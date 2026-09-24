@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · Automation lane</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 1050px; margin: 36px auto; padding: 0 24px; }
+  h1 { font-size: 27px; } h2 { margin-top: 28px; font-size: 19px; }
+  p { color: #acb9c8; line-height: 1.6; } button, select { font: inherit; padding: 8px 12px; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .5; } .row { display: flex; flex-wrap: wrap; align-items: center; }
+  table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #343d48; } th { color: #acb9c8; }
+  #status, #undoList { min-height: 24px; } code { color: #f0c674; }
+  svg { width: 100%; height: 160px; background: #0f1216; border: 1px solid #343d48; border-radius: 6px; }
+  .bp { fill: #6db3f2; } .lane { stroke: #6db3f2; stroke-width: 2; fill: none; }
+</style>
+<h1>Automation lane</h1>
+<p>The breakpoints on the first track's <b>Volume</b> lane, drawn live from <code>track.gain.automation</code>. Every button is one SDK call and one LUNA undo entry, and the lane redraws from the live list — so a breakpoint you add, move or delete in LUNA itself appears here without a refresh. The mode selector calls <code>track.setAutomationMode()</code>.</p>
+<p><b>Note:</b> the lane is addressed by tick, not by breakpoint object: <code>move(fromTick, toTick)</code>, <code>setValue(tick, value)</code> and <code>clear(startTick, stopTick)</code>. So “delete the first” removes <i>every</i> breakpoint sitting on that tick, which matters once two share one. The value axis is drawn from each breakpoint's stored value, normalised to the lane's own range.</p>
+<button id="refresh">Connect</button><p id="status" role="status">Connecting…</p>
+<h2>Volume lane <span id="trackName"></span></h2>
+<svg id="lane" viewBox="0 0 1000 160" preserveAspectRatio="none" aria-label="Automation lane"></svg>
+<div class="row">
+  <label>Mode <select id="mode" aria-label="Automation mode"></select></label>
+  <button id="insert">Insert a 3-point ramp</button>
+  <button id="moveFirst" disabled>Move the first +1 bar</button>
+  <button id="trimFirst" disabled>Nudge the first down</button>
+  <button id="deleteFirst" disabled>Delete the first</button>
+  <button id="clear" disabled>Clear all</button>
+</div>
+<p id="laneInfo"></p>
+<h2>Breakpoints</h2>
+<table><thead><tr><th>rowid</th><th>beat</th><th>value (raw)</th></tr></thead><tbody id="rows"></tbody></table>
+<p id="undoList">Undo queue: …</p>
+<script src="../dist/luna.global.js"></script>
+<script>
+const B = Luna.TICKS_PER_BEAT;
+const $ = (id) => document.getElementById(id);
+let luna, session, track, lane, base = 0;
+
+/** The undo queue, read raw: the SDK does not model it. */
+async function undoText() {
+  try {
+    const q = await luna.raw.get(`${session.path}/undo_queues`, { children: true, levels: 2, commands: false, propfilter: 'name', flatvalue: true });
+    const names = (q?.children ?? []).map((c) => c.properties?.name).filter(Boolean);
+    $('undoList').textContent = `Undo queue (${names.length}): ${names.slice(-6).join(' · ')}`;
+  } catch { $('undoList').textContent = ''; }
+}
+
+/** Breakpoints live at `<control>/automation/<rowid>` with a `start` tick (fact 31). */
+const sorted = () => (lane ? [...lane.items].sort((a, b) => (a.start.value ?? 0) - (b.start.value ?? 0)) : []);
+
+function draw() {
+  const items = sorted();
+  const rows = $('rows'); rows.replaceChildren();
+  const svg = $('lane'); svg.replaceChildren();
+  const has = items.length > 0;
+  for (const b of ['moveFirst', 'trimFirst', 'deleteFirst', 'clear']) $(b).disabled = !has;
+  if (!has) { $('laneInfo').textContent = 'The lane is empty.'; return; }
+  const ticks = items.map((b) => b.start.value ?? 0);
+  const vals = items.map((b) => b.value.value ?? 0);
+  const t0 = Math.min(...ticks), t1 = Math.max(...ticks) || t0 + B;
+  const v0 = Math.min(...vals), v1 = Math.max(...vals);
+  const x = (t) => (t1 === t0 ? 500 : ((t - t0) / (t1 - t0)) * 960 + 20);
+  const y = (v) => (v1 === v0 ? 80 : 150 - ((v - v0) / (v1 - v0)) * 140);
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  poly.setAttribute('points', items.map((b) => `${x(b.start.value ?? 0)},${y(b.value.value ?? 0)}`).join(' '));
+  poly.setAttribute('class', 'lane');
+  svg.append(poly);
+  for (const b of items) {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', x(b.start.value ?? 0));
+    c.setAttribute('cy', y(b.value.value ?? 0));
+    c.setAttribute('r', 5);
+    c.setAttribute('class', 'bp');
+    svg.append(c);
+    const tr = document.createElement('tr');
+    for (const v of [b.id, ((b.start.value ?? 0) / B).toFixed(2), (b.value.value ?? 0).toFixed(4)]) {
+      tr.append(Object.assign(document.createElement('td'), { textContent: v }));
+    }
+    rows.append(tr);
+  }
+  $('laneInfo').textContent = `${items.length} breakpoints, beats ${(t0 / B).toFixed(1)}–${(t1 / B).toFixed(1)}.`;
+}
+
+async function boot() {
+  $('status').textContent = 'Connecting…';
+  try {
+    if (!luna) {
+      luna = await Luna.connect();
+      Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+    }
+    await luna.sessions.ready();
+    session = luna.sessions.current();
+    if (!session) { $('status').textContent = 'No session open in LUNA.'; return; }
+    await session.ready();
+    track = session.visibleTracks[0];
+    if (!track) { $('status').textContent = 'No track in this session.'; return; }
+    await track.loadStrip();
+    lane = track.gain.automation;
+    await lane.load();
+    base = 400 * B;
+    $('trackName').textContent = `(${track.name.value ?? track.id})`;
+
+    const modeSel = $('mode');
+    modeSel.replaceChildren(...Luna.AUTOMATION_MODES.map((m) => Object.assign(document.createElement('option'), { value: m, textContent: m })));
+    const syncMode = () => { modeSel.value = track.automationMode.value ?? 'read'; };
+    track.automationMode.onChange(syncMode);
+    syncMode();
+    // The track property is the string form; the command takes it too (fact 31).
+    modeSel.onchange = () => track.setAutomationMode(modeSel.value).catch((e) => { $('status').textContent = `mode: ${e.message}`; });
+
+    // A Collection notifies on membership. A breakpoint that moves or changes value is a
+    // property change on a member, so each member is subscribed too, and re-subscribed
+    // whenever membership changes.
+    let memberOffs = [];
+    const rebind = () => {
+      for (const off of memberOffs) off();
+      memberOffs = lane.items.flatMap((b) => [b.start.onChange(draw), b.value.onChange(draw)]);
+      draw();
+    };
+    lane.onChange(rebind);
+    rebind();
+    $('status').textContent = `Connected to ${session.name.value ?? session.uid}.`;
+    await undoText();
+  } catch (e) { $('status').textContent = `Error: ${e.code ?? ''} ${e.message}`; }
+}
+
+const guard = (fn) => async () => {
+  try { await fn(); await undoText(); }
+  catch (e) { $('status').textContent = `Error: ${e.code ?? ''} ${e.message}`; }
+};
+const firstTick = () => sorted()[0]?.start.value ?? 0;
+
+// insert() with a clear range replaces whatever was there, in one entry.
+$('insert').onclick = guard(() => lane.insert(
+  [{ tick: base, value: -6 }, { tick: base + 4 * B, value: 0 }, { tick: base + 8 * B, value: -3 }],
+  { startTick: base - B, stopTick: base + 100 * B },
+));
+$('moveFirst').onclick = guard(() => lane.move(firstTick(), firstTick() + 4 * B));
+$('trimFirst').onclick = guard(() => lane.setValue(firstTick(), (sorted()[0]?.value.value ?? 0) - 3));
+$('deleteFirst').onclick = guard(() => lane.clear(firstTick(), firstTick()));
+$('clear').onclick = guard(() => lane.clear(base - B, base + 100 * B));
+$('refresh').onclick = boot;
+boot();
+</script>

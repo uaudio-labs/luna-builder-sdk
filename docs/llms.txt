@@ -1,0 +1,58 @@
+# @uaudio/ua-builder-sdk
+
+> TypeScript/JavaScript SDK for LUNA Add Ons. One `Luna` namespace. Props (`.value`, `.onChange`, `.set`), Collections (`.items`, `.byId`, `.onChange`). Runs inside LUNA (WebSocket, `?port=` on the page URL) or on the wasm engine.
+
+Start with QUICKSTART, then the API page for the object you are using. Use EVIDENCE when
+the engine does something the docs do not say. Use PROTOCOL only for the raw escape hatch.
+
+## Docs
+
+- [Quickstart](QUICKSTART.md): connect, session, props, tracks, controls, clips, effects, markers, workspace, gui, errors, testing.
+- [Recipes](RECIPES.md): eleven Add Ons to ask an agent for, and the SDK each one leans on.
+- [Manifest](MANIFEST.md): `manifest.json` fields, Add Ons folder, how LUNA loads a page.
+- [Protocol](PROTOCOL.md): verbs, paths, correlation, pushes, error codes, where things live.
+- [Evidence](EVIDENCE.md): numbered measured facts about engine behaviour; cite as "fact N".
+- [Tree snapshot](tree/luna-3.0.0.15776.json): the shape of the nodes the SDK builds on, for one LUNA build. `ua-builder tree <path>` prints any node's shape; `ua-builder tree --out file.json` snapshots the running build.
+
+## API reference (generated)
+
+- [api/index.md](api/index.md): every exported class, function and type in the Luna namespace.
+
+## Skills (Claude Code)
+
+- skills/create-add-on: scaffold, connect, first feature, tests.
+- skills/add-feature: wrap an engine path the SDK does not type yet.
+- skills/test-add-on: MockEngine fixtures, settled(), live lane rules.
+- skills/debug-connection: nothing connects, no pushes, wrong port, reconnect.
+- skills/port-to-wasm: run the Add On on the in-page wasm engine; hosting, audio gesture, engine limits.
+- skills/verify-add-on: prove an Add On against a running LUNA from a second client, and check the undo queue.
+
+These six ship as the `ua-luna-builder` plugin (`plugins/ua-luna-builder/`), which also
+carries the SDK builds, the `ua-builder` CLI, the add-on-basic template, the examples and
+QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CLI as
+`node <plugin-root>/sdk/cli.js <command>` instead of `npx ua-builder <command>`.
+
+## Rules of thumb
+
+- Await `luna.session()` before touching tracks. Call `track.loadStrip()` before reading gain/pan/mute.
+- Nodes outside a session (`luna.gui.main`, `luna.preferences`) need `node.watch()` to follow pushes.
+- Touch every control a user edits (fact 78): clicks are one-shot `set()`/`toggle()`, bracketed for you; drags use `Luna.bindGesture(element, control)` (touch on pointer down, release on up/cancel) and write from `input`/`pointermove`.
+- Keyboard: call `Luna.bindShortcuts(luna)` after connecting; LUNA's undo, redo, play and record keys then work for any key the page does not `preventDefault()` (facts 79-80).
+- Timeline = ticks (96e9 per beat); source offsets = nanoseconds. No conversion in the SDK.
+- Effect bypass is `slot.setIn(bool)`, not the `enabled` property.
+- MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addMidi`.
+- Upload a browser file with `session.uploadFile({ bytes, name, onProgress })`; `session.importFile(path)` is for a path LUNA can read.
+- Sends are outputs: `channel.outputs.byId('send_0')`, with `assign`/`unassign`/`retarget`/`moveTo`. Assign appends, so use `retarget` to replace (fact 43). Read `send.destinations` (each has the assignment `uid` that `unassign` takes, `busUid`, `name`, `error`), not the raw `assignments` rows (fact 83).
+- Pan is `pan` on a mono channel and `pan_left`/`pan_right` on a stereo one (fact 84): use `output.pans` (or `panLeft`/`panRight`); `output.pan` is the left one on stereo.
+- Automation values go on the wire as float literals (`Luna.float`), because LUNA stores a bare whole number as 0 (fact 82). `lane.insert`/`setValue`/`move`/`clear` resolve once the lane shows the edit.
+- Plugins: `slot.setPlugin(id)` and `channel.insert(id)` resolve once loaded (`slot.loaded`) and reject with the slot's `plugin_error`; list parameters with `slot.params`, which leaves out a cleared plugin's ghosts (fact 86).
+- A removed object is disposed: `node.disposed`, `node.onDispose(fn)`; its commands reject with `Luna.Disposed`.
+- Bounce/export: `session.bounce({ channelUids, range })` and `session.exportMain()` return a `Render`; watch `render.progress` and `await render.done()` (fact 44).
+- Waveforms: `Luna.clipAudio(clip, session.sources)` says which source to draw (the original, or LUNA's time-stretched render); `new Luna.Waveforms().range(source, startNs, stopNs, Luna.kindForScale(nsPerPixel))` pages the pairs; `Luna.audioNsAtTick` maps a tick to a file offset (facts 72-73). No analysis means draw an outline, never silence.
+- MIDI edits: `midi.setVelocities` (one post, one undo entry), `midi.setMuted`, `midi.deleteNotes`. They move LUNA's selection and put it back, so they refuse inside a `transaction()` (fact 74).
+- Recording: `luna.audioInputs()` lists device inputs; `session.record({ track, inputUid, startTick, seconds })` runs the whole pass and resolves to the finalized take, source listed (facts 75-76).
+- `Luna.settle(predicate, what, { refresh })` is how to wait for an edit: LUNA answers `null` whether or not it happened (fact 71).
+- Timeline conversions: `tickAtBar`, `tickAt({bar,beat,tick})`, `barBeat(tick)`, `seconds(tick)`, `tickAtSeconds(s)`.
+- Folders outside a session (`/renders`, `/jobs`, `/plugins`) need `collection.watch()` before they follow pushes (fact 34).
+- Wasm: `Luna.connect({ engine: 'wasm' })` or `?engine=wasm`; no session at boot; `luna.wasm.resumeAudio()` after a click; no `luna.gui`.
+- Tests: `Luna.MockEngine`, `await engine.settled()`, `await luna.settled()`.

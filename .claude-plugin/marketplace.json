@@ -1,0 +1,33 @@
+{
+  "name": "ua-builder-sdk",
+  "owner": {
+    "name": "Universal Audio",
+    "url": "https://www.uaudio.com"
+  },
+  "metadata": {
+    "description": "Plugins for building LUNA Add Ons with @uaudio/ua-builder-sdk",
+    "version": "0.1.0-alpha.0"
+  },
+  "plugins": [
+    {
+      "name": "ua-luna-builder",
+      "source": "./plugins/ua-luna-builder",
+      "description": "Build LUNA Add Ons with @uaudio/ua-builder-sdk: scaffold a page, connect to a running LUNA or the in-page WebAssembly engine, read and write transport, tracks, controls, clips and meters, test against Luna.MockEngine, then install the Add On into LUNA's Window menu",
+      "version": "0.1.0-alpha.0",
+      "author": {
+        "name": "Universal Audio"
+      },
+      "repository": "ssh://git@stash.uaudio.com:7999/uapkg/sdk-luna.git",
+      "license": "Apache-2.0",
+      "keywords": [
+        "luna",
+        "universal-audio",
+        "ua-net",
+        "daw",
+        "add-on",
+        "wasm"
+      ],
+      "category": "development"
+    }
+  ]
+}

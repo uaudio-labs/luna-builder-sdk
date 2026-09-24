@@ -1,0 +1,17 @@
+{
+  "name": "ua-builder-sdk",
+  "interface": {
+    "displayName": "Luna Builder SDK"
+  },
+  "plugins": [
+    {
+      "name": "ua-luna-builder",
+      "source": "./plugins/ua-luna-builder",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

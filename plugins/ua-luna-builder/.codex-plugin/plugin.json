@@ -1,0 +1,34 @@
+{
+  "name": "ua-luna-builder",
+  "version": "0.1.0-alpha.0",
+  "description": "Build LUNA Add Ons with the bundled @uaudio/ua-builder-sdk: scaffold a page, connect to a running LUNA over UA Net or to the in-page WebAssembly engine, read and write transport, tracks, controls, clips, effects and meters, test against Luna.MockEngine with no LUNA, then install the Add On so it opens from LUNA's Window menu",
+  "author": {
+    "name": "Universal Audio",
+    "url": "https://www.uaudio.com"
+  },
+  "repository": "ssh://git@stash.uaudio.com:7999/uapkg/sdk-luna.git",
+  "license": "Apache-2.0",
+  "keywords": [
+    "luna",
+    "universal-audio",
+    "ua-net",
+    "daw",
+    "add-on",
+    "wasm"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "LUNA Add On Builder",
+    "shortDescription": "Build, test and install LUNA Add Ons.",
+    "longDescription": "Scaffold, extend, test and install LUNA Add Ons with the bundled ua-builder-sdk, five skills and four worked examples. Runs against a LUNA on the same machine, or with no LUNA at all on the in-page WebAssembly engine.",
+    "developerName": "Universal Audio",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "Scaffold a LUNA Add On with a big bar|beat counter and install it.",
+      "Build a LUNA Add On mixer with a fader, mute, solo and meter per track.",
+      "Add a marker list to my Add On that jumps the transport when I click one.",
+      "Make my Add On run in the browser on the wasm engine instead of LUNA."
+    ]
+  }
+}

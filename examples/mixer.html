@@ -1,0 +1,219 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA mixer</title>
+<!--
+  A strip for every channel with fader, pan, mute, solo and meter, on the model layer.
+  Stays in sync when faders move in LUNA; a drag lands as one undo entry. The meter
+  subscribes only while the strip is on screen.
+
+  ?all=1 also shows the CLICK and count_in system tracks (handy for watching a meter move).
+
+  From a checkout this loads ../dist; `npx ua-builder serve` serves the package over HTTP,
+  or open it from file:// in a real browser. As a LUNA Add On, vendor the build and point
+  the script at ./luna.global.js.
+-->
+<script src="../dist/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #17171a; color: #e8e8ec; font: 13px/1.3 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #2a2a30; }
+  header .title { font-weight: 600; }
+  header button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid #3a3a42; background: #26262c; color: inherit; cursor: pointer; }
+  header button[data-on="true"] { background: #1f6f3f; border-color: #2fa35d; }
+  #status { margin-left: auto; opacity: .6; }
+  #status.error { color: #ff8080; opacity: 1; }
+  #strips { display: flex; gap: 6px; padding: 12px 14px; overflow-x: auto; }
+  .strip { width: 84px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px 10px; background: #1f1f24; border-radius: 8px; border-top: 4px solid #888; }
+  .strip .name { width: 100%; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strip .kind { font-size: 10px; opacity: .5; text-transform: uppercase; letter-spacing: .06em; }
+  .strip .pan { display: flex; gap: 4px; }
+  .strip .pan input { width: 36px; }
+  .strip .pan.stereo input { width: 34px; }
+  .strip .panlabel { font-size: 11px; opacity: .7; min-height: 1.2em; }
+  .faderrow { display: flex; gap: 4px; align-items: stretch; height: 180px; }
+  .fader { writing-mode: vertical-lr; direction: rtl; height: 180px; width: 28px; accent-color: #9ad; }
+  .meter { display: flex; gap: 2px; padding: 2px; background: #111114; border-radius: 3px; }
+  .meter .stream { position: relative; width: 6px; background: #26262c; border-radius: 2px; overflow: hidden; }
+  .meter .stream i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(to top, #3fae5a 0 70%, #e6c25a 70% 90%, #d44 90%); }
+  .meter .stream b { position: absolute; left: 0; right: 0; height: 1px; background: #eee; bottom: 0; }
+  .meter.clip .stream { box-shadow: inset 0 0 0 1px #d44; }
+  .db { font-variant-numeric: tabular-nums; min-height: 1.2em; }
+  .buttons { display: flex; gap: 4px; }
+  .buttons button { font: inherit; font-size: 11px; width: 34px; padding: 5px 0; border-radius: 4px; border: 1px solid #3a3a42; background: #26262c; color: inherit; cursor: pointer; }
+  .buttons button.mute[data-on="true"] { background: #8a2b2b; border-color: #d44; }
+  .buttons button.solo[data-on="true"] { background: #8a7a1f; border-color: #dc3; }
+  .strip.master { border-top-color: #e6c25a; }
+</style>
+<header>
+  <span class="title">LUNA mixer</span>
+  <button id="play">▶ Play</button>
+  <span id="session"></span>
+  <span id="status">connecting…</span>
+</header>
+<div id="strips"></div>
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
+
+  let luna;
+  try { luna = await Luna.connect(); }
+  catch (e) { say(String(e.message || e), true); return; }
+  Luna.bindShortcuts(luna, { onError: (e) => say(String(e.message || e), true) }); // LUNA's undo, redo, play and record keys
+
+  luna.status.onChange(() => {
+    const connected = luna.status.value === 'connected';
+    say(connected ? '' : 'disconnected from LUNA', !connected);
+  });
+
+  /** ARGB integer as the engine stores it (fact 27) to a CSS colour. */
+  const cssColor = (argb) => (typeof argb === 'number' ? `#${(argb & 0xffffff).toString(16).padStart(6, '0')}` : '#888');
+
+  /** Tracks and buses share the Channel surface, so one strip builder covers both. */
+  const kindOf = (ch) => (ch instanceof Luna.Bus ? (ch.isMaster ? 'master' : ch.busType.value ?? 'bus') : ch.trackType.value ?? 'audio');
+
+  // Build once per focused session; rebuild when the user switches sessions in LUNA.
+  async function build() {
+    document.getElementById('strips').replaceChildren();
+    const session = luna.sessions.current();
+    if (!session) { say('no session open in LUNA', true); return; }
+    await session.ready();
+    say('');
+    document.getElementById('session').textContent = session.name.value ?? session.uid;
+
+    const play = document.getElementById('play');
+    play.onclick = () => session.transport.toggle();
+    const renderPlay = () => {
+      const on = session.transport.playing.value === true;
+      play.dataset.on = String(on);
+      play.textContent = on ? '■ Stop' : '▶ Play';
+    };
+    renderPlay();
+    session.transport.playing.onChange(renderPlay);
+
+    const showAll = new URLSearchParams(location.search).get('all') === '1';
+    const channels = () => [...(showAll ? session.tracksInOrder : session.visibleTracks), ...session.buses.items];
+
+    // Every strip keeps the unsubscribes it registered in `el.offs`; a rebuild releases the
+    // old strips' listeners first, or each rebuild would stack another set on the same
+    // channels (and keep every meter subscribed).
+    const render = async () => {
+      const host = document.getElementById('strips');
+      for (const old of host.children) for (const off of old.offs ?? []) off();
+      const list = channels();
+      // loadStrip() fetches the channel's properties and its main-output controls together.
+      await Promise.all(list.map((ch) => ch.loadStrip().catch(() => undefined)));
+      host.replaceChildren(...list.map(strip));
+    };
+    session.tracks.onChange(() => { void render(); });
+    session.buses.onChange(() => { void render(); });
+    await render();
+  }
+
+  function strip(ch) {
+    const kind = kindOf(ch);
+    const el = document.createElement('div');
+    el.className = `strip ${kind}`;
+    el.style.borderTopColor = cssColor(ch.color.value);
+    // Stereo buses pan with pan_left/pan_right instead of one pan (fact 26).
+    const pans = ['pan', 'pan_left', 'pan_right'].filter((n) => ch.main.controls.byId(n)).map((n) => ch.main.controls.get(n));
+    el.innerHTML = `
+      <div class="name"></div><div class="kind">${kind}</div>
+      <div class="pan ${pans.length > 1 ? 'stereo' : ''}"></div><div class="panlabel"></div>
+      <div class="faderrow"><input class="fader" type="range" min="0" max="1000" step="1"><div class="meter"></div></div>
+      <div class="db"></div>
+      <div class="buttons"><button class="mute">M</button><button class="solo">S</button></div>`;
+
+    const offs = [];
+    el.offs = offs;
+    const name = el.querySelector('.name');
+    const renderName = () => { name.textContent = ch.name.value ?? ch.id; };
+    renderName();
+    offs.push(ch.name.onChange(renderName));
+
+    // Pan: one slider for mono, two for stereo. Each drag is one undo entry.
+    const panBox = el.querySelector('.pan');
+    const panLabel = el.querySelector('.panlabel');
+    const renderPan = () => { panLabel.textContent = pans.map((c) => c.display.value ?? '').join(' · '); };
+    for (const c of pans) {
+      const s = document.createElement('input');
+      s.type = 'range'; s.min = '0'; s.max = '1000'; s.step = '1';
+      s.value = String(Math.round((c.normalized.value ?? 0.5) * 1000));
+      const g = bindFader(s, c, (v) => c.normalized.set(v / 1000));
+      offs.push(() => g.dispose());
+      offs.push(c.normalized.onChange(() => { if (!g.active) s.value = String(Math.round((c.normalized.value ?? 0.5) * 1000)); }));
+      offs.push(c.display.onChange(renderPan));
+      panBox.append(s);
+    }
+    renderPan();
+
+    // Fader: normalized 0..1, shown as the engine's own dB readout. Drag = one undo entry.
+    const fader = el.querySelector('.fader');
+    const db = el.querySelector('.db');
+    const faderGesture = bindFader(fader, ch.gain, (v) => ch.gain.normalized.set(v / 1000));
+    const renderFader = () => { if (!faderGesture.active) fader.value = String(Math.round((ch.gain.normalized.value ?? 0) * 1000)); };
+    const renderDb = () => { db.textContent = ch.gain.display.value ?? ''; };
+    renderFader(); renderDb();
+    offs.push(() => faderGesture.dispose());
+    offs.push(ch.gain.normalized.onChange(renderFader), ch.gain.display.onChange(renderDb));
+    // Double click to unity: write 0 dB through the real view, one bracketed one-shot.
+    fader.ondblclick = () => ch.gain.real.set(0).catch((e) => say(String(e.message || e), true));
+
+    // Meter: one bar per stream, height = level (1.0 is full scale), a peak line held by
+    // the page (LUNA's own peak falls back to 0 a second after signal stops), a clip
+    // outline. Listening opens the subscription; releasing the strip closes it. LUNA holds
+    // the clip flag and the wire cannot reset it, so a click only hides the light until
+    // the flags change again (the view notifies on change, not on every push).
+    const meterEl = el.querySelector('.meter');
+    const streamCount = Math.max(1, ch.meter.numStreams.value ?? 1);
+    const streams = Array.from({ length: streamCount }, () => {
+      const s = document.createElement('div'); s.className = 'stream'; s.innerHTML = '<i></i><b></b>'; meterEl.append(s); return s;
+    });
+    const held = streams.map(() => ({ value: 0, at: 0 }));
+    const HOLD_MS = 1500;
+    const drawPeak = (i) => { streams[i].lastChild.style.bottom = `${Math.min(1, held[i].value) * 100}%`; };
+    offs.push(
+      ch.meter.level.onChange(() => {
+        const levels = ch.meter.level.value ?? [];
+        streams.forEach((s, i) => {
+          const l = Math.min(1, levels[i] ?? 0);
+          s.firstChild.style.height = `${l * 100}%`;
+          const h = held[i];
+          if (l >= h.value || performance.now() - h.at > HOLD_MS) { h.value = l; h.at = performance.now(); drawPeak(i); }
+        });
+      }),
+      ch.meter.clip.onChange(() => meterEl.classList.toggle('clip', (ch.meter.clip.value ?? []).some(Boolean))),
+    );
+    meterEl.onclick = () => meterEl.classList.remove('clip');
+
+    const mute = el.querySelector('.mute');
+    const solo = el.querySelector('.solo');
+    const soloControl = ch.controls.get('solo');   // strip-level, unlike mute (fact 26)
+    const renderMute = () => { mute.dataset.on = String(ch.mute.on); };
+    const renderSolo = () => { solo.dataset.on = String(soloControl.on); };
+    renderMute(); renderSolo();
+    offs.push(ch.mute.real.onChange(renderMute), soloControl.real.onChange(renderSolo));
+    mute.onclick = () => ch.mute.toggle().catch((e) => say(String(e.message || e), true));
+    solo.onclick = () => soloControl.toggle().catch((e) => say(String(e.message || e), true));
+
+    return el;
+  }
+
+  // Luna.bindGesture touches the control on pointer down and releases it on pointer up, cancel
+  // or lost capture, exactly once, so a drag is one undo entry and one automation pass. The
+  // page only writes values. While the gesture is active the slider ignores echoes from LUNA,
+  // so a late reconcile never fights the user's finger; on release it settles on LUNA's value.
+  function bindFader(slider, control, write) {
+    const gesture = Luna.bindGesture(slider, control, {
+      onEnd: () => { slider.value = String(Math.round((control.normalized.value ?? 0) * 1000)); },
+    });
+    slider.addEventListener('input', () => write(Number(slider.value)).catch((e) => say(String(e.message || e), true)));
+    // Keyboard nudges are one-shot writes, which bracket themselves.
+    return gesture;
+  }
+
+  await luna.sessions.ready();
+  await build();
+  luna.sessions.focused.onChange(() => { void build(); });
+})();
+</script>

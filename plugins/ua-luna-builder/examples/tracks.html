@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA tracks</title>
+<!-- The smallest raw-wire check: list the focused session's tracks through luna.raw, the
+     escape hatch, without touching the model layer. Useful when you want to see exactly
+     what the engine answers. Everything else in this folder uses the model instead.
+
+     Open from file:// with LUNA running (Chrome, Safari, LUNA's webview), or serve the
+     package over HTTP: npx ua-builder serve -->
+<script src="../sdk/luna.global.js"></script>
+<h1>Tracks in the focused session</h1>
+<ul id="tracks"></ul>
+<p id="status"></p>
+<script>
+  (async () => {
+    const luna = await Luna.connect();
+    // flatvalue collapses `{ value: X }` to X (fact 21), so properties read straight off.
+    const sessions = await luna.raw.get('/sessions', { propfilter: 'focused_session', children: false, commands: false, flatvalue: true });
+    const sid = sessions?.properties?.focused_session;
+    if (!sid) throw new Error('no session open in LUNA');
+    const tracks = await luna.raw.get(`/sessions/${sid}/tracks`, { children: true, properties: false, commands: false });
+    // A node reply lists children as [{ path: <relative name> }] (fact 9).
+    const ids = (tracks?.children ?? []).map((c) => c.path);
+    for (const tid of ids) {
+      const track = await luna.raw.get(`/sessions/${sid}/tracks/${tid}`, { propfilter: 'name', children: false, commands: false, flatvalue: true });
+      const li = document.createElement('li');
+      li.textContent = track?.properties?.name ?? tid;
+      document.getElementById('tracks').append(li);
+    }
+    document.getElementById('status').textContent = `${ids.length} tracks, session ${sid}`;
+    await luna.close();
+  })().catch((err) => { document.getElementById('status').textContent = String(err); });
+</script>

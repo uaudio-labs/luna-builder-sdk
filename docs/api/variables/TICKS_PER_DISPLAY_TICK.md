@@ -1,0 +1,5 @@
+# Variable: TICKS\_PER\_DISPLAY\_TICK
+
+```ts
+const TICKS_PER_DISPLAY_TICK: 100000000 = 100_000_000;
+```

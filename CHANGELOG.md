@@ -1,0 +1,83 @@
+# Changelog
+
+Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
+engine is versioned separately.
+
+## Unreleased
+
+Measured against LUNA 3.0.0.15776 (facts 82-91 in `docs/EVIDENCE.md`).
+
+Changed (breaking)
+- The namespace is `Luna`, not `UA`: `import { Luna } from '@uaudio/ua-builder-sdk'`, `Luna.connect()`,
+  and `globalThis.Luna` from a script tag. The script-tag bundle is `luna.global.js` (was
+  `ua.global.js`). To move an existing Add On: rename `UA` to `Luna` in its scripts, point its
+  `<script src>` at `vendor/luna.global.js`, and rename the vendored file (`ua-builder pack`
+  then keeps it current). Environment variables keep their `UA_` prefix.
+- `Track.inputMonitor` is a `WritableProp<boolean>` (was a read-only `Prop<string>`): LUNA's
+  `input_monitor` is the track's on/off monitor switch, not a mode. Code that compared it with
+  a string such as `'auto'` no longer type-checks; compare with `true`/`false`, and turn it on
+  with `inputMonitor.set(true)`. That write rejects with `uasrv.invalid_value` while the
+  record mute preference is on and no Apollo is active.
+- `Transport.seek()` now sets the play start and both loop marks, as LUNA's own locate and
+  Return To Zero do, so a drawn loop range becomes an empty one at the target; call `setLoop()`
+  after seeking to keep a range. It resolves once the playhead is there, and while playing it
+  now jumps at once (`sync_playback`) instead of only moving the next play start.
+
+Changed
+- Licensed under the Apache License, Version 2.0 (was proprietary and unlicensed). The package
+  and the plugin each carry `LICENSE` and a `NOTICE`; every manifest's `license` is `Apache-2.0`.
+
+Fixed
+- Sends: `Output.unassign()` and `retarget()` delete by the assignment uid; they sent the bus
+  uid, which LUNA rejects. New `destinations` (each with its `uid`, `busUid`, `name`,
+  `busType`, `error`) and `destination`; `busUid` is derived from them, since LUNA's own
+  `bus_uid` is always null. Routing calls resolve once the model shows the change;
+  `retarget()` joins a caller's `transaction()`; `moveTo()` checks the slot is 0-7.
+- Pan: stereo channels and sends use `pan_left`/`pan_right`. `Output.pan` is the left pan on
+  stereo; new `pans`, `panLeft`, `panRight`, `stereo`.
+- Automation: breakpoint values go on the wire as float literals; LUNA stored a whole
+  number such as -6 as 0. `insert`, `setValue`, `move` and `clear` resolve once the lane
+  shows the edit and refuse fractional ticks.
+- Plugins: a slot counts as loaded by its instance id (`plugin_name` can stay null).
+  `setPlugin()` and `channel.insert()` resolve once loaded and reject with the slot's
+  `plugin_error`. New `Effect.params` leaves out the parameters a cleared plugin leaves
+  behind; new `Effect.loaded`, `Effect.instanceId`, `Control.initialized`.
+- Bounce: a render posted straight after a selection write used the previous selection;
+  `Context.select()` now reads the selection back before resolving.
+- Clip delete and trim, marker add, rename, move, recolor, comment and delete, and
+  `session.deleteTracks()` resolve once the change is visible, and reject with `no_effect`
+  when LUNA answers without acting.
+- Store: a read answered late no longer overwrites a newer push; a refused write rolls back
+  to the last value LUNA confirmed; a read's child lists count only as deep as it asked; a
+  watch whose first load failed can be retried; a closed Store subscribes to nothing.
+- `session.transaction()` called inside another runs in the open batch instead of nesting.
+
+Added
+- `Transport.seek({ bar, beat, tick })` seeks to a musical position through the session's
+  timeline; `seek({ bar: 1 })` is the downbeat of bar 1 even when tick 0 is not. New
+  `{ sync: 'now' | 'next_bar' | 'loop_end' }` option for a seek during playback.
+- `Transport.returnToZero()`: LUNA's Return To Zero, to the arrangement start (tick 0 until
+  set). New `Transport.arrangementStart`.
+- `Track.inputMonitoring`: whether LUNA is monitoring the track's input right now
+  (`input_monitor_state`, read-only). It can be true while the switch is off, for an armed
+  track that is stopped or punched in.
+- `Luna.float()` / `Luna.FloatLiteral` for float fields on the raw wire; `Luna.encodePayload`.
+- `Luna.Disposed`, `node.disposed` and `node.onDispose()`: commands on a removed object reject
+  instead of acting on whatever replaced it. Collections dispose removed members at once.
+- `Clip.snapshot()`, `Clip.layer`, `Clip.muted`; `Meter.streams`, `Meter.max`.
+- `Luna.connect({ log })`: status changes, reconnects, timeouts and listener errors.
+- `Luna.MockEngine`: LUNA's routing model, four cue buses, the stereo pan layout, the 3.0 insert
+  slots, plugin load and ghost parameters, bare-integer breakpoints stored as 0;
+  `engine.addBus()` and `engine.overrideCommand()`.
+- `ua-builder tree [path]`: the shape of any node, or a snapshot of the nodes the SDK builds
+  on (`docs/tree/luna-3.0.0.15776.json`).
+- The `verify-add-on` skill: prove an Add On against LUNA from a second client and check the
+  undo queue. `add-feature` now points at `ua-builder tree` and the wire traps.
+- A live lane for the mixer (`tests/live/mixer.test.ts`).
+
+## 0.1.0-alpha.0
+
+First alpha: the wire layer, store and `UA.connect`; the session, transport, track, control,
+bus, playlist, clip, MIDI, automation, render and recording models; `UA.MockEngine`; the
+in-page wasm engine transport; the `ua-builder` CLI; five skills and the `ua-luna-builder`
+agent plugin.

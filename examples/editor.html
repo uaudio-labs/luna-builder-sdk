@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · Edit clips and notes</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 1050px; margin: 36px auto; padding: 0 24px; }
+  h1 { font-size: 27px; } h2 { margin-top: 28px; font-size: 19px; }
+  p { color: #acb9c8; line-height: 1.6; } button, select { font: inherit; padding: 8px 12px; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .5; } .row { display: flex; flex-wrap: wrap; align-items: center; }
+  #status, #selection, #clipInfo, #markerInfo, #noteInfo { min-height: 24px; } code { color: #f0c674; }
+</style>
+<h1>Edit clips and notes</h1>
+<p>Every button is one SDK call and one LUNA undo entry, and waits for the live model to show
+the change — LUNA answers <code>null</code> whether or not an edit happened (fact 71), so the
+reply is never taken as proof. The selection below is read back from LUNA after each action:
+the note verbs move it to do their work, and must put it back exactly as they found it.</p>
+<button id="refresh">Connect</button><p id="status" role="status">Connecting…</p>
+<h2>Clips (first audio track's active playlist)</h2>
+<div class="row">
+  <select id="sources" aria-label="Audio source"></select>
+  <button id="insert" disabled>Insert 2 s clip at the end</button>
+  <button id="trim" disabled>Trim to 1 s</button>
+  <button id="move" disabled>Move +1 bar</button>
+  <button id="rename" disabled>Rename it</button>
+  <button id="deleteClip" disabled>Delete clip</button>
+</div>
+<p id="clipInfo"></p>
+<h2>Markers</h2>
+<div class="row">
+  <button id="addMarker">Add marker at playhead</button>
+  <button id="renameMarker" disabled>Rename it</button>
+  <button id="nudgeMarker" disabled>Nudge +1 bar</button>
+  <button id="deleteMarker" disabled>Delete it</button>
+</div>
+<p id="markerInfo"></p>
+<h2>Notes (first instrument track's active playlist)</h2>
+<div class="row">
+  <button id="makeNotes" disabled>Create C-E-G at bar 1</button>
+  <button id="velocity" disabled>Scale every velocity by 80%</button>
+  <button id="mute" disabled>Mute below velocity 90</button>
+  <button id="deleteNotes" disabled>Delete the last note</button>
+</div>
+<p id="noteInfo"></p>
+<h2>Batch</h2>
+<div class="row"><button id="batch" disabled>Marker + clip in one undo entry</button><button id="undo">Undo</button></div>
+<p id="selection">Selection: …</p>
+<script src="../dist/luna.global.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const B = Luna.TICKS_PER_BEAT;
+let luna, session, timeline, lane, notesLane, clip, marker, midi, userSelection;
+const offs = [];
+
+const selectionText = () => JSON.stringify(session.context.snapshot());
+
+async function report(action) {
+  await session.context.refreshSelection().catch(() => {});
+  const now = selectionText();
+  $('selection').textContent = `Selection ${now === userSelection ? 'as found' : 'CHANGED'}: ${now.slice(0, 200)}`;
+  if (action) $('status').textContent = `${action} · can undo: ${session.canUndo.value ?? 'unknown'}`;
+}
+
+/** Ticks covering `s` seconds from `fromTick`, through the tempo map. */
+const forSeconds = (fromTick, s) => Math.round(timeline.tickAtSeconds(timeline.seconds(fromTick) + s)) - fromTick;
+const endTick = () => Math.max(0, ...session.playlists.items.flatMap((p) => p.clips.items).map((c) => c.stop.value ?? 0));
+const nextBar = (extra) => Math.ceil(endTick() / (4 * B)) * 4 * B + extra * B;
+
+/** The clip a command just made: the one on the lane that was not there before. */
+async function newClip(before) {
+  await lane.clips.reload();
+  await luna.settled();
+  return lane.clips.items.find((c) => !before.has(c.id));
+}
+
+function clipButtons() {
+  const live = clip && lane?.clips.byId(clip.id);
+  for (const id of ['trim', 'move', 'rename', 'deleteClip']) $(id).disabled = !live;
+  $('clipInfo').textContent = live
+    ? `${clip.name.value}: beats ${(clip.start.value / B).toFixed(2)} → ${(clip.stop.value / B).toFixed(2)}, plays ${clip.renderState.value === 'current' ? 'a render' : 'the source'}`
+    : 'No SDK clip yet.';
+}
+
+function markerButtons() {
+  const live = marker && session.markers.byId(marker.id);
+  for (const id of ['renameMarker', 'nudgeMarker', 'deleteMarker']) $(id).disabled = !live;
+  $('markerInfo').textContent = live ? `${marker.name.value} at beat ${(marker.location.value / B).toFixed(2)}` : 'No SDK marker yet.';
+}
+
+function noteButtons() {
+  $('makeNotes').disabled = !notesLane;
+  const items = midi ? midi.notes.items : [];
+  for (const id of ['velocity', 'mute', 'deleteNotes']) $(id).disabled = items.length === 0;
+  $('noteInfo').textContent = notesLane
+    ? (midi ? `${items.length} notes: ${items.map((n) => `${n.pitch}${n.muted ? '(m)' : ''}@v${n.velocity}`).join(' ')}` : 'No SDK notes yet.')
+    : 'No instrument track in the session: add one in LUNA to try notes.';
+}
+
+async function act(name, fn) {
+  const buttons = [...document.querySelectorAll('button')];
+  buttons.forEach((b) => (b.disabled = true));
+  try {
+    await fn();
+    await report(name);
+  } catch (e) {
+    $('status').textContent = `${name} failed: ${e.code ?? ''} ${e.message}`;
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+    clipButtons(); markerButtons(); noteButtons();
+  }
+}
+
+$('insert').onclick = () => act('insertClip', async () => {
+  const sourceUid = $('sources').value;
+  if (!sourceUid) throw new Error('no audio source in this session');
+  const before = new Set(lane.clips.items.map((c) => c.id));
+  const start = nextBar(4);
+  await session.insertClip({ playlistUid: lane.id, sourceUid, startTick: start, stopTick: start + forSeconds(start, 2), sourceStartNs: 0, sourceStopNs: 2e9, name: 'SDK clip' });
+  clip = await newClip(before);
+});
+$('trim').onclick = () => act('trim', async () => {
+  await clip.trim(clip.start.value, clip.start.value + forSeconds(clip.start.value, 1));
+  await Luna.settle(() => clip.stop.value - clip.start.value < 2 * B, 'trim', { refresh: () => lane.clips.reload() });
+});
+$('move').onclick = () => act('move', async () => {
+  const was = clip.start.value;
+  await session.moveClips(was + 4 * B, { startTick: was, stopTick: clip.stop.value, trackUids: [lane.trackUid.value] });
+  await Luna.settle(() => clip.start.value !== was, 'move', { refresh: () => lane.clips.reload() });
+});
+$('rename').onclick = () => act('rename', () => clip.name.set(`SDK clip ${new Date().toLocaleTimeString()}`));
+$('deleteClip').onclick = () => act('delete', async () => {
+  const uid = clip.id;
+  await clip.delete();
+  await Luna.settle(() => !lane.clips.byId(uid), 'delete clip', { refresh: () => lane.clips.reload() });
+});
+
+$('addMarker').onclick = () => act('addMarker', async () => {
+  const before = new Set(session.markers.items.map((m) => m.id));
+  await session.addMarker(session.transport.playStart.value ?? 0, 'SDK marker');
+  await Luna.settle(() => session.markers.items.some((m) => !before.has(m.id)), 'add marker', { refresh: () => session.markers.reload() });
+  marker = session.markers.items.find((m) => !before.has(m.id));
+});
+$('renameMarker').onclick = () => act('renameMarker', () => marker.rename(`SDK marker ${new Date().toLocaleTimeString()}`));
+$('nudgeMarker').onclick = () => act('nudgeMarker', () => marker.moveTo((marker.location.value ?? 0) + 4 * B));
+$('deleteMarker').onclick = () => act('deleteMarker', async () => {
+  const uid = marker.id;
+  await marker.delete();
+  await Luna.settle(() => !session.markers.byId(uid), 'delete marker', { refresh: () => session.markers.reload() });
+});
+
+// createNotes makes the MIDI clip if the lane has none, and hands back the notes it created.
+$('makeNotes').onclick = () => act('createNotes', async () => {
+  const bar = timeline.tickAt({ bar: 1 });
+  const created = await notesLane.createNotes([60, 64, 67].map((pitch, i) => ({ pitch, startTick: bar + i * B, stopTick: bar + (i + 1) * B })));
+  midi = created.clip.midi;
+  offs.push(midi.notes.onChange(noteButtons));
+});
+// One post, one "Change Velocities" entry for the whole clip.
+$('velocity').onclick = () => act('setVelocities', () =>
+  midi.setVelocities(midi.notes.items.map((n) => ({ note: n, velocity: Math.max(1, Math.round(n.velocity * 0.8)) }))));
+// One "Mute Notes" entry, and the selection is put back afterwards.
+$('mute').onclick = () => act('setMuted', () => midi.setMuted(midi.notes.items.filter((n) => n.velocity < 90), true));
+$('deleteNotes').onclick = () => act('deleteNotes', () => midi.deleteNotes([midi.notes.items.at(-1)]));
+
+$('batch').onclick = () => act('transaction', () => session.transaction('SDK marker and clip', async () => {
+  const start = nextBar(8);
+  await session.addMarker(start, 'SDK batch marker');
+  await session.insertClip({ playlistUid: lane.id, sourceUid: $('sources').value, startTick: start, stopTick: start + forSeconds(start, 1), sourceStartNs: 0, sourceStopNs: 1e9, name: 'SDK batch clip' });
+}));
+$('undo').onclick = () => act('undo', async () => {
+  await session.undo();
+  await Promise.all([lane?.clips.reload(), session.markers.reload()].filter(Boolean));
+});
+
+async function refresh() {
+  $('refresh').disabled = true;
+  try {
+    if (!luna) {
+      luna = await Luna.connect();
+      Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+    }
+    session = await luna.session();
+    await session.ready();
+    await Promise.all([session.musical.ready(), session.sources?.load() ?? Promise.resolve()]);
+    for (const p of session.playlists.items) await p.clips.load();
+    timeline = session.musical.timeline;
+    const audio = session.visibleTracks.find((t) => t.trackType.value === 'audio' && session.playlistFor(t));
+    lane = audio && session.playlistFor(audio);
+    const inst = session.visibleTracks.find((t) => t.trackType.value === 'instrument' && session.playlistFor(t));
+    notesLane = inst && session.playlistFor(inst);
+    $('sources').replaceChildren();
+    for (const s of session.sources?.items ?? []) {
+      const option = document.createElement('option');
+      option.value = s.id;
+      option.textContent = s.name.value ?? s.id;
+      $('sources').append(option);
+    }
+    await session.context.refreshSelection().catch(() => {});
+    userSelection = selectionText();
+    $('batch').disabled = !lane;
+    $('insert').disabled = !lane;
+    $('status').textContent = `${session.name.value} · clips on ${audio?.name.value ?? 'no audio track'} · notes on ${inst?.name.value ?? 'no instrument track'}`;
+    clipButtons(); markerButtons(); noteButtons();
+    await report();
+  } catch (e) {
+    $('status').textContent = e.message;
+  } finally {
+    $('refresh').disabled = false;
+  }
+}
+
+$('refresh').onclick = refresh;
+window.addEventListener('pagehide', () => {
+  for (const off of offs) off();
+  void luna?.close();
+});
+void refresh();
+</script>
+</html>
