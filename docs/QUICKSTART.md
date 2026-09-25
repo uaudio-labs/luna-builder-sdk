@@ -112,6 +112,7 @@ track.gain.normalized.value;            // 0..1
 track.gain.real.value;                  // dB
 await track.gain.real.set(-6);          // one-shot: touch-bracketed for undo/automation
 await track.mute.toggle(); track.mute.on;   // switches
+await track.pan.resetToDefault();       // LUNA's default (centre); for double-click-to-reset
 track.solo;                             // track-level control; mute/gain/pan live on the main output
 track.main.pans;                        // [pan] on mono, [pan_left, pan_right] on stereo (fact 84)
 const bus = session.buses.items.find((b) => b.busType.value === 'aux') ?? session.master;
@@ -128,25 +129,27 @@ and one automation pass only if the control is touched when the edit starts and 
 when it ends (fact 78). Every Add On control follows one of two patterns:
 
 - **Discrete (click):** buttons, toggles, menus, steppers, double-click-to-reset. Write once
-  with `set()` or `toggle()`; the SDK sends touch, write, release, in order, and resolves
-  after the release. Do not wrap a click in `begin()`/`end()`.
+  with `set()`, `toggle()` or `resetToDefault()`; the SDK sends touch, write, release, in
+  order, and resolves after the release. Do not wrap a click in `begin()`/`end()`.
 - **Continuous (drag):** faders, knobs, XY pads. Touch on pointer down, write on every move,
-  release on pointer up. `Luna.bindGesture(element, control)` does the touch and the release,
-  including when the drag ends by cancel, lost capture or window blur; your code only writes.
+  release on pointer up. `Luna.bindRange(input, control)` does it all for `<input type="range">`,
+  `Luna.bindDrag(element, control)` for a div or canvas knob (pointer travel, keys, double-click
+  reset, `role="slider"`). Both follow LUNA except mid-drag, and settle on its value on release.
 
 ```js
 muteButton.onclick = () => track.mute.toggle();                 // discrete
-const g = Luna.bindGesture(fader, track.gain, { onEnd: repaint }); // continuous
-fader.addEventListener('input', () => track.gain.normalized.set(Number(fader.value)));
-// a canvas knob: Luna.bindGesture(canvas, [gainL, gainR], { capture: true }), write on pointermove while g.active
-g.dispose();                            // when the element goes away
+Luna.bindRange(fader, track.gain);                               // continuous: <input type="range">
+Luna.bindDrag(knob, track.pan, { render: (v) => knob.style.setProperty('--turn', `${(v - 0.5) * 300}deg`) });
+const strips = new Luna.Bindings();                              // pass { bindings: strips } to both
+session.tracks.onChange(() => void strips.whenIdle(render));    // render() begins with strips.clear()
 ```
 
 Writes inside a gesture are not bracketed individually. `control.touchable` says whether a
 control is bracketed at all: automatable controls and switches are (solo is, so exclusive solo
-works), a non-automatable continuous control is not. Do not rebuild a fader's DOM while it is
-being dragged, or the release never arrives; update its value instead, skipping `g.active`.
-Without the DOM helper: `control.begin()` on press, `control.end()` on every way a drag ends.
+works), a non-automatable continuous control is not. Never rebuild a fader mid-drag, or the
+release never arrives: `Luna.Bindings` collects listeners (`strips.on(prop, fn)`) and bindings,
+and `whenIdle` waits for its last drag. For your own pointer code, `Luna.bindGesture` does only
+the touch and release; by hand, `control.begin()` on press and `control.end()` on release.
 
 ## 7. Playlists, clips, sources
 
@@ -172,6 +175,9 @@ const cache = new Luna.Waveforms();
 const kind = Luna.kindForScale(nsPerPixel);               // 'coarse' past 31.25 ms per pixel
 const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
 const ns = Luna.audioNsAtTick(session.musical.timeline, clip, audio, tick);   // tick -> file offset
+// One min/max per pixel per channel; column i's left edge is file offset nsAt(i).
+const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(session.musical.timeline, clip, audio, tickAtPx(i)));
+const lanes = Luna.waveformLanes(cols.channels.length, top, height);   // stereo: left lane above right
 ```
 
 `examples/arrangement.html` is the whole picture: lanes, ruler, waveforms and playhead, live.

@@ -363,6 +363,31 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ***
 
+### resetToDefault()
+
+```ts
+resetToDefault(): Promise<void>;
+```
+
+Put the control back to its default value (`set_control_default_value`). LUNA knows each
+control's default, so there is no default to read or hard-code: a double-click-to-reset
+calls this. Like a one-shot write it is touch-bracketed, so it makes one undo step; inside
+a [begin](#begin)/[end](#end) gesture it is not bracketed again. The new value arrives by
+push. A plugin parameter whose plugin gives LUNA no default keeps its value (fact 92).
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+fader.addEventListener('dblclick', () => track.gain.resetToDefault());  // 0 dB
+panKnob.addEventListener('dblclick', () => track.main.pans[0]?.resetToDefault()); // centre
+```
+
+***
+
 ### toggle()
 
 ```ts

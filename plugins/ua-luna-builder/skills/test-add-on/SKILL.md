@@ -42,7 +42,8 @@ Assert on:
 - touch: every control edit is exactly one `<path>:on` then one `<path>:off` in
   `engine.touches`, a drag included (one pair however many writes). Drive a drag in jsdom by
   dispatching `pointerdown`, `input`s, then `pointerup` on the element bound with
-  `Luna.bindGesture`,
+  `Luna.bindRange` or `Luna.bindGesture` (`pointermove`s with `clientX`/`clientY` for
+  `Luna.bindDrag`),
 - engine state: `engine.value(path, prop)`, `engine.has(path)`, `engine.children(path)`,
 - shortcuts: dispatch a `keydown` (`{ key: ' ', code: 'Space', bubbles: true, cancelable: true }`)
   in jsdom and expect `playing`, or call `new Luna.Shortcuts(luna).run('undo')` without a DOM

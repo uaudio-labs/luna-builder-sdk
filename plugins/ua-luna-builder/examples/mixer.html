@@ -55,6 +55,7 @@
 (async () => {
   const status = document.getElementById('status');
   const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
+  const report = (e) => say(String(e?.message || e), true);
 
   let luna;
   try { luna = await Luna.connect(); }
@@ -72,12 +73,26 @@
   /** Tracks and buses share the Channel surface, so one strip builder covers both. */
   const kindOf = (ch) => (ch instanceof Luna.Bus ? (ch.isMaster ? 'master' : ch.busType.value ?? 'bus') : ch.trackType.value ?? 'audio');
 
+  // Two Luna.Bindings per session: `page` for its session-level listeners, `strips` for each
+  // strip's listeners and fader bindings. A group releases what it collected, and holds a
+  // rebuild asked for mid-drag (whenIdle); both are disposed when the session changes.
+  let page = new Luna.Bindings();
+  let strips = new Luna.Bindings();
+  let built;
+
   // Build once per focused session; rebuild when the user switches sessions in LUNA.
   async function build() {
-    document.getElementById('strips').replaceChildren();
     const session = luna.sessions.current();
+    if (session && session === built) return;   // the focus moved back, or was announced again
+    built = session;
+    page.dispose();
+    strips.dispose();
+    page = new Luna.Bindings();
+    const group = strips = new Luna.Bindings();
+    document.getElementById('strips').replaceChildren();
     if (!session) { say('no session open in LUNA', true); return; }
     await session.ready();
+    if (session !== built) return;
     say('');
     document.getElementById('session').textContent = session.name.value ?? session.uid;
 
@@ -89,28 +104,30 @@
       play.textContent = on ? '■ Stop' : '▶ Play';
     };
     renderPlay();
-    session.transport.playing.onChange(renderPlay);
+    page.on(session.transport.playing, renderPlay);
 
     const showAll = new URLSearchParams(location.search).get('all') === '1';
     const channels = () => [...(showAll ? session.tracksInOrder : session.visibleTracks), ...session.buses.items];
 
-    // Every strip keeps the unsubscribes it registered in `el.offs`; a rebuild releases the
-    // old strips' listeners first, or each rebuild would stack another set on the same
-    // channels (and keep every meter subscribed).
+    // A rebuild releases the old strips' listeners first (group.clear()), or each rebuild would
+    // stack another set on the same channels and keep every meter subscribed. It runs through
+    // whenIdle, so never mid-drag (the release would be lost with the old fader) and never
+    // twice at once: changes that arrive while one loads cost one more rebuild, not one each.
     const render = async () => {
-      const host = document.getElementById('strips');
-      for (const old of host.children) for (const off of old.offs ?? []) off();
       const list = channels();
       // loadStrip() fetches the channel's properties and its main-output controls together.
       await Promise.all(list.map((ch) => ch.loadStrip().catch(() => undefined)));
-      host.replaceChildren(...list.map(strip));
+      if (session !== built) return;                                // the session changed meanwhile
+      if (group.busy) { void group.whenIdle(render); return; }      // a drag began while loading
+      group.clear();
+      document.getElementById('strips').replaceChildren(...list.map((ch) => strip(ch, group)));
     };
-    session.tracks.onChange(() => { void render(); });
-    session.buses.onChange(() => { void render(); });
-    await render();
+    page.on(session.tracks, () => void group.whenIdle(render));
+    page.on(session.buses, () => void group.whenIdle(render));
+    await group.whenIdle(render);
   }
 
-  function strip(ch) {
+  function strip(ch, strips) {
     const kind = kindOf(ch);
     const el = document.createElement('div');
     el.className = `strip ${kind}`;
@@ -124,25 +141,22 @@
       <div class="db"></div>
       <div class="buttons"><button class="mute">M</button><button class="solo">S</button></div>`;
 
-    const offs = [];
-    el.offs = offs;
     const name = el.querySelector('.name');
     const renderName = () => { name.textContent = ch.name.value ?? ch.id; };
     renderName();
-    offs.push(ch.name.onChange(renderName));
+    strips.on(ch.name, renderName);
 
-    // Pan: one slider for mono, two for stereo. Each drag is one undo entry.
+    // Pan: one slider for mono, two for stereo. Luna.bindRange touches the control on press and
+    // releases it once however the drag ends, so a drag is one undo entry; it follows LUNA
+    // except mid-drag, and double-click resets to LUNA's default.
     const panBox = el.querySelector('.pan');
     const panLabel = el.querySelector('.panlabel');
     const renderPan = () => { panLabel.textContent = pans.map((c) => c.display.value ?? '').join(' · '); };
     for (const c of pans) {
       const s = document.createElement('input');
       s.type = 'range'; s.min = '0'; s.max = '1000'; s.step = '1';
-      s.value = String(Math.round((c.normalized.value ?? 0.5) * 1000));
-      const g = bindFader(s, c, (v) => c.normalized.set(v / 1000));
-      offs.push(() => g.dispose());
-      offs.push(c.normalized.onChange(() => { if (!g.active) s.value = String(Math.round((c.normalized.value ?? 0.5) * 1000)); }));
-      offs.push(c.display.onChange(renderPan));
+      Luna.bindRange(s, c, { bindings: strips, onError: report });
+      strips.on(c.display, renderPan);
       panBox.append(s);
     }
     renderPan();
@@ -150,14 +164,10 @@
     // Fader: normalized 0..1, shown as the engine's own dB readout. Drag = one undo entry.
     const fader = el.querySelector('.fader');
     const db = el.querySelector('.db');
-    const faderGesture = bindFader(fader, ch.gain, (v) => ch.gain.normalized.set(v / 1000));
-    const renderFader = () => { if (!faderGesture.active) fader.value = String(Math.round((ch.gain.normalized.value ?? 0) * 1000)); };
+    Luna.bindRange(fader, ch.gain, { bindings: strips, onError: report });   // double-click: 0 dB
     const renderDb = () => { db.textContent = ch.gain.display.value ?? ''; };
-    renderFader(); renderDb();
-    offs.push(() => faderGesture.dispose());
-    offs.push(ch.gain.normalized.onChange(renderFader), ch.gain.display.onChange(renderDb));
-    // Double click to unity: write 0 dB through the real view, one bracketed one-shot.
-    fader.ondblclick = () => ch.gain.real.set(0).catch((e) => say(String(e.message || e), true));
+    renderDb();
+    strips.on(ch.gain.display, renderDb);
 
     // Meter: one bar per stream, height = level (1.0 is full scale), a peak line held by
     // the page (LUNA's own peak falls back to 0 a second after signal stops), a clip
@@ -172,7 +182,7 @@
     const held = streams.map(() => ({ value: 0, at: 0 }));
     const HOLD_MS = 1500;
     const drawPeak = (i) => { streams[i].lastChild.style.bottom = `${Math.min(1, held[i].value) * 100}%`; };
-    offs.push(
+    strips.add(
       ch.meter.level.onChange(() => {
         const levels = ch.meter.level.value ?? [];
         streams.forEach((s, i) => {
@@ -182,8 +192,8 @@
           if (l >= h.value || performance.now() - h.at > HOLD_MS) { h.value = l; h.at = performance.now(); drawPeak(i); }
         });
       }),
-      ch.meter.clip.onChange(() => meterEl.classList.toggle('clip', (ch.meter.clip.value ?? []).some(Boolean))),
     );
+    strips.on(ch.meter.clip, () => meterEl.classList.toggle('clip', (ch.meter.clip.value ?? []).some(Boolean)));
     meterEl.onclick = () => meterEl.classList.remove('clip');
 
     const mute = el.querySelector('.mute');
@@ -192,24 +202,12 @@
     const renderMute = () => { mute.dataset.on = String(ch.mute.on); };
     const renderSolo = () => { solo.dataset.on = String(soloControl.on); };
     renderMute(); renderSolo();
-    offs.push(ch.mute.real.onChange(renderMute), soloControl.real.onChange(renderSolo));
-    mute.onclick = () => ch.mute.toggle().catch((e) => say(String(e.message || e), true));
-    solo.onclick = () => soloControl.toggle().catch((e) => say(String(e.message || e), true));
+    strips.on(ch.mute.real, renderMute);
+    strips.on(soloControl.real, renderSolo);
+    mute.onclick = () => ch.mute.toggle().catch(report);
+    solo.onclick = () => soloControl.toggle().catch(report);
 
     return el;
-  }
-
-  // Luna.bindGesture touches the control on pointer down and releases it on pointer up, cancel
-  // or lost capture, exactly once, so a drag is one undo entry and one automation pass. The
-  // page only writes values. While the gesture is active the slider ignores echoes from LUNA,
-  // so a late reconcile never fights the user's finger; on release it settles on LUNA's value.
-  function bindFader(slider, control, write) {
-    const gesture = Luna.bindGesture(slider, control, {
-      onEnd: () => { slider.value = String(Math.round((control.normalized.value ?? 0) * 1000)); },
-    });
-    slider.addEventListener('input', () => write(Number(slider.value)).catch((e) => say(String(e.message || e), true)));
-    // Keyboard nudges are one-shot writes, which bracket themselves.
-    return gesture;
   }
 
   await luna.sessions.ready();

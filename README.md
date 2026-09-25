@@ -22,7 +22,7 @@ npx ua-builder doctor                               # what is reachable from her
 
 Read `docs/QUICKSTART.md` first, then `docs/RECIPES.md` for eleven Add Ons worth asking an
 agent for. `docs/api/` is the generated reference, `docs/llms.txt`
-the index for coding agents, and `skills/` holds Claude Code skills for creating, extending,
+the index for coding agents, and `skills/` holds shared Claude Code and Codex skills for creating, extending,
 testing and debugging Add Ons.
 
 ## Install for an agent
@@ -49,13 +49,22 @@ claude --plugin-dir ./plugins/ua-luna-builder
 
 ### Codex
 
+From this SDK folder, register the marketplace and install the plugin:
+
 ```bash
 codex plugin marketplace add .
+codex plugin add ua-luna-builder@ua-builder-sdk
 ```
 
-Then open the Plugins Directory, choose the registered source, and install **LUNA Add On
-Builder**. Start a fresh task so it loads the skills. The catalog is
+Alternatively, after registering the marketplace, open the Plugins Directory, choose
+the registered source, and install **LUNA Add On Builder**. Start a fresh task so it
+loads the skills. Try: "Use the create-add-on skill to build a LUNA Add On with a
+bar/beat counter." The catalog is
 `.agents/plugins/marketplace.json`; its source path resolves from the repository root.
+
+The marketplace needs the prebuilt `plugins/ua-luna-builder/` folder. In a source
+checkout, generate it with `npm run build` before installing; distributed SDK
+packages already include it. Node.js 22 or newer is required to run the bundled CLI.
 
 The plugin carries both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
 Installing from a clone is not a release: the package is not published to npm, and nothing

@@ -69,11 +69,13 @@
     catch (e) { say(`${label} failed: ${e.message}`); }
   };
 
-  /** A drag on a level or pan slider: touched on press, released on pointer up, one undo entry. */
-  function bindDrag(slider, control) {
-    const gesture = Luna.bindGesture(slider, control, { onEnd: () => void undoText() });
-    slider.addEventListener('input', () => { control.normalized.set(Number(slider.value)).catch((e) => say(e.message)); });
-    return () => gesture.dispose();
+  /**
+   * A level or pan slider: touched on press, released on pointer up, one undo entry. It follows
+   * LUNA except mid-drag, and double-click resets it to LUNA's default.
+   */
+  function bindSlider(slider, control) {
+    const binding = Luna.bindRange(slider, control, { onEnd: () => void undoText(), onError: (e) => say(e.message) });
+    return () => binding.dispose();
   }
 
   function busMenu() {
@@ -102,7 +104,7 @@
       r.setAttribute('aria-label', `${send.id} ${c.id}`);
       const txt = Object.assign(document.createElement('span'), { className: 'db' });
       panCell.append(r, ' ', txt, ' ');
-      offs.push(bindDrag(r, c));
+      offs.push(bindSlider(r, c));
       return { c, r, txt };
     });
 
@@ -122,24 +124,23 @@
       const destinations = send.destinations.value ?? [];
       dest.textContent = destinations.length ? destinations.map((d) => (d.error ? `${d.name} (${d.error})` : d.name)).join(' + ') : '—';
       dest.classList.toggle('none', destinations.length === 0);
-      range.value = String(send.gain.normalized.value ?? 0);
       db.textContent = send.gain.display.value ?? '';
-      for (const { c, r, txt } of pans) { r.value = String(c.normalized.value ?? 0.5); txt.textContent = c.display.value ?? ''; }
+      for (const { c, txt } of pans) txt.textContent = c.display.value ?? '';
       muteBox.checked = send.mute.on;
       preBox.checked = send.preFader.on;
       onBox.checked = send.enabled.on;
     };
     offs.push(
       send.destinations.onChange(paint),
-      send.gain.normalized.onChange(paint), send.gain.display.onChange(paint),
+      send.gain.display.onChange(paint),
       send.mute.real.onChange(paint), send.preFader.real.onChange(paint), send.enabled.real.onChange(paint),
     );
-    for (const { c } of pans) offs.push(c.normalized.onChange(paint), c.display.onChange(paint));
+    for (const { c } of pans) offs.push(c.display.onChange(paint));
 
     muteBox.addEventListener('change', run(`${send.id} mute`, () => send.mute.real.set(muteBox.checked)));
     preBox.addEventListener('change', run(`${send.id} pre-fader`, () => send.preFader.real.set(preBox.checked)));
     onBox.addEventListener('change', run(`${send.id} enabled`, () => send.enabled.real.set(onBox.checked)));
-    offs.push(bindDrag(range, send.gain));
+    offs.push(bindSlider(range, send.gain));
 
     if (editable) {
       const meterCell = cell();

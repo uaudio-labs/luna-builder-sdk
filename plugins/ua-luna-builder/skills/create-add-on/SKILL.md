@@ -46,9 +46,12 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 - `await luna.session()` first; `await track.loadStrip()` before reading gain/pan/mute.
 - Touch every control the user edits, so undo and automation work (QUICKSTART section 6,
   "Touch"). Clicks (buttons, toggles, menus): a single `set()` or `toggle()`, which the SDK
-  brackets. Drags (faders, knobs): `Luna.bindGesture(element, control)` for the touch and
-  release, and write from `input` or `pointermove`. Keep the gesture and `dispose()` it with
-  the element, and never rebuild a control's DOM mid-drag.
+  brackets; double-click-to-reset is `control.resetToDefault()`, never a hard-coded default.
+  Drags: `Luna.bindRange(input, control)` for a range input, `Luna.bindDrag(element,
+  control, { render })` for a div or canvas knob; they touch, write, release and follow LUNA.
+  Put them and every `onChange` of rebuilt DOM in a `Luna.Bindings` (`{ bindings }`,
+  `bindings.on(prop, fn)`), `clear()` it when rebuilding, and rebuild through
+  `bindings.whenIdle(render)`, never mid-drag.
 - Call `Luna.bindShortcuts(luna)` once after connecting, so LUNA's undo, redo, play and record
   keys keep working while the Add On has the focus (QUICKSTART section 2). A key the page
   wants for itself: handle it and call `preventDefault()`.

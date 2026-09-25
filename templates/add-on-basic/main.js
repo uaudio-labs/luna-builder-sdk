@@ -26,9 +26,9 @@ function renderTracks() {
     const track = session.tracks.byId(row.id);
     // Every control the user edits is touched so LUNA records one undo step and one
     // automation pass. A click is one write, which the SDK brackets (touch, write, release).
-    // A fader or knob uses Luna.bindGesture(element, control) for the touch on pointer down and
-    // the release on pointer up, and writes from its own input/pointermove listener; keep
-    // such elements across re-renders rather than rebuilding them mid-drag.
+    // A fader is Luna.bindRange(input, control) and a knob Luna.bindDrag(element, control):
+    // touch on press, writes while dragging, release on pointer up. Pass { bindings } from a
+    // Luna.Bindings and re-render through bindings.whenIdle(render), so no drag is cut off.
     el.querySelector('.mute').onclick = () => track.mute.toggle();
     el.querySelector('.solo').onclick = () => track.solo.toggle();
     root.appendChild(el);

@@ -148,12 +148,11 @@
     const display = el.querySelector('.display');
     const slider = el.querySelector('input');
     const renderDisplay = () => { display.textContent = p.display.value ?? ''; };
-    // Touch on pointer down, write while dragging, release on pointer up: one undo entry.
-    const gesture = Luna.bindGesture(slider, p, { onEnd: () => renderSlider() });
-    const renderSlider = () => { if (!gesture.active) slider.value = String(Math.round((p.normalized.value ?? 0) * 1000)); };
-    renderDisplay(); renderSlider();
-    rowOffs.push(p.normalized.onChange(renderSlider), p.display.onChange(renderDisplay), () => gesture.dispose());
-    slider.addEventListener('input', () => p.normalized.set(Number(slider.value) / 1000).catch((e) => say(e.message, true)));
+    // Touch on pointer down, write while dragging, release on pointer up: one undo entry. The
+    // slider follows the plugin except mid-drag; double-click resets to the plugin's default.
+    const binding = Luna.bindRange(slider, p, { onError: (e) => say(e.message, true) });
+    renderDisplay();
+    rowOffs.push(p.display.onChange(renderDisplay), () => binding.dispose());
     return el;
   }
 

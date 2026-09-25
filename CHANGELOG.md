@@ -5,7 +5,7 @@ engine is versioned separately.
 
 ## Unreleased
 
-Measured against LUNA 3.0.0.15776 (facts 82-91 in `docs/EVIDENCE.md`).
+Measured against LUNA 3.0.0.15776 (facts 82-92 in `docs/EVIDENCE.md`).
 
 Changed (breaking)
 - The namespace is `Luna`, not `UA`: `import { Luna } from '@uaudio/ua-builder-sdk'`, `Luna.connect()`,
@@ -53,6 +53,25 @@ Fixed
 - `session.transaction()` called inside another runs in the open batch instead of nesting.
 
 Added
+- `Luna.waveformColumns(range, width, nsAt)` reduces a `WaveformRange` to one min/max per drawn
+  column per channel, keeping the loudest pair each column covers, and `NaN` where no pair
+  lies. `Luna.waveformLanes(channels, top, height)` stacks one lane per channel in file
+  order. Together they draw a stereo clip as two lanes, as LUNA does, instead of one folded
+  shape that looks mono.
+- `Luna.bindRange(input, control)` binds an `<input type="range">` to a control in one call:
+  touch on press, a write per `input` (the input's `min`..`max` mapped onto 0..1, or units with
+  `view: 'real'`), release once however the drag ends, LUNA's value followed except mid-drag
+  and settled on at release, double-click to `resetToDefault()`.
+- `Luna.bindDrag(element, controls, { render })` does the same for a div or canvas knob or
+  fader: pointer capture, travel to value (`axis`, `pixelsPerUnit`), arrow, Page and Home/End
+  keys, double-click reset, and `role="slider"` with `aria-valuenow`/`aria-valuetext`.
+- `Luna.Bindings` groups a page's listeners and bindings: `on(prop, fn)`, `add(off)`,
+  `clear()`, `dispose()`. Bindings made with `{ bindings }` hold it while dragged, and
+  `whenIdle(render)` runs a rebuild now or once when the last drag ends. `bindGesture` takes
+  `bindings` too.
+- `Control.resetToDefault()`: puts any control back to LUNA's own default
+  (`set_control_default_value`), touch-bracketed so it is one undo step. Use it for
+  double-click-to-reset instead of hard-coding a default; controls expose no default value.
 - `Transport.seek({ bar, beat, tick })` seeks to a musical position through the session's
   timeline; `seek({ bar: 1 })` is the downbeat of bar 1 even when tick 0 is not. New
   `{ sync: 'now' | 'next_bar' | 'loop_end' }` option for a seek during playback.

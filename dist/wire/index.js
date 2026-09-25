@@ -1733,6 +1733,13 @@ var MockEngine = class {
           if (count < 0) throw new UAError("uasrv.invalid_value", "set_touch: control is not touched", { cmd: "post", path: `${nodePath}/set_touch` });
           engine.setValue(nodePath, "touch_count", count);
           return null;
+        },
+        // The control's default is the value it was created with; LUNA answers the default
+        // real value (fact 92).
+        set_control_default_value: (_data, engine, nodePath) => {
+          const defaults = { value: o.value, real_value: o.real, normalized_value: o.normalized ?? o.value, string_value: o.str };
+          for (const [prop, v] of Object.entries(defaults)) if (engine.value(nodePath, prop) !== v) engine.setValue(nodePath, prop, v);
+          return o.real;
         }
       }
     });

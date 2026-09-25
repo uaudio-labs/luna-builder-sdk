@@ -1,5 +1,9 @@
 # Interface: Gesture
 
+## Extended by
+
+- [`ControlBinding`](ControlBinding.md)
+
 ## Properties
 
 | Property | Modifier | Type | Description |

@@ -599,6 +599,18 @@ declare class Control extends Node {
      * (fact 78).
      */
     end(): void;
+    /**
+     * Put the control back to its default value (`set_control_default_value`). LUNA knows each
+     * control's default, so there is no default to read or hard-code: a double-click-to-reset
+     * calls this. Like a one-shot write it is touch-bracketed, so it makes one undo step; inside
+     * a {@link begin}/{@link end} gesture it is not bracketed again. The new value arrives by
+     * push. A plugin parameter whose plugin gives LUNA no default keeps its value (fact 92).
+     *
+     * @example
+     * fader.addEventListener('dblclick', () => track.gain.resetToDefault());  // 0 dB
+     * panKnob.addEventListener('dblclick', () => track.main.pans[0]?.resetToDefault()); // centre
+     */
+    resetToDefault(): Promise<void>;
     /** True while inside a {@link begin}/{@link end} pair. */
     get inGesture(): boolean;
     /** Raw touch state on the engine (`set_touch` command). Prefer begin/end; errors are swallowed. */
@@ -2321,6 +2333,105 @@ declare abstract class Node {
 }
 
 /**
+ * One group of a page's listeners and gestures, released together, that also knows whether
+ * any of its drags is in progress.
+ *
+ * An Add On that rebuilds part of its DOM (a mixer's strips when tracks come and go) has two
+ * chores. It must drop every `onChange` listener and gesture of the old DOM, and it must not
+ * rebuild while one of those faders or knobs is being dragged, or the drag's release never
+ * arrives (fact 78). `Bindings` does both: {@link Bindings.on} and {@link Bindings.add} collect
+ * what to release, {@link bindGesture}, {@link bindRange} and {@link bindDrag} with
+ * `{ bindings }` hold the group for the length of each drag, and {@link Bindings.whenIdle}
+ * runs a rebuild now, or once when the last drag (and any rebuild still loading) has ended.
+ *
+ * @example
+ * const strips = new Luna.Bindings();
+ *
+ * function render() {
+ *   strips.clear();                                  // old listeners and gestures
+ *   host.replaceChildren(...session.tracks.items.map((t) => {
+ *     const fader = document.createElement('input');
+ *     fader.type = 'range';
+ *     Luna.bindRange(fader, t.gain, { bindings: strips });
+ *     strips.on(t.name, () => { fader.title = t.name.value ?? ''; });
+ *     return fader;
+ *   }));
+ * }
+ * // a rebuild asked for mid-drag waits for the drag to end; several collapse into one
+ * session.tracks.onChange(() => void strips.whenIdle(render));
+ */
+
+/** Something {@link Bindings} can release: an unsubscribe function or an object with `dispose()`. */
+type Releasable = Unsubscribe | {
+    dispose(): void;
+};
+declare class Bindings {
+    private releases;
+    private holds;
+    private pending;
+    /** A {@link whenIdle} rebuild that has not settled yet (an async one still loading). */
+    private running;
+    private disposed;
+    /** True while a drag bound with this group, or a {@link hold}, is in progress. */
+    get busy(): boolean;
+    /**
+     * Release `item` with the group. After {@link dispose} it is released at once.
+     *
+     * @example
+     * const g = bindings.add(Luna.bindGesture(canvas, control, { capture: true }));
+     * bindings.add(() => clearInterval(timer));
+     */
+    add<T extends Releasable>(item: T): T;
+    /**
+     * Subscribe to `prop` for as long as the group lives.
+     *
+     * @example
+     * bindings.on(track.name, () => { label.textContent = track.name.value ?? ''; });
+     */
+    on(prop: Prop<unknown>, listener: () => void): Unsubscribe;
+    /**
+     * Keep the group busy until the returned function is called, for an edit that is not a drag
+     * (an inline rename). Releasing twice is harmless; {@link clear} drops every hold.
+     *
+     * @example
+     * const done = bindings.hold();
+     * input.addEventListener('blur', done, { once: true });
+     */
+    hold(): () => void;
+    /**
+     * Run `rebuild` now when the group is idle. While it is busy, or while an earlier async
+     * `rebuild` is still running, run it once afterwards instead; asked again meanwhile, the
+     * latest `rebuild` replaces the waiting one, so a burst of changes costs one rebuild. The
+     * promise settles when the `rebuild` that finally ran has finished.
+     *
+     * An async `rebuild` can find the group busy again after an `await` (a drag began while it
+     * loaded). It should then ask again and return without touching the DOM:
+     * `if (strips.busy) { void strips.whenIdle(render); return; }`. Returning that promise
+     * instead would wait on itself.
+     *
+     * @example
+     * session.tracks.onChange(() => void strips.whenIdle(render));
+     */
+    whenIdle(rebuild: () => void | Promise<void>): Promise<void>;
+    /**
+     * Release everything added so far, end any drag and drop the holds. The group stays usable:
+     * call it in each rebuild, just before replacing the DOM. A rebuild still waiting in
+     * {@link whenIdle} is kept, and runs once nothing holds the group.
+     *
+     * @example
+     * function render() { strips.clear(); ... }
+     */
+    clear(): void;
+    /**
+     * {@link clear}, drop any waiting {@link whenIdle} rebuild (its promise resolves), and
+     * release anything added afterwards at once.
+     */
+    dispose(): void;
+    private start;
+    private flush;
+}
+
+/**
  * Touch-bracket a DOM control's drag: `begin()` on pointer down, `end()` on pointer up.
  *
  * LUNA turns a `set_touch` on / writes / `set_touch` off sequence into one undo step and one
@@ -2329,7 +2440,8 @@ declare abstract class Node {
  * release exactly once whatever ends the drag: pointer up over another element, a cancelled
  * pointer, lost capture, the window losing focus. {@link bindGesture} owns that part. The Add
  * On keeps writing values from its own `input` or `pointermove` listener; inside the gesture
- * those writes are not bracketed one by one.
+ * those writes are not bracketed one by one. For a range input or a knob, {@link bindRange}
+ * and {@link bindDrag} do the writing and the following too; this is the part they share.
  *
  * Clicks (buttons, toggles, menus) need no gesture: a one-shot `set()` or `toggle()` is
  * bracketed by the control itself.
@@ -2361,6 +2473,11 @@ interface GestureOptions {
      * element to the engine's settled value.
      */
     onEnd?: (event?: Event) => void;
+    /**
+     * Hold this group for the length of each drag, so its {@link Bindings.whenIdle} rebuilds
+     * wait for the release, and dispose the gesture with the group. The hold ends after `onEnd`.
+     */
+    bindings?: Bindings;
 }
 interface Gesture {
     /** True between pointer down and release. Gate `pointermove` writes on it. */
@@ -2388,6 +2505,104 @@ interface Gesture {
  * gesture.dispose();
  */
 declare function bindGesture(target: EventTarget, controls: Control | readonly Control[], options?: GestureOptions): Gesture;
+
+/**
+ * Bind a fader or knob element to a control in one call.
+ *
+ * Every continuous control on a page does the same four things: touch the control on press and
+ * release it once however the drag ends (fact 78, {@link bindGesture}), write the new value on
+ * every move, follow LUNA's value except mid-drag so a late echo never fights the pointer, and
+ * settle on LUNA's value on release. {@link bindRange} does them for a native
+ * `<input type="range">`; {@link bindDrag} also turns pointer travel into a value for a div or
+ * canvas knob, and adds the keyboard, double-click reset and slider semantics a native input
+ * has for free.
+ *
+ * @example
+ * Luna.bindRange(fader, track.gain);                                   // <input type="range">
+ * Luna.bindDrag(knob, track.pan, { render: (v) => knob.style.setProperty('--turn', `${(v - 0.5) * 300}deg`) });
+ */
+
+/** What {@link bindRange} and {@link bindDrag} return. */
+interface ControlBinding extends Gesture {
+    /** Repaint the element from the control's current value now, even mid-drag. */
+    sync(): void;
+}
+interface CommonOptions {
+    /** Called after the controls are touched, with the pointer-down event. */
+    onBegin?: (event: Event) => void;
+    /** Called after the release, once the element shows LUNA's settled value. */
+    onEnd?: (event?: Event) => void;
+    /** A rejected write or reset. Default: `console.error`. */
+    onError?: (error: unknown) => void;
+    /**
+     * Double-click puts the controls back to LUNA's default (`resetToDefault()`, one undo step).
+     * Default true.
+     */
+    reset?: boolean;
+    /** Hold this group for each drag and dispose the binding with it. */
+    bindings?: Bindings;
+}
+interface RangeOptions extends CommonOptions {
+    /**
+     * Which view of the control the input's value is. `'normalized'` (default) maps the input's
+     * `min`..`max` onto 0..1, so `min="0" max="1000"` gives a finer fader. `'real'` writes the
+     * input's value as units (dB, pan position), for an input whose `min`/`max` are in units.
+     */
+    view?: 'normalized' | 'real';
+}
+interface DragOptions extends CommonOptions {
+    /** Which pointer travel moves the value: up (`'y'`, default), right (`'x'`), or either (`'both'`). */
+    axis?: 'x' | 'y' | 'both';
+    /** Pixels of travel for the whole 0..1 range. Default 200. */
+    pixelsPerUnit?: number;
+    /** Arrow-key step in normalized units; Page Up/Down move ten steps, Home/End go to the ends. Default 0.01. */
+    step?: number;
+    /**
+     * Paint the element for a normalized value. Called on bind, on every write the element
+     * makes, and on LUNA's changes outside a drag.
+     */
+    render?: (normalized: number) => void;
+    /** `aria-label`, when the element has none. */
+    label?: string;
+}
+/**
+ * Bind a native `<input type="range">` to `control`: touch on press, write on `input`, follow
+ * LUNA outside a drag, settle on LUNA's value on release, double-click to reset. Keyboard
+ * changes the browser makes are one-shot writes, which the control brackets itself.
+ *
+ * @example
+ * const fader = document.createElement('input');
+ * fader.type = 'range';
+ * fader.min = '0'; fader.max = '1000';
+ * Luna.bindRange(fader, track.gain, {
+ *   onBegin: () => strip.classList.add('adjusting'),
+ *   onEnd: () => strip.classList.remove('adjusting'),
+ * });
+ *
+ * // units instead: a trim input from -20 to +20 dB
+ * Luna.bindRange(trim, track.gainTrim, { view: 'real' });
+ */
+declare function bindRange(input: HTMLInputElement, control: Control, options?: RangeOptions): ControlBinding;
+/**
+ * Bind a div or canvas knob (or fader, or one axis of an XY pad) to one control, or to several
+ * that move together. Dragging captures the pointer and moves the value by pointer travel;
+ * arrow, Page and Home/End keys nudge it; double-click resets it. The element becomes a
+ * focusable `role="slider"` whose `aria-valuenow` and `aria-valuetext` follow the control.
+ * Writes go to the controls' `normalized` view, and the first control's value is the one shown.
+ *
+ * @example
+ * const knob = document.createElement('div');
+ * Luna.bindDrag(knob, track.pan, {
+ *   label: 'Pan',
+ *   axis: 'both',
+ *   pixelsPerUnit: 160,
+ *   render: (v) => knob.style.setProperty('--turn', `${(v - 0.5) * 300}deg`),
+ * });
+ *
+ * // a stereo bus's two pans on one knob
+ * Luna.bindDrag(knob, bus.main.pans, { render });
+ */
+declare function bindDrag(el: HTMLElement, controls: Control | readonly Control[], options?: DragOptions): ControlBinding;
 
 /**
  * LUNA's standard keyboard shortcuts for an Add On: the fallback for keys the Add On's own GUI
@@ -2618,6 +2833,55 @@ declare class Waveforms {
     range(source: AudioSource, startNs: number, stopNs: number, kind?: OverviewKind): Promise<WaveformRange>;
     private page;
 }
+interface WaveformColumns {
+    /** Columns returned; `channels[c].min[i]` is column `i`. */
+    readonly width: number;
+    /**
+     * One entry per source channel, in file order (left then right for stereo), never folded
+     * together. A column with no pair under it is `NaN` in both arrays: draw nothing there.
+     */
+    readonly channels: readonly WaveformChannel[];
+}
+/**
+ * Reduce a {@link WaveformRange} to one min/max per drawn column, per channel: each column
+ * holds the loudest of every pair it covers, so peaks survive zooming out, and at least the
+ * pair under its left edge, so zooming in repeats pairs rather than leaving gaps.
+ *
+ * `nsAt(i)` is the file offset (ns) at the left edge of column `i`, for `i` in `0..width`,
+ * and must not decrease; column `i` covers `[nsAt(i), nsAt(i + 1))`. For a timeline that is
+ * {@link audioNsAtTick} of the tick at that edge, so a tempo change bends the mapping as the
+ * engine does. Columns outside the range are `NaN`.
+ *
+ * Draw each channel in its own lane ({@link waveformLanes}); folding a stereo range into one
+ * shape makes it look mono.
+ *
+ * @example
+ * const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(timeline, clip, audio, tickAtPx(x0 + i)));
+ * const lanes = Luna.waveformLanes(cols.channels.length, top, height);
+ * cols.channels.forEach((ch, c) => {
+ *   for (let i = 0; i < cols.width; i++) {
+ *     if (Number.isNaN(ch.max[i])) continue;
+ *     const { mid, half } = lanes[c];
+ *     ctx.fillRect(x0 + i, mid - ch.max[i] * half, 1, Math.max(1, (ch.max[i] - ch.min[i]) * half));
+ *   }
+ * });
+ */
+declare function waveformColumns(range: WaveformRange, width: number, nsAt: (column: number) => number): WaveformColumns;
+interface WaveformLane {
+    /** The lane's zero line. */
+    readonly mid: number;
+    /** Pixels from `mid` to full scale; `mid - max * half` is where a pair's maximum lands. */
+    readonly half: number;
+}
+/**
+ * Split `height` pixels from `top` into one equal lane per channel, stacked in file order
+ * (left above right for stereo), each with a zero line and a full-scale half-height.
+ * `gap` pixels are kept clear at the top and bottom of every lane.
+ *
+ * @example
+ * const [left, right] = Luna.waveformLanes(2, 20, 80);   // left.mid 40, right.mid 80
+ */
+declare function waveformLanes(channels: number, top: number, height: number, gap?: number): readonly WaveformLane[];
 
 /** How long {@link settle} waits by default for the model to reflect an edit. */
 declare const EDIT_TIMEOUT_MS = 4000;
@@ -2733,6 +2997,8 @@ declare const luna_Automation: typeof Automation;
 type luna_AutomationMode = AutomationMode;
 type luna_AutomationModeName = AutomationModeName;
 type luna_BarBeat = BarBeat;
+type luna_Bindings = Bindings;
+declare const luna_Bindings: typeof Bindings;
 type luna_BootOptions = BootOptions;
 type luna_BounceOptions = BounceOptions;
 type luna_Breakpoint = Breakpoint;
@@ -2766,6 +3032,7 @@ declare const luna_Context: typeof Context;
 type luna_ContextType = ContextType;
 type luna_Control = Control;
 declare const luna_Control: typeof Control;
+type luna_ControlBinding = ControlBinding;
 type luna_ControlType = ControlType;
 type luna_Controls = Controls;
 declare const luna_Controls: typeof Controls;
@@ -2779,6 +3046,7 @@ declare const luna_Device: typeof Device;
 type luna_Devices = Devices;
 declare const luna_Devices: typeof Devices;
 declare const luna_Disposed: typeof Disposed;
+type luna_DragOptions = DragOptions;
 type luna_Drivers = Drivers;
 declare const luna_Drivers: typeof Drivers;
 declare const luna_EDIT_TIMEOUT_MS: typeof EDIT_TIMEOUT_MS;
@@ -2865,8 +3133,10 @@ type luna_Prop<T> = Prop<T>;
 declare const luna_QUARTER_NOTE: typeof QUARTER_NOTE;
 type luna_QueryOptions = QueryOptions;
 declare const luna_RECORD_LOOP_MARGIN_TICKS: typeof RECORD_LOOP_MARGIN_TICKS;
+type luna_RangeOptions = RangeOptions;
 type luna_RecPlayMode = RecPlayMode;
 type luna_RecordOptions = RecordOptions;
+type luna_Releasable = Releasable;
 type luna_Render = Render;
 declare const luna_Render: typeof Render;
 type luna_Renders = Renders;
@@ -2936,6 +3206,8 @@ declare const luna_WasmPort: typeof WasmPort;
 type luna_WasmPortOptions = WasmPortOptions;
 type luna_WasmState = WasmState;
 type luna_WaveformChannel = WaveformChannel;
+type luna_WaveformColumns = WaveformColumns;
+type luna_WaveformLane = WaveformLane;
 type luna_WaveformRange = WaveformRange;
 type luna_Waveforms = Waveforms;
 declare const luna_Waveforms: typeof Waveforms;
@@ -2948,7 +3220,9 @@ type luna_WritableProp<T> = WritableProp<T>;
 declare const luna_audioNsAtTick: typeof audioNsAtTick;
 declare const luna_automationModeOrdinal: typeof automationModeOrdinal;
 declare const luna_beatsToTicks: typeof beatsToTicks;
+declare const luna_bindDrag: typeof bindDrag;
 declare const luna_bindGesture: typeof bindGesture;
+declare const luna_bindRange: typeof bindRange;
 declare const luna_bindShortcuts: typeof bindShortcuts;
 declare const luna_bootWasmEngine: typeof bootWasmEngine;
 declare const luna_clipAudio: typeof clipAudio;
@@ -2989,10 +3263,12 @@ declare const luna_ticksToBeats: typeof ticksToBeats;
 declare const luna_ticksToSeconds: typeof ticksToSeconds;
 declare const luna_toEvent: typeof toEvent;
 declare const luna_wasmUpdateToEvent: typeof wasmUpdateToEvent;
+declare const luna_waveformColumns: typeof waveformColumns;
+declare const luna_waveformLanes: typeof waveformLanes;
 declare const luna_writable: typeof writable;
 declare const luna_yieldTask: typeof yieldTask;
 declare namespace luna {
-  export { luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnTarget as AddOnTarget, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, luna_Collection as Collection, luna_CommandHandler as CommandHandler, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, luna_Drivers as Drivers, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, Event$1 as Event, luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, luna_LogFn as LogFn, luna_LogLevel as LogLevel, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, luna_MockMidiRow as MockMidiRow, luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, luna_Musical as Musical, type luna_NewNote as NewNote, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, luna_Plugins as Plugins, luna_Port as Port, luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, luna_Render as Render, luna_Renders as Renders, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, luna_SocketConstructor as SocketConstructor, luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_Store as Store, luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, luna_Track as Track, type luna_TrackType as TrackType, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformRange as WaveformRange, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, luna_WebSocketPortOptions as WebSocketPortOptions, luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindGesture as bindGesture, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_writable as writable, luna_yieldTask as yieldTask };
+  export { luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnTarget as AddOnTarget, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, luna_Collection as Collection, luna_CommandHandler as CommandHandler, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, luna_Drivers as Drivers, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, Event$1 as Event, luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, luna_LogFn as LogFn, luna_LogLevel as LogLevel, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, luna_MockMidiRow as MockMidiRow, luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, luna_Musical as Musical, type luna_NewNote as NewNote, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, luna_Plugins as Plugins, luna_Port as Port, luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, luna_SocketConstructor as SocketConstructor, luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_Store as Store, luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, luna_Track as Track, type luna_TrackType as TrackType, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformRange as WaveformRange, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, luna_WebSocketPortOptions as WebSocketPortOptions, luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_writable as writable, luna_yieldTask as yieldTask };
 }
 
 export { luna as Luna };

@@ -171,17 +171,19 @@ function paintTimeline() {
       ctx.strokeRect(x0 + 0.5, top + 14.5, Math.max(1, x1 - x0 - 1), laneH - 16);
       if (state === 'pending') { pending++; continue; }
       if (state === 'missing') { missing++; continue; }
-      const h = (laneH - 18) / Math.max(1, range.channels.length);
-      range.channels.forEach((ch, c) => {
-        const center = top + 15 + h * (c + 0.5);
+      // One min/max per pixel per channel, the loudest pair each pixel covers; a lane per channel.
+      const px0 = Math.floor(x0);
+      const cols = Luna.waveformColumns(range, Math.max(0, Math.ceil(x1) - px0), (i) =>
+        Luna.audioNsAtTick(t, clip, audio, start + (px0 + i) / W * span));
+      const waveLanes = Luna.waveformLanes(cols.channels.length, top + 15, laneH - 18);
+      cols.channels.forEach((ch, c) => {
+        const { mid, half } = waveLanes[c];
         ctx.strokeStyle = audio.stretched ? '#f0c674' : '#64d7b2';
         ctx.beginPath();
-        for (let px = Math.floor(x0); px < x1; px++) {
-          const tick = start + (px + 0.5) / W * span;
-          const pair = Math.floor(Luna.audioNsAtTick(t, clip, audio, tick) / range.pairNs) - range.index;
-          if (pair < 0 || pair >= range.count) continue;
-          ctx.moveTo(px + 0.5, center - ch.max[pair] * h * 0.46);
-          ctx.lineTo(px + 0.5, center - ch.min[pair] * h * 0.46);
+        for (let i = 0; i < cols.width; i++) {
+          if (Number.isNaN(ch.max[i])) continue;
+          ctx.moveTo(px0 + i + 0.5, mid - ch.max[i] * half);
+          ctx.lineTo(px0 + i + 0.5, mid - ch.min[i] * half);
         }
         ctx.stroke();
       });

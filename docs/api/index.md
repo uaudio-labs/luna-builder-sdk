@@ -7,6 +7,7 @@
 | [AddOn](classes/AddOn.md) | - |
 | [AudioSource](classes/AudioSource.md) | - |
 | [Automation](classes/Automation.md) | An observable ordered collection with id lookup. |
+| [Bindings](classes/Bindings.md) | - |
 | [BreakpointNode](classes/BreakpointNode.md) | - |
 | [Bus](classes/Bus.md) | - |
 | [Cell](classes/Cell.md) | The concrete [Prop](interfaces/Prop.md): a value with a version stamp and listeners. The version lets the Store decide whether an incoming value is newer than a pending write. |
@@ -81,8 +82,10 @@
 | [ClipLike](interfaces/ClipLike.md) | The clip fields placement needs. A [Clip](classes/Clip.md) satisfies it, as does a plain snapshot. |
 | [ClipSnapshot](interfaces/ClipSnapshot.md) | A clip's state at one moment, as plain data: what a view draws from. |
 | [ConnectOptions](interfaces/ConnectOptions.md) | - |
+| [ControlBinding](interfaces/ControlBinding.md) | What [bindRange](functions/bindRange.md) and [bindDrag](functions/bindDrag.md) return. |
 | [CreateSessionOptions](interfaces/CreateSessionOptions.md) | - |
 | [Destination](interfaces/Destination.md) | Where an output goes. `uid` is the assignment's, the handle [Output.unassign](classes/Output.md#unassign) takes. |
+| [DragOptions](interfaces/DragOptions.md) | - |
 | [Event](interfaces/Event.md) | One change pushed by the engine, normalised: a trailing `/value` is stripped, multi-updates are already expanded, and `operation` marks a child added or removed at `path`. |
 | [ExportOptions](interfaces/ExportOptions.md) | - |
 | [Gesture](interfaces/Gesture.md) | - |
@@ -110,6 +113,7 @@
 | [ProgressTask](interfaces/ProgressTask.md) | - |
 | [Prop](interfaces/Prop.md) | A readable, observable value. `value` is `undefined` until the first load or push. |
 | [QueryOptions](interfaces/QueryOptions.md) | - |
+| [RangeOptions](interfaces/RangeOptions.md) | - |
 | [RecordOptions](interfaces/RecordOptions.md) | - |
 | [SeekOptions](interfaces/SeekOptions.md) | - |
 | [SelectedNotes](interfaces/SelectedNotes.md) | One playlist's selected notes as LUNA stores them: `[pitch, start, stop, rowid]` in absolute ticks. |
@@ -127,6 +131,8 @@
 | [WasmModule](interfaces/WasmModule.md) | The subset of the Emscripten module the SDK uses. |
 | [WasmPortOptions](interfaces/WasmPortOptions.md) | - |
 | [WaveformChannel](interfaces/WaveformChannel.md) | - |
+| [WaveformColumns](interfaces/WaveformColumns.md) | - |
+| [WaveformLane](interfaces/WaveformLane.md) | - |
 | [WaveformRange](interfaces/WaveformRange.md) | - |
 | [WebSocketPortOptions](interfaces/WebSocketPortOptions.md) | - |
 | [WireMessage](interfaces/WireMessage.md) | A message as it appears on the wire (JSON dialect), before normalisation. |
@@ -157,6 +163,7 @@
 | [OverviewKind](type-aliases/OverviewKind.md) | `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. |
 | [PortStatus](type-aliases/PortStatus.md) | Connection state as reported by [Port.onStatus](interfaces/Port.md#onstatus). |
 | [RecPlayMode](type-aliases/RecPlayMode.md) | - |
+| [Releasable](type-aliases/Releasable.md) | Something [Bindings](classes/Bindings.md) can release: an unsubscribe function or an object with `dispose()`. |
 | [SeekTarget](type-aliases/SeekTarget.md) | Where to seek: a tick, or a bar|beat|tick position (`beat` defaults to 1, `tick` to 0). |
 | [ShortcutBindings](type-aliases/ShortcutBindings.md) | - |
 | [ShortcutCommand](type-aliases/ShortcutCommand.md) | The commands the standard shortcuts cover. |
@@ -206,7 +213,9 @@
 | [audioNsAtTick](functions/audioNsAtTick.md) | The file offset (ns) that plays at a timeline tick inside a clip: the clip's audio start plus the tempo-map seconds between the clip start and the tick. Linear in seconds, not in ticks, so a tempo change inside the clip bends the mapping exactly as the engine does. |
 | [automationModeOrdinal](functions/automationModeOrdinal.md) | Commands take the mode as an integer ordinal; the track property reports it as a string. |
 | [beatsToTicks](functions/beatsToTicks.md) | Beats to ticks. |
+| [bindDrag](functions/bindDrag.md) | Bind a div or canvas knob (or fader, or one axis of an XY pad) to one control, or to several that move together. Dragging captures the pointer and moves the value by pointer travel; arrow, Page and Home/End keys nudge it; double-click resets it. The element becomes a focusable `role="slider"` whose `aria-valuenow` and `aria-valuetext` follow the control. Writes go to the controls' `normalized` view, and the first control's value is the one shown. |
 | [bindGesture](functions/bindGesture.md) | Bracket every drag on `target` with `begin()`/`end()` on `controls` (one control, or all the controls one element drives). |
+| [bindRange](functions/bindRange.md) | Bind a native `<input type="range">` to `control`: touch on press, write on `input`, follow LUNA outside a drag, settle on LUNA's value on release, double-click to reset. Keyboard changes the browser makes are one-shot writes, which the control brackets itself. |
 | [bindShortcuts](functions/bindShortcuts.md) | Give an Add On LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind its own key handling. |
 | [bootWasmEngine](functions/bootWasmEngine.md) | Load and boot the engine once per page. Resolves when the services report `running`. Rejects with `Luna.Error` code `engine_boot` on failure or timeout. |
 | [clipAudio](functions/clipAudio.md) | Which audio a clip plays, or `undefined` when there is nothing safe to draw: no source, or a render LUNA has named but not yet announced. In that second case draw the clip's outline rather than the unstretched original at the wrong scale. |
@@ -246,5 +255,7 @@
 | [ticksToSeconds](functions/ticksToSeconds.md) | Ticks to seconds at a constant tempo. |
 | [toEvent](functions/toEvent.md) | Turn a decoded wire message into the normalised event the Store consumes. |
 | [wasmUpdateToEvent](functions/wasmUpdateToEvent.md) | Turn one `onUpdate(path, json)` into a normalised event. Exported for tests. |
+| [waveformColumns](functions/waveformColumns.md) | Reduce a [WaveformRange](interfaces/WaveformRange.md) to one min/max per drawn column, per channel: each column holds the loudest of every pair it covers, so peaks survive zooming out, and at least the pair under its left edge, so zooming in repeats pairs rather than leaving gaps. |
+| [waveformLanes](functions/waveformLanes.md) | Split `height` pixels from `top` into one equal lane per channel, stacked in file order (left above right for stereo), each with a zero line and a full-scale half-height. `gap` pixels are kept clear at the top and bottom of every lane. |
 | [writable](functions/writable.md) | Wrap a [Prop](interfaces/Prop.md) with a setter to make a [WritableProp](interfaces/WritableProp.md). |
 | [yieldTask](functions/yieldTask.md) | One macrotask later, through a `MessageChannel` where there is one. A background browser tab throttles timers to about one tick per second but never throttles messages, so a timer-only loop lands on its own timeout in a hidden page even though LUNA finished in milliseconds. |

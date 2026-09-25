@@ -11,6 +11,7 @@ __export(luna_exports, {
   AddOn: () => AddOn,
   AudioSource: () => AudioSource,
   Automation: () => Automation,
+  Bindings: () => Bindings,
   BreakpointNode: () => BreakpointNode,
   Bus: () => Bus,
   COARSE_PAIRS_PER_FINE: () => COARSE_PAIRS_PER_FINE,
@@ -92,7 +93,9 @@ __export(luna_exports, {
   audioNsAtTick: () => audioNsAtTick,
   automationModeOrdinal: () => automationModeOrdinal,
   beatsToTicks: () => beatsToTicks,
+  bindDrag: () => bindDrag,
   bindGesture: () => bindGesture,
+  bindRange: () => bindRange,
   bindShortcuts: () => bindShortcuts,
   bootWasmEngine: () => bootWasmEngine,
   clipAudio: () => clipAudio,
@@ -133,6 +136,8 @@ __export(luna_exports, {
   ticksToSeconds: () => ticksToSeconds,
   toEvent: () => toEvent,
   wasmUpdateToEvent: () => wasmUpdateToEvent,
+  waveformColumns: () => waveformColumns,
+  waveformLanes: () => waveformLanes,
   writable: () => writable,
   yieldTask: () => yieldTask
 });
@@ -1872,6 +1877,13 @@ var MockEngine = class {
           if (count < 0) throw new UAError("uasrv.invalid_value", "set_touch: control is not touched", { cmd: "post", path: `${nodePath}/set_touch` });
           engine.setValue(nodePath, "touch_count", count);
           return null;
+        },
+        // The control's default is the value it was created with; LUNA answers the default
+        // real value (fact 92).
+        set_control_default_value: (_data, engine, nodePath) => {
+          const defaults = { value: o.value, real_value: o.real, normalized_value: o.normalized ?? o.value, string_value: o.str };
+          for (const [prop, v] of Object.entries(defaults)) if (engine.value(nodePath, prop) !== v) engine.setValue(nodePath, prop, v);
+          return o.real;
         }
       }
     });
@@ -2981,7 +2993,7 @@ var Node = class {
    */
   get wire() {
     const raw = this.client.raw;
-    const check = (run) => this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : run();
+    const check = (run2) => this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : run2();
     return {
       get: (path, options) => check(() => raw.get(path, options)),
       set: (path, data) => check(() => raw.set(path, data)),
@@ -3442,6 +3454,27 @@ var Control = class extends Node {
     this.gestureTouched = false;
     void this.touch(false);
   }
+  /**
+   * Put the control back to its default value (`set_control_default_value`). LUNA knows each
+   * control's default, so there is no default to read or hard-code: a double-click-to-reset
+   * calls this. Like a one-shot write it is touch-bracketed, so it makes one undo step; inside
+   * a {@link begin}/{@link end} gesture it is not bracketed again. The new value arrives by
+   * push. A plugin parameter whose plugin gives LUNA no default keeps its value (fact 92).
+   *
+   * @example
+   * fader.addEventListener('dblclick', () => track.gain.resetToDefault());  // 0 dB
+   * panKnob.addEventListener('dblclick', () => track.main.pans[0]?.resetToDefault()); // centre
+   */
+  async resetToDefault() {
+    const reset = () => this.post("set_control_default_value", {}).then(() => void 0);
+    if (this.gestureDepth > 0 || !this.touchable) return reset();
+    await this.touch(true);
+    try {
+      await reset();
+    } finally {
+      await this.touch(false);
+    }
+  }
   /** True while inside a {@link begin}/{@link end} pair. */
   get inGesture() {
     return this.gestureDepth > 0;
@@ -3485,6 +3518,7 @@ function bindGesture(target, controls, options = {}) {
   const view = el.ownerDocument?.defaultView ?? globalThis.window;
   let active = false;
   let pointerId;
+  let releaseHold;
   const samePointer = (e) => pointerId === void 0 || e.pointerId === void 0 || e.pointerId === pointerId;
   const finish = (event) => {
     if (!active) return;
@@ -3495,7 +3529,13 @@ function bindGesture(target, controls, options = {}) {
     if (pointerId !== void 0 && el.hasPointerCapture?.(pointerId)) el.releasePointerCapture?.(pointerId);
     pointerId = void 0;
     for (const c of list) c.end();
-    options.onEnd?.(event);
+    try {
+      options.onEnd?.(event);
+    } finally {
+      const done = releaseHold;
+      releaseHold = void 0;
+      done?.();
+    }
   };
   const onRelease = (e) => {
     if (samePointer(e)) finish(e);
@@ -3506,6 +3546,7 @@ function bindGesture(target, controls, options = {}) {
     if (active || p.button !== void 0 && p.button !== 0) return;
     active = true;
     pointerId = p.pointerId;
+    releaseHold = options.bindings?.hold();
     for (const c of list) c.begin();
     if (options.capture && pointerId !== void 0) {
       try {
@@ -3522,7 +3563,7 @@ function bindGesture(target, controls, options = {}) {
   target.addEventListener("pointerup", onRelease);
   target.addEventListener("pointercancel", onRelease);
   target.addEventListener("lostpointercapture", onRelease);
-  return {
+  const gesture = {
     get active() {
       return active;
     },
@@ -3535,6 +3576,299 @@ function bindGesture(target, controls, options = {}) {
       target.removeEventListener("lostpointercapture", onRelease);
     }
   };
+  options.bindings?.add(gesture);
+  return gesture;
+}
+
+// src/model/bind.ts
+var clamp01 = (v) => Math.min(1, Math.max(0, v));
+function bindRange(input, control, options = {}) {
+  const view = options.view ?? "normalized";
+  const fail = options.onError ?? ((e) => console.error("[Luna] bindRange", e));
+  const bounds = () => {
+    const min = input.min === "" ? 0 : Number(input.min);
+    const max = input.max === "" ? 100 : Number(input.max);
+    return [min, max > min ? max : min + 1];
+  };
+  const sync = () => {
+    if (view === "real") {
+      const r = control.real.value;
+      if (typeof r === "number") input.value = String(r);
+      return;
+    }
+    const [min, max] = bounds();
+    input.value = String(min + (control.normalized.value ?? 0) * (max - min));
+  };
+  const gesture = bindGesture(input, control, {
+    ...options.onBegin ? { onBegin: options.onBegin } : {},
+    ...options.bindings ? { bindings: options.bindings } : {},
+    onEnd: (e) => {
+      sync();
+      options.onEnd?.(e);
+    }
+  });
+  const onInput = () => {
+    const v = Number(input.value);
+    let write;
+    if (view === "real") write = control.real.set(v);
+    else {
+      const [min, max] = bounds();
+      write = control.normalized.set(clamp01((v - min) / (max - min)));
+    }
+    write.catch(fail);
+  };
+  const onDouble = () => void control.resetToDefault().catch(fail);
+  const off = control[view].onChange(() => {
+    if (!gesture.active) sync();
+  });
+  input.addEventListener("input", onInput);
+  if (options.reset !== false) input.addEventListener("dblclick", onDouble);
+  sync();
+  return withBindings(options.bindings, gesture, sync, () => {
+    off();
+    input.removeEventListener("input", onInput);
+    input.removeEventListener("dblclick", onDouble);
+  });
+}
+function bindDrag(el, controls, options = {}) {
+  const list = Array.isArray(controls) ? controls : [controls];
+  const lead = list[0];
+  if (!lead) throw new TypeError("bindDrag needs at least one control");
+  const fail = options.onError ?? ((e) => console.error("[Luna] bindDrag", e));
+  const axis = options.axis ?? "y";
+  const perUnit = options.pixelsPerUnit ?? 200;
+  const step = options.step ?? 0.01;
+  if (el.tabIndex < 0 && !el.hasAttribute("tabindex")) el.tabIndex = 0;
+  if (!el.hasAttribute("role")) el.setAttribute("role", "slider");
+  el.setAttribute("aria-valuemin", "0");
+  el.setAttribute("aria-valuemax", "1");
+  if (options.label && !el.hasAttribute("aria-label")) el.setAttribute("aria-label", options.label);
+  if (!el.style.touchAction) el.style.touchAction = "none";
+  let value = 0;
+  const paint = () => {
+    el.setAttribute("aria-valuenow", value.toFixed(3));
+    const text = lead.display.value;
+    if (text) el.setAttribute("aria-valuetext", text);
+    else el.removeAttribute("aria-valuetext");
+    options.render?.(value);
+  };
+  const sync = () => {
+    value = clamp01(lead.normalized.value ?? value);
+    paint();
+  };
+  const write = (v) => {
+    value = clamp01(v);
+    paint();
+    for (const c of list) c.normalized.set(value).catch(fail);
+  };
+  let from;
+  const gesture = bindGesture(el, list, {
+    capture: true,
+    ...options.bindings ? { bindings: options.bindings } : {},
+    onBegin: (e) => {
+      const p = e;
+      from = { x: p.clientX, y: p.clientY, value };
+      options.onBegin?.(e);
+    },
+    onEnd: (e) => {
+      from = void 0;
+      sync();
+      options.onEnd?.(e);
+    }
+  });
+  const onMove = (e) => {
+    if (!gesture.active || !from) return;
+    const dx = e.clientX - from.x;
+    const dy = from.y - e.clientY;
+    const travel = axis === "x" ? dx : axis === "y" ? dy : dx + dy;
+    write(from.value + travel / perUnit);
+  };
+  const onKey = (e) => {
+    const next = {
+      ArrowUp: value + step,
+      ArrowRight: value + step,
+      ArrowDown: value - step,
+      ArrowLeft: value - step,
+      PageUp: value + step * 10,
+      PageDown: value - step * 10,
+      Home: 0,
+      End: 1
+    };
+    const v = next[e.key];
+    if (v === void 0 || e.defaultPrevented) return;
+    e.preventDefault();
+    write(v);
+  };
+  const onDouble = () => {
+    for (const c of list) c.resetToDefault().catch(fail);
+  };
+  const offs = [lead.normalized, lead.display].map(
+    (p) => p.onChange(() => {
+      if (!gesture.active) sync();
+    })
+  );
+  el.addEventListener("pointermove", onMove);
+  el.addEventListener("keydown", onKey);
+  if (options.reset !== false) el.addEventListener("dblclick", onDouble);
+  sync();
+  return withBindings(options.bindings, gesture, sync, () => {
+    for (const off of offs) off();
+    el.removeEventListener("pointermove", onMove);
+    el.removeEventListener("keydown", onKey);
+    el.removeEventListener("dblclick", onDouble);
+  });
+}
+function withBindings(bindings, gesture, sync, unbind) {
+  let disposed = false;
+  const binding = {
+    get active() {
+      return gesture.active;
+    },
+    sync,
+    end: () => gesture.end(),
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      gesture.dispose();
+      unbind();
+    }
+  };
+  bindings?.add(binding);
+  return binding;
+}
+
+// src/model/bindings.ts
+var Bindings = class {
+  releases = [];
+  holds = /* @__PURE__ */ new Set();
+  pending;
+  /** A {@link whenIdle} rebuild that has not settled yet (an async one still loading). */
+  running = false;
+  disposed = false;
+  /** True while a drag bound with this group, or a {@link hold}, is in progress. */
+  get busy() {
+    return this.holds.size > 0;
+  }
+  /**
+   * Release `item` with the group. After {@link dispose} it is released at once.
+   *
+   * @example
+   * const g = bindings.add(Luna.bindGesture(canvas, control, { capture: true }));
+   * bindings.add(() => clearInterval(timer));
+   */
+  add(item) {
+    if (this.disposed) release(item);
+    else this.releases.push(item);
+    return item;
+  }
+  /**
+   * Subscribe to `prop` for as long as the group lives.
+   *
+   * @example
+   * bindings.on(track.name, () => { label.textContent = track.name.value ?? ''; });
+   */
+  on(prop, listener) {
+    return this.add(prop.onChange(listener));
+  }
+  /**
+   * Keep the group busy until the returned function is called, for an edit that is not a drag
+   * (an inline rename). Releasing twice is harmless; {@link clear} drops every hold.
+   *
+   * @example
+   * const done = bindings.hold();
+   * input.addEventListener('blur', done, { once: true });
+   */
+  hold() {
+    const token = {};
+    this.holds.add(token);
+    return () => {
+      if (this.holds.delete(token)) this.flush();
+    };
+  }
+  /**
+   * Run `rebuild` now when the group is idle. While it is busy, or while an earlier async
+   * `rebuild` is still running, run it once afterwards instead; asked again meanwhile, the
+   * latest `rebuild` replaces the waiting one, so a burst of changes costs one rebuild. The
+   * promise settles when the `rebuild` that finally ran has finished.
+   *
+   * An async `rebuild` can find the group busy again after an `await` (a drag began while it
+   * loaded). It should then ask again and return without touching the DOM:
+   * `if (strips.busy) { void strips.whenIdle(render); return; }`. Returning that promise
+   * instead would wait on itself.
+   *
+   * @example
+   * session.tracks.onChange(() => void strips.whenIdle(render));
+   */
+  whenIdle(rebuild) {
+    if (!this.busy && !this.running) return this.start(rebuild);
+    return new Promise((resolve, reject) => {
+      const waiters = this.pending?.waiters ?? [];
+      waiters.push({ resolve, reject });
+      this.pending = { run: rebuild, waiters };
+    });
+  }
+  /**
+   * Release everything added so far, end any drag and drop the holds. The group stays usable:
+   * call it in each rebuild, just before replacing the DOM. A rebuild still waiting in
+   * {@link whenIdle} is kept, and runs once nothing holds the group.
+   *
+   * @example
+   * function render() { strips.clear(); ... }
+   */
+  clear() {
+    this.holds.clear();
+    const releases = this.releases;
+    this.releases = [];
+    for (const item of releases) {
+      try {
+        release(item);
+      } catch (err) {
+        console.error("[Luna] release threw", err);
+      }
+    }
+    this.flush();
+  }
+  /**
+   * {@link clear}, drop any waiting {@link whenIdle} rebuild (its promise resolves), and
+   * release anything added afterwards at once.
+   */
+  dispose() {
+    this.disposed = true;
+    const pending = this.pending;
+    this.pending = void 0;
+    this.clear();
+    for (const w of pending?.waiters ?? []) w.resolve();
+  }
+  start(rebuild) {
+    this.running = true;
+    const done = run(rebuild);
+    const settle2 = () => {
+      this.running = false;
+      this.flush();
+    };
+    done.then(settle2, settle2);
+    return done;
+  }
+  flush() {
+    const pending = this.pending;
+    if (!pending || this.busy || this.running) return;
+    this.pending = void 0;
+    this.start(pending.run).then(
+      () => pending.waiters.forEach((w) => w.resolve()),
+      (err) => pending.waiters.forEach((w) => w.reject(err))
+    );
+  }
+};
+function release(item) {
+  if (typeof item === "function") item();
+  else item.dispose();
+}
+function run(fn) {
+  try {
+    return Promise.resolve(fn());
+  } catch (err) {
+    return Promise.reject(err);
+  }
 }
 
 // src/model/shortcuts.ts
@@ -4909,7 +5243,7 @@ var MidiClip = class extends Node {
     await this.client.store.load(this.path, { children: false, flatvalue: true, commands: false, propfilter: "row_data" });
   }
   release() {
-    for (const release of this.releases) release();
+    for (const release2 of this.releases) release2();
     this.releases.length = 0;
     this.client.store.forget(this.path);
   }
@@ -5465,6 +5799,36 @@ var Waveforms = class {
     return pending;
   }
 };
+function waveformColumns(range, width, nsAt) {
+  if (!Number.isInteger(width) || width < 0) throw new UAError("out_of_range", "waveformColumns(): width must be a whole number of columns >= 0");
+  const out = range.channels.map(() => ({ min: new Float32Array(width).fill(Number.NaN), max: new Float32Array(width).fill(Number.NaN) }));
+  const pairAt = (ns) => Math.floor(ns / range.pairNs) - range.index;
+  let next = pairAt(nsAt(0));
+  for (let i = 0; i < width; i++) {
+    const first = next;
+    next = pairAt(nsAt(i + 1));
+    const a = Math.max(0, first);
+    const b = Math.min(range.count, Math.max(first + 1, next));
+    if (!Number.isFinite(first) || !Number.isFinite(b) || b <= a) continue;
+    range.channels.forEach((ch, c) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let p = a; p < b; p++) {
+        if (ch.min[p] < lo) lo = ch.min[p];
+        if (ch.max[p] > hi) hi = ch.max[p];
+      }
+      out[c].min[i] = lo;
+      out[c].max[i] = hi;
+    });
+  }
+  return Object.freeze({ width, channels: Object.freeze(out.map((ch) => Object.freeze(ch))) });
+}
+function waveformLanes(channels, top, height, gap = 1) {
+  if (!Number.isInteger(channels) || channels < 0) throw new UAError("out_of_range", "waveformLanes(): channels must be a whole number >= 0");
+  const lane = channels ? height / channels : 0;
+  const half = Math.max(0, lane / 2 - gap);
+  return Object.freeze(Array.from({ length: channels }, (_, c) => Object.freeze({ mid: top + lane * (c + 0.5), half })));
+}
 
 // src/model/markers.ts
 var Marker = class extends Node {
@@ -5664,7 +6028,7 @@ var Gui = class extends Node {
       done: () => this.post("remove_task", { task_uid: taskUid }).then(() => void 0)
     };
   }
-  async dialog(command, payload, release, timeoutMs = 10 * 6e4) {
+  async dialog(command, payload, release2, timeoutMs = 10 * 6e4) {
     const reply = await this.post(command, payload);
     const uid = typeof reply === "string" ? reply : reply?.uid;
     if (!uid) return [];
@@ -5693,7 +6057,7 @@ var Gui = class extends Node {
       return status.value === "selected" ? (files.value ?? []).map((f) => f.path) : [];
     } finally {
       watch.release();
-      await this.post(release, { uid }).catch(() => void 0);
+      await this.post(release2, { uid }).catch(() => void 0);
     }
   }
 };
