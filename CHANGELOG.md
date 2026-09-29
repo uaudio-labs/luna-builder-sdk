@@ -3,6 +3,39 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
+## 0.1.0-alpha.2
+
+Measured against the wasm LUNA engine (fact 96 in `docs/EVIDENCE.md`, 2026-09-29); native
+LUNA's `min_sec` precision is an open check for the live lane.
+
+Added
+- `Transport.seconds`: the playhead in wall-clock seconds, `transport.tick` converted through
+  the session's tempo map. Safe on any session from `luna.session()` (the tempo map loads with
+  `session.ready()`); read earlier it throws `unavailable` instead of converting at a guessed
+  tempo. `TransportLocation.min_sec` is documented (fact 96): present on `location` pushes,
+  its `seconds` fractional on the wasm engine (measured); floor it for display.
+- `Luna.formatMinSec(seconds, { fraction })`: a zero-padded `MM:SS` clock as a companion to
+  `formatBarBeat`, with optional fractional digits, flooring rather than rounding and clamping
+  negatives to zero.
+- `Luna.bindClock(el, transport, { render, bindings })`: a smooth playback clock. The engine
+  pushes `location` only several times a second, so the binding anchors on each push (the push
+  stays authoritative) and interpolates with requestAnimationFrame while `transport.playing`,
+  cancels on stop, and returns a release function. Default paint is
+  `formatMinSec(seconds, { fraction: 1 })` into `el.textContent`.
+- `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
+  re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
+  `min_sec` integrated from the session's tempo map (fact 96).
+- Every skill, the scaffold README and `docs/llms.txt` ask an agent that hits a workflow the
+  SDK could support better to end its reply with `UA BUILDER SDK FEEDBACK:` followed by a
+  prompt that could be used to update the SDK for that workflow.
+
+Fixed
+- The scaffold declares `vite` (vitest 5's peer dependency) so a fresh Add On installs, and
+  the SDK's `file:` spec is written relative to the Add On so a moved folder keeps installing.
+  The README notes the Node 24 / npm 11 requirement.
+- `ua-builder doctor` reports the npm version, with a note when it is older than 11 (npm 10
+  crashes in arborist on the scaffold), and creates LUNA's Add Ons folder when it is missing.
+
 ## 0.1.0-alpha.1
 
 Measured against LUNA 3.0.0.15776 (facts 82-92 in `docs/EVIDENCE.md`).
@@ -56,22 +89,6 @@ Fixed
 - `session.transaction()` called inside another runs in the open batch instead of nesting.
 
 Added
-- `Transport.seconds`: the playhead in wall-clock seconds, `transport.tick` converted through
-  the session's tempo map. Safe on any session from `luna.session()` (the tempo map loads with
-  `session.ready()`); read earlier it throws `unavailable` instead of converting at a guessed
-  tempo. `TransportLocation.min_sec` is documented (fact 96): present on `location` pushes,
-  its `seconds` fractional on the wasm engine (measured); floor it for display.
-- `Luna.formatMinSec(seconds, { fraction })`: a zero-padded `MM:SS` clock as a companion to
-  `formatBarBeat`, with optional fractional digits, flooring rather than rounding and clamping
-  negatives to zero.
-- `Luna.bindClock(el, transport, { render, bindings })`: a smooth playback clock. The engine
-  pushes `location` only several times a second, so the binding anchors on each push (the push
-  stays authoritative) and interpolates with requestAnimationFrame while `transport.playing`,
-  cancels on stop, and returns a release function. Default paint is
-  `formatMinSec(seconds, { fraction: 1 })` into `el.textContent`.
-- `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
-  re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
-  `min_sec` integrated from the session's tempo map (fact 96).
 - `Luna.waveformColumns(range, width, nsAt, { gain })` reduces a `WaveformRange` to one min/max
   per drawn column per channel the way LUNA's timeline does (fact 93): the loudest pairs each
   column covers, every column touching the zero line, columns between pairs interpolated when
