@@ -62,6 +62,20 @@ describe('Cell and Scheduler', () => {
     expect(list.byId('x')).toEqual({ id: 'x' });
     expect(list.byId('y')).toBeUndefined();
   });
+
+  it('a distinct derived notifies only when the computed value moves', () => {
+    const scheduler = new Scheduler();
+    const source = new Cell<{ tick: number; tempo: number }>(scheduler, { tick: 0, tempo: 120 });
+    const tempo = derived([source], () => source.value?.tempo, { distinct: true });
+    let calls = 0;
+    tempo.onChange(() => calls++);
+    source.update({ tick: 1, tempo: 120 }); // the source moved, the carved-out value did not
+    scheduler.flush();
+    expect(calls).toBe(0);
+    source.update({ tick: 2, tempo: 128 });
+    scheduler.flush();
+    expect([calls, tempo.value]).toEqual([1, 128]);
+  });
 });
 
 describe('Store', () => {

@@ -12,7 +12,7 @@
  */
 import type { Client } from '../client/client';
 import { UAError } from '../wire/errors';
-import type { Prop, WritableProp } from '../store/prop';
+import { derived, type Prop, type WritableProp } from '../store/prop';
 import type { Musical } from './musical';
 import { Node } from './node';
 import { requireTick, settle } from './settle';
@@ -57,6 +57,23 @@ export class Transport extends Node {
   readonly arrangementStart: WritableProp<number>;
   /** Live playhead, pushed many times per second while playing. */
   readonly location: Prop<TransportLocation>;
+  /**
+   * Tempo in effect at the playhead (BPM), carved out of the `location` pushes (fact 95: a
+   * tempo edit shows here at once). Notifies only when the number moves, so a BPM display is
+   * not re-rendered on every playhead push.
+   *
+   * @example
+   * t.tempo.onChange(() => bpm.textContent = `${t.tempo.value ?? '--'} BPM`);
+   */
+  readonly tempo: Prop<number>;
+  /**
+   * Time signature in effect at the playhead, carved out of the `location` pushes. Notifies
+   * only when it changes. Format with `Luna.formatTimeSignature`.
+   *
+   * @example
+   * t.timeSignature.onChange(() => meter.textContent = Luna.formatTimeSignature(t.timeSignature.value));
+   */
+  readonly timeSignature: Prop<{ numerator: number; denominator: number }>;
   readonly countingIn: Prop<boolean>;
   readonly punchedIn: Prop<boolean>;
   readonly maxTick: Prop<number>;
@@ -81,6 +98,8 @@ export class Transport extends Node {
     this.loopStop = this.writableProp<number>('loop_stop');
     this.arrangementStart = this.writableProp<number>('arrangement_start');
     this.location = this.prop<TransportLocation>('location');
+    this.tempo = derived([this.location], () => this.location.value?.tempo, { distinct: true });
+    this.timeSignature = derived([this.location], () => this.location.value?.time_signature, { distinct: true });
     this.countingIn = this.prop<boolean>('counting_in');
     this.punchedIn = this.prop<boolean>('punched_in');
     this.maxTick = this.prop<number>('max_tick');

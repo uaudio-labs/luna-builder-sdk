@@ -228,7 +228,7 @@
 | [connect](functions/connect.md) | - |
 | [decodeMessage](functions/decodeMessage.md) | Decode one frame. Tolerates an 8-byte `JSON` header (magic + length) and a trailing NUL, and returns `undefined` for anything unparseable so the receive loop survives a bad frame. |
 | [decodeMidiData](functions/decodeMidiData.md) | Unpack the three MIDI bytes the engine packs into one number (fact 39). |
-| [derived](functions/derived.md) | A read-only [Prop](interfaces/Prop.md) computed from other props. Recomputes lazily on read and notifies when any source notifies. |
+| [derived](functions/derived.md) | A read-only [Prop](interfaces/Prop.md) computed from other props. Recomputes lazily on read and notifies when any source notifies. With `distinct: true` it notifies only when the computed value actually moved ([shallowEquals](functions/shallowEquals.md)) — for a value carved out of a chatty source, such as the tempo on `location` pushes. |
 | [encodeMidiData](functions/encodeMidiData.md) | Pack three MIDI bytes the way the engine's table stores them (fact 39). |
 | [encodePayload](functions/encodePayload.md) | Encode a payload the way the engine parses it: JSON for everything. Strings are quoted so the engine can tell `"1234"` from `1234` (the ambiguity the deprecated String dialect suffers from). [FloatLiteral](classes/FloatLiteral.md)s are written as float literals. |
 | [encodeRequest](functions/encodeRequest.md) | Build one request line. |
@@ -237,6 +237,7 @@
 | [float](functions/float.md) | Wrap `value` so it is sent as a float literal. See [FloatLiteral](classes/FloatLiteral.md). |
 | [formatBarBeat](functions/formatBarBeat.md) | Format a `bar_beat` as `1|1|000` with the display tick zero-padded. |
 | [formatMinSec](functions/formatMinSec.md) | Format seconds as a zero-padded `MM:SS` clock, flooring rather than rounding so a counting display never shows a time the playhead has not reached. Negative values clamp to `00:00`; `undefined` (an unloaded prop) gives a placeholder, like [formatBarBeat](functions/formatBarBeat.md). |
+| [formatTimeSignature](functions/formatTimeSignature.md) | Format a time signature as `4/4`; `undefined` (an unloaded prop) gives a placeholder, like [formatBarBeat](functions/formatBarBeat.md). Pairs with `transport.timeSignature`. |
 | [getOptionsToParams](functions/getOptionsToParams.md) | Convert [GetOptions](interfaces/GetOptions.md) to wire query parameters. |
 | [hasNativeBridge](functions/hasNativeBridge.md) | True when LUNA's native webview bridge is present. |
 | [isEmbeddedInLuna](functions/isEmbeddedInLuna.md) | True when the page was opened by LUNA (a `?port=` is on the URL). |

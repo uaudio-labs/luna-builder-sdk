@@ -58,6 +58,19 @@ export function formatBarBeat(bb: BarBeat | undefined): string {
 }
 
 /**
+ * Format a time signature as `4/4`; `undefined` (an unloaded prop) gives a placeholder, like
+ * {@link formatBarBeat}. Pairs with `transport.timeSignature`.
+ *
+ * @example
+ * Luna.formatTimeSignature(t.timeSignature.value);   // "4/4"
+ * Luna.formatTimeSignature(undefined);               // "-/-"
+ */
+export function formatTimeSignature(ts: { numerator: number; denominator: number } | undefined): string {
+  if (!ts) return '-/-';
+  return `${ts.numerator}/${ts.denominator}`;
+}
+
+/**
  * Format seconds as a zero-padded `MM:SS` clock, flooring rather than rounding so a
  * counting display never shows a time the playhead has not reached. Negative values clamp
  * to `00:00`; `undefined` (an unloaded prop) gives a placeholder, like {@link formatBarBeat}.

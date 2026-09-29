@@ -25,6 +25,11 @@ Added
 - `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
   re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
   `min_sec` integrated from the session's tempo map (fact 96).
+- `transport.tempo` and `transport.timeSignature`: typed Props carved out of the `location`
+  pushes (the tempo and meter in effect at the playhead), notifying only when the value moves
+  rather than on every playhead push. `Luna.formatTimeSignature` formats the meter as `4/4`
+  (placeholder `-/-`), pairing with `formatBarBeat`; `Luna.derived` gained a
+  `{ distinct: true }` option that skips notifications when the computed value is unchanged.
 - `Luna.MockEngine` fidelity: writing one view of a control (`value`, `real_value`,
   `normalized_value`, `string_value`) re-derives the other three and pushes them to every
   client, the writer included (fact 97), so a test that sets `gain.real` can assert on

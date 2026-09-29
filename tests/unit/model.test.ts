@@ -224,6 +224,38 @@ describe('Luna.Transport', () => {
     expect(Luna.formatBarBeat(t.location.value?.bar_beat)).toBe('2|2|120');
     expect(t.tick).toBe(Luna.TICKS_PER_BEAT * 5 + Luna.TICKS_PER_DISPLAY_TICK * 120);
   });
+
+  it('carves tempo and time signature out of location, notifying only when they move', async () => {
+    const { engine, luna } = await connected();
+    const t = (await luna.session()).transport;
+    expect(t.tempo.value).toBe(120);
+    expect(Luna.formatTimeSignature(t.timeSignature.value)).toBe('4/4');
+    expect(Luna.formatTimeSignature(undefined)).toBe('-/-');
+
+    let tempoCalls = 0;
+    let meterCalls = 0;
+    t.tempo.onChange(() => tempoCalls++);
+    t.timeSignature.onChange(() => meterCalls++);
+
+    // A playhead push with the same tempo and meter is quiet on both.
+    const at = (tick: number, tempo: number, n: number, d: number) =>
+      engine.setValue('/sessions/abc', 'location', { tick, bar_beat: { bar: 1, beat: 1, tick: 0 }, tempo, time_signature: { numerator: n, denominator: d } });
+    at(Luna.TICKS_PER_BEAT, 120, 4, 4);
+    await engine.settled();
+    await luna.settled();
+    expect([tempoCalls, meterCalls]).toEqual([0, 0]);
+
+    at(Luna.TICKS_PER_BEAT * 2, 128, 4, 4);
+    await engine.settled();
+    await luna.settled();
+    expect([tempoCalls, meterCalls, t.tempo.value]).toEqual([1, 0, 128]);
+
+    at(Luna.TICKS_PER_BEAT * 3, 128, 3, 4);
+    await engine.settled();
+    await luna.settled();
+    expect([tempoCalls, meterCalls]).toEqual([1, 1]);
+    expect(Luna.formatTimeSignature(t.timeSignature.value)).toBe('3/4');
+  });
 });
 
 describe('Luna.Track and Luna.Control', () => {

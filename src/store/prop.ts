@@ -154,15 +154,24 @@ export function shallowEquals(a: unknown, b: unknown): boolean {
 
 /**
  * A read-only {@link Prop} computed from other props. Recomputes lazily on read and notifies
- * when any source notifies.
+ * when any source notifies. With `distinct: true` it notifies only when the computed value
+ * actually moved ({@link shallowEquals}) — for a value carved out of a chatty source, such as
+ * the tempo on `location` pushes.
  *
  * @example
  * const isStopped = Luna.derived([transport.playing], () => transport.playing.value === false);
+ * const tempo = Luna.derived([t.location], () => t.location.value?.tempo, { distinct: true });
  */
-export function derived<T>(sources: readonly Prop<unknown>[], compute: () => T): Prop<T> {
+export function derived<T>(sources: readonly Prop<unknown>[], compute: () => T | undefined, options: { distinct?: boolean } = {}): Prop<T> {
   const listeners = new Set<() => void>();
   let subscriptions: Unsubscribe[] = [];
+  let last: T | undefined;
   const fanOut = () => {
+    if (options.distinct) {
+      const next = compute();
+      if (shallowEquals(last, next)) return;
+      last = next;
+    }
     for (const l of [...listeners]) l();
   };
   return {
@@ -170,7 +179,10 @@ export function derived<T>(sources: readonly Prop<unknown>[], compute: () => T):
       return compute();
     },
     onChange(listener) {
-      if (listeners.size === 0) subscriptions = sources.map((s) => s.onChange(fanOut));
+      if (listeners.size === 0) {
+        if (options.distinct) last = compute();
+        subscriptions = sources.map((s) => s.onChange(fanOut));
+      }
       listeners.add(listener);
       return () => {
         listeners.delete(listener);

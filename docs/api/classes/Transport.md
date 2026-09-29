@@ -25,7 +25,9 @@
 | <a id="punchedin"></a> `punchedIn` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="recordenabled"></a> `recordEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="recplaymode"></a> `recPlayMode` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="tempo"></a> `tempo` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | Tempo in effect at the playhead (BPM), carved out of the `location` pushes (fact 95: a tempo edit shows here at once). Notifies only when the number moves, so a BPM display is not re-rendered on every playhead push. **Example** `t.tempo.onChange(() => bpm.textContent = `${t.tempo.value ?? '--'} BPM`);` | - |
 | <a id="tempopercent"></a> `tempoPercent` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
+| <a id="timesignature"></a> `timeSignature` | `readonly` | [`Prop`](../interfaces/Prop.md)\<\{ `denominator`: `number`; `numerator`: `number`; \}\> | Time signature in effect at the playhead, carved out of the `location` pushes. Notifies only when it changes. Format with `Luna.formatTimeSignature`. **Example** `t.timeSignature.onChange(() => meter.textContent = Luna.formatTimeSignature(t.timeSignature.value));` | - |
 
 ## Accessors
 

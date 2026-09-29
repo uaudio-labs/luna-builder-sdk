@@ -81,7 +81,9 @@ await t.seek({ bar: 1 });               // downbeat of bar 1; also { bar, beat, 
 await t.returnToZero();                 // LUNA's Return To Zero: the arrangement start
 await t.setLoop(0, Luna.WHOLE_NOTE * 8); await t.looping.set(true);
 t.tick; t.seconds;                      // playhead: ticks, and wall-clock seconds via the tempo map
+t.tempo.value; t.timeSignature.value;   // at the playhead, from location pushes; notify only on change
 Luna.formatMinSec(t.seconds, { fraction: 1 });    // "01:30.5": zero-padded, floored, negatives clamp to 0
+Luna.formatTimeSignature(t.timeSignature.value);  // "4/4"; "-/-" until loaded
 const release = Luna.bindClock(clockEl, t);       // smooth MM:SS.s clock while playing
 ```
 
