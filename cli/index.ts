@@ -5,7 +5,7 @@
  *   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
  *   ua-builder test [dir] [--live]
  *   ua-builder install [dir] [--name "Link Name"]
- *   ua-builder pack [dir] [--out file.zip]
+ *   ua-builder pack [dir] [--out Name.lunaaddon]
  *   ua-builder doctor
  *   ua-builder tree [path] [--levels N] [--out file.json]
  */

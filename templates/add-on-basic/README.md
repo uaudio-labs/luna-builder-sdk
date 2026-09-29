@@ -16,7 +16,7 @@ npm install
 npm test                  # against the mock engine
 npx ua-builder serve      # http://localhost:8790/ ; LUNA must be running to see live data
 npx ua-builder install    # link into LUNA's Add Ons folder; appears in the Window menu
-npx ua-builder pack       # zip for distribution
+npx ua-builder pack       # .lunaaddon bundle for distribution
 ```
 
 `main.js` calls `Luna.bindShortcuts(luna)`, so LUNA's own undo, redo, play and record keys

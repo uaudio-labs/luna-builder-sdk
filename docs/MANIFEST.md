@@ -82,7 +82,7 @@ compatibility.
 
 | Field | Notes |
 |---|---|
-| `package_name` | Name of the Add Ons folder entry: the symlink `ua-builder install` creates, or the folder LUNA installs a `.lunaaddon` file into. Must be a bare name. Falls back to the folder name. Does not affect menu names, which come from `title`. |
+| `package_name` | Name of the Add Ons folder entry: the symlink `ua-builder install` creates, or the `<name>.lunaaddon` folder LUNA installs a `.lunaaddon` bundle into. Must be a bare name. Falls back to the folder name. Does not affect menu names, which come from `title`. |
 
 ## How LUNA loads the page
 
