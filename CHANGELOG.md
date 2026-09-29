@@ -3,7 +3,7 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
-## Unreleased
+## 0.1.0-alpha.1
 
 Measured against LUNA 3.0.0.15776 (facts 82-92 in `docs/EVIDENCE.md`).
 
@@ -26,6 +26,9 @@ Changed (breaking)
 Changed
 - Licensed under the Apache License, Version 2.0 (was proprietary and unlicensed). The package
   and the plugin each carry `LICENSE` and a `NOTICE`; every manifest's `license` is `Apache-2.0`.
+- The repo ships the SDK source instead of a packed artifact: `dist/` and the generated agent
+  plugin are built by `npm ci` (a new `prepare` script) with Node.js 22 or newer. Distributed
+  SDK packages still arrive built.
 
 Fixed
 - Sends: `Output.unassign()` and `retarget()` delete by the assignment uid; they sent the bus
