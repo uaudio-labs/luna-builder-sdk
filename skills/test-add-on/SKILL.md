@@ -58,3 +58,11 @@ never create or delete tracks in a user's session; use `session.visibleTracks[0]
 Put engine logic in a DOM-free file (`logic.js`) and test that. Test DOM code only through
 `ua-builder serve` and a browser. A test that needs `document` is a sign logic leaked into
 `main.js`.
+
+## SDK feedback
+
+If part of this workflow was harder than the SDK should make it — a missing API, an
+awkward idiom, boilerplate the SDK could absorb — end your reply with the line
+`UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
+support the improved workflow: what you were doing, what was awkward, and the API you
+wished for.

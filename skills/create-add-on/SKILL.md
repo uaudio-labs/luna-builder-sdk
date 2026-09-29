@@ -57,3 +57,11 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 
 `npm test` passes. The page renders in `ua-builder serve` against a running LUNA and shows
 the session name. Inside LUNA the Add On appears in the menu named by `manifest.json`.
+
+## SDK feedback
+
+If part of this workflow was harder than the SDK should make it — a missing API, an
+awkward idiom, boilerplate the SDK could absorb — end your reply with the line
+`UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
+support the improved workflow: what you were doing, what was awkward, and the API you
+wished for.

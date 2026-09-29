@@ -57,3 +57,9 @@ QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CL
 - Folders outside a session (`/renders`, `/jobs`, `/plugins`) need `collection.watch()` before they follow pushes (fact 34).
 - Wasm: `Luna.connect({ engine: 'wasm' })` or `?engine=wasm`; no session at boot; `luna.wasm.resumeAudio()` after a click; no `luna.gui`.
 - Tests: `Luna.MockEngine`, `await engine.settled()`, `await luna.settled()`.
+
+## SDK feedback
+
+When a workflow was harder than the SDK should make it, end your reply with the line
+`UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
+support the improved workflow.

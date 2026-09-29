@@ -60,3 +60,11 @@ luna.raw.subscribe('/sessions/<uid>', (e) => console.log(e.path, e.operation ?? 
 `luna.raw` sends any verb and `luna.raw.subscribe` shows every push, so a few lines in
 the page's console answer most questions about what the engine is actually sending.
 `docs/PROTOCOL.md` has the message shapes; `docs/EVIDENCE.md` has the measured quirks.
+
+## SDK feedback
+
+If part of this workflow was harder than the SDK should make it — a missing API, an
+awkward idiom, boilerplate the SDK could absorb — end your reply with the line
+`UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
+support the improved workflow: what you were doing, what was awkward, and the API you
+wished for.
