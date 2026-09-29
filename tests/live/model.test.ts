@@ -40,6 +40,13 @@ describe.skipIf(!live)('live: model', () => {
     expect(typeof t.playing.value).toBe('boolean');
     expect(typeof t.location.value?.tick).toBe('number');
     expect(Luna.formatBarBeat(t.location.value?.bar_beat)).toMatch(/^\d+\|\d+\|\d{3}$/);
+    // Fact 96: location carries min_sec. The wasm engine sends fractional seconds; log the
+    // raw value so a run records what native LUNA sends (the fact's open check).
+    const minSec = t.location.value?.min_sec;
+    expect(minSec).toMatchObject({ minutes: expect.any(Number), seconds: expect.any(Number) });
+    console.info('[live] location.min_sec =', JSON.stringify(minSec));
+    expect(typeof t.seconds).toBe('number');
+    expect(t.seconds).toBeGreaterThanOrEqual(0);
   });
 
   it('reads main output controls and the meter path of the first track', async () => {

@@ -420,7 +420,8 @@ locationAt(sessionPath, tick): Record<string, unknown>;
 ```
 
 The session `location` LUNA reports for `tick`: bar|beat from the session's time
-signatures, whose `bar` numbers need not put bar 1 at tick 0 (fact 91).
+signatures, whose `bar` numbers need not put bar 1 at tick 0 (fact 91), and `min_sec`
+from the tempo map (fact 96).
 
 #### Parameters
 

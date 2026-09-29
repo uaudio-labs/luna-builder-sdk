@@ -65,3 +65,26 @@ describe('Luna.Timeline.tickAt', () => {
     expect(t.tickAt({ bar: 4 })).toBe(t.tickAt({ bar: 4, beat: 1, tick: 0 }));
   });
 });
+
+describe('Luna.formatMinSec', () => {
+  it('formats zero-padded MM:SS, flooring rather than rounding', () => {
+    expect(Luna.formatMinSec(0)).toBe('00:00');
+    expect(Luna.formatMinSec(5.999)).toBe('00:05');
+    expect(Luna.formatMinSec(90.56)).toBe('01:30');
+    expect(Luna.formatMinSec(3600)).toBe('60:00'); // minutes are not capped
+  });
+
+  it('adds fractional digits, floored at that precision', () => {
+    expect(Luna.formatMinSec(90.5, { fraction: 1 })).toBe('01:30.5');
+    expect(Luna.formatMinSec(90.56, { fraction: 2 })).toBe('01:30.56');
+    expect(Luna.formatMinSec(90.999, { fraction: 2 })).toBe('01:30.99');
+    expect(Luna.formatMinSec(61, { fraction: 2 })).toBe('01:01.00');
+  });
+
+  it('clamps negatives to zero and shows a placeholder for undefined', () => {
+    expect(Luna.formatMinSec(-3)).toBe('00:00');
+    expect(Luna.formatMinSec(-0.2, { fraction: 1 })).toBe('00:00.0');
+    expect(Luna.formatMinSec(undefined)).toBe('--:--');
+    expect(Luna.formatMinSec(Number.NaN, { fraction: 2 })).toBe('--:--.--');
+  });
+});

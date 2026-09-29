@@ -56,3 +56,24 @@ export function formatBarBeat(bb: BarBeat | undefined): string {
   if (!bb) return '-|-|---';
   return `${bb.bar}|${bb.beat}|${String(Math.floor(bb.tick / TICKS_PER_DISPLAY_TICK)).padStart(3, '0')}`;
 }
+
+/**
+ * Format seconds as a zero-padded `MM:SS` clock, flooring rather than rounding so a
+ * counting display never shows a time the playhead has not reached. Negative values clamp
+ * to `00:00`; `undefined` (an unloaded prop) gives a placeholder, like {@link formatBarBeat}.
+ *
+ * @example
+ * Luna.formatMinSec(90.56);                    // "01:30"
+ * Luna.formatMinSec(90.56, { fraction: 2 });   // "01:30.56"
+ * Luna.formatMinSec(t.seconds, { fraction: 1 });
+ */
+export function formatMinSec(seconds: number | undefined, options: { fraction?: number } = {}): string {
+  const fraction = options.fraction ?? 0;
+  if (seconds === undefined || !Number.isFinite(seconds)) return `--:--${fraction > 0 ? '.' + '-'.repeat(fraction) : ''}`;
+  const total = Math.max(0, seconds);
+  const whole = Math.floor(total);
+  const clock = `${String(Math.floor(whole / 60)).padStart(2, '0')}:${String(whole % 60).padStart(2, '0')}`;
+  if (fraction <= 0) return clock;
+  const frac = Math.floor((total - whole) * 10 ** fraction);
+  return `${clock}.${String(frac).padStart(fraction, '0')}`;
+}

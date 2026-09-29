@@ -80,7 +80,9 @@ await t.play(); await t.stop(); await t.toggle(); await t.record(); await t.togg
 await t.seek({ bar: 1 });               // downbeat of bar 1; also { bar, beat, tick } or a raw tick
 await t.returnToZero();                 // LUNA's Return To Zero: the arrangement start
 await t.setLoop(0, Luna.WHOLE_NOTE * 8); await t.looping.set(true);
-t.tick;                                 // playhead in ticks
+t.tick; t.seconds;                      // playhead: ticks, and wall-clock seconds via the tempo map
+Luna.formatMinSec(t.seconds, { fraction: 1 });    // "01:30.5": zero-padded, floored, negatives clamp to 0
+const release = Luna.bindClock(clockEl, t);       // smooth MM:SS.s clock while playing
 ```
 
 Tick 0 is not always bar 1: a session with bars before bar 1 starts earlier, so seek to
@@ -88,6 +90,11 @@ Tick 0 is not always bar 1: a session with bars before bar 1 starts earlier, so 
 start, which is tick 0 until one is set. A seek sets the play start and both loop marks, as
 LUNA's own locate does, and resolves once the playhead is there; while playing it jumps at
 once, or pass `{ sync: 'next_bar' }` or `{ sync: 'loop_end' }`.
+
+`location` is pushed only several times a second and carries `min_sec` (minutes, plus seconds
+in the minute — fractional on the wasm engine, fact 96). For a sub-second display use
+`Luna.bindClock(el, t, { render })`: it anchors on each push (the engine stays authoritative),
+interpolates with requestAnimationFrame while playing, and returns a release function.
 
 Ticks: `Luna.TICKS_PER_BEAT` (96e9), `Luna.WHOLE_NOTE`, `Luna.QUARTER_NOTE`, ...
 `session.musical.timeline.barBeat(tick)` and `.seconds(tick)` honour tempo and meter changes.

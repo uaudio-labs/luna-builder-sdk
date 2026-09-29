@@ -81,6 +81,7 @@
 | [ClipAudio](interfaces/ClipAudio.md) | - |
 | [ClipLike](interfaces/ClipLike.md) | The clip fields placement needs. A [Clip](classes/Clip.md) satisfies it, as does a plain snapshot. |
 | [ClipSnapshot](interfaces/ClipSnapshot.md) | A clip's state at one moment, as plain data: what a view draws from. |
+| [ClockOptions](interfaces/ClockOptions.md) | - |
 | [ConnectOptions](interfaces/ConnectOptions.md) | - |
 | [ControlBinding](interfaces/ControlBinding.md) | What [bindRange](functions/bindRange.md) and [bindDrag](functions/bindDrag.md) return. |
 | [CreateSessionOptions](interfaces/CreateSessionOptions.md) | - |
@@ -216,6 +217,7 @@
 | [audioNsAtTick](functions/audioNsAtTick.md) | The file offset (ns) that plays at a timeline tick inside a clip: the clip's audio start plus the tempo-map seconds between the clip start and the tick. Linear in seconds, not in ticks, so a tempo change inside the clip bends the mapping exactly as the engine does. |
 | [automationModeOrdinal](functions/automationModeOrdinal.md) | Commands take the mode as an integer ordinal; the track property reports it as a string. |
 | [beatsToTicks](functions/beatsToTicks.md) | Beats to ticks. |
+| [bindClock](functions/bindClock.md) | Bind `el` to the transport's playhead clock. Reads [Transport.seconds](classes/Transport.md#seconds), so the session's tempo map must be loaded (`session.ready()` does that). Returns a release function that cancels the frame loop and the listeners. |
 | [bindDrag](functions/bindDrag.md) | Bind a div or canvas knob (or fader, or one axis of an XY pad) to one control, or to several that move together. Dragging captures the pointer and moves the value by pointer travel; arrow, Page and Home/End keys nudge it; double-click resets it. The element becomes a focusable `role="slider"` whose `aria-valuenow` and `aria-valuetext` follow the control. Writes go to the controls' `normalized` view, and the first control's value is the one shown. |
 | [bindGesture](functions/bindGesture.md) | Bracket every drag on `target` with `begin()`/`end()` on `controls` (one control, or all the controls one element drives). |
 | [bindRange](functions/bindRange.md) | Bind a native `<input type="range">` to `control`: touch on press, write on `input`, follow LUNA outside a drag, settle on LUNA's value on release, double-click to reset. Keyboard changes the browser makes are one-shot writes, which the control brackets itself. |
@@ -234,6 +236,7 @@
 | [expandMulti](functions/expandMulti.md) | Expand a message into the individual updates it carries. A non-multi message expands to itself. Entries that cannot be decoded are dropped. |
 | [float](functions/float.md) | Wrap `value` so it is sent as a float literal. See [FloatLiteral](classes/FloatLiteral.md). |
 | [formatBarBeat](functions/formatBarBeat.md) | Format a `bar_beat` as `1|1|000` with the display tick zero-padded. |
+| [formatMinSec](functions/formatMinSec.md) | Format seconds as a zero-padded `MM:SS` clock, flooring rather than rounding so a counting display never shows a time the playhead has not reached. Negative values clamp to `00:00`; `undefined` (an unloaded prop) gives a placeholder, like [formatBarBeat](functions/formatBarBeat.md). |
 | [getOptionsToParams](functions/getOptionsToParams.md) | Convert [GetOptions](interfaces/GetOptions.md) to wire query parameters. |
 | [hasNativeBridge](functions/hasNativeBridge.md) | True when LUNA's native webview bridge is present. |
 | [isEmbeddedInLuna](functions/isEmbeddedInLuna.md) | True when the page was opened by LUNA (a `?port=` is on the URL). |

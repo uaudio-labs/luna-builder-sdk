@@ -413,3 +413,57 @@ describe('Clip snapshot, layer and mute; Meter streams and max', () => {
     stop();
   });
 });
+
+describe('Luna.Transport.seconds', () => {
+  it('converts the playhead through the tempo map, mirroring tick', async () => {
+    const { engine, luna, session } = await connected();
+    const t = session.transport;
+    expect(t.seconds).toBe(0);
+    await t.seek(Luna.WHOLE_NOTE); // stopped: the play start, 4 beats at the default 120 BPM
+    expect(t.seconds).toBe(2);
+    // playing: the live location, as for `tick`
+    engine.setValue('/sessions/abc', 'playing', true);
+    engine.setValue('/sessions/abc', 'location', engine.locationAt('/sessions/abc', Luna.TICKS_PER_BEAT * 8));
+    await engine.settled();
+    await luna.store.scheduler.settled();
+    expect(t.seconds).toBe(4);
+  });
+
+  it('honours tempo changes: 90.5 beats at 60 BPM is 90.5 s', async () => {
+    const engine = new Luna.MockEngine();
+    engine.addSession('abc', { tracks: ['Vocal'] });
+    engine.setValue('/sessions/abc/tempo_map/1', 'tempo', 60);
+    await engine.settled();
+    const luna = await Luna.connect({ port_: engine.port() });
+    const session = await luna.session();
+    const t = session.transport;
+    await t.seek(Luna.TICKS_PER_BEAT * 90.5);
+    expect(t.seconds).toBe(90.5);
+    expect(Luna.formatMinSec(t.seconds, { fraction: 2 })).toBe('01:30.50');
+  });
+
+  it('integrates a multi-event tempo map', async () => {
+    const engine = new Luna.MockEngine();
+    engine.addSession('abc', { tracks: ['Vocal'] });
+    engine.setValue('/sessions/abc/tempo_map/1', 'tempo', 60);
+    engine.addNode('/sessions/abc/tempo_map/2', { properties: { tick: Luna.TICKS_PER_BEAT * 60, time: 60, tempo: 120 } });
+    await engine.settled();
+    const luna = await Luna.connect({ port_: engine.port() });
+    const session = await luna.session();
+    const t = session.transport;
+    await t.seek(Luna.TICKS_PER_BEAT * 90.5); // 60 beats at 60 BPM, then 30.5 at 120
+    expect(t.seconds).toBe(60 + 15.25);
+  });
+
+  it('throws unavailable before the tempo map is loaded, rather than guessing a tempo', async () => {
+    const engine = new Luna.MockEngine();
+    engine.addSession('abc', { tracks: ['Vocal'] });
+    await engine.settled();
+    const luna = await Luna.connect({ port_: engine.port() });
+    await luna.sessions.ready();
+    const session = luna.sessions.items.items[0]!;
+    expect(() => session.transport.seconds).toThrowError(/tempo map is not loaded/);
+    await session.ready();
+    expect(session.transport.seconds).toBe(0);
+  });
+});

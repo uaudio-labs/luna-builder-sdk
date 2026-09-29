@@ -19,6 +19,13 @@ import { requireTick, settle } from './settle';
 import type { Location } from './ticks';
 
 export interface TransportLocation extends Location {
+  /**
+   * The playhead as LUNA's own MIN:SEC counter shows it: whole `minutes`, and `seconds`
+   * within the minute (fact 96). Present on the engine's `location` pushes. On the wasm
+   * engine `seconds` is fractional (a push read `0.52625`); native LUNA's precision is not
+   * yet re-measured, so floor it for display (`Luna.formatMinSec` does). For wall-clock
+   * seconds derived from the tick, use {@link Transport.seconds}.
+   */
   min_sec?: { minutes: number; seconds: number };
   tempo?: number;
   time_signature?: { numerator: number; denominator: number };
@@ -87,6 +94,27 @@ export class Transport extends Node {
   /** Current playhead in ticks: the live location while playing, else the play start. */
   get tick(): number {
     return this.location.value?.tick ?? this.playStart.value ?? 0;
+  }
+
+  /**
+   * Current playhead in wall-clock seconds: {@link tick} converted through the session's
+   * tempo map (`session.musical.timeline.seconds`), so tempo changes are honoured. Like
+   * {@link tick}, it is the live location while playing and the play start when stopped.
+   *
+   * The tempo map loads with the session (`session.ready()`, which `luna.session()` awaits),
+   * so it is safe to read on any session obtained normally. Read before that, it throws
+   * `unavailable` rather than converting at a guessed tempo.
+   *
+   * @example
+   * el.textContent = Luna.formatMinSec(t.seconds, { fraction: 1 });
+   */
+  get seconds(): number {
+    if (!this.musical) throw new UAError('unavailable', 'transport.seconds: this transport has no timeline', { path: this.path });
+    const musical = this.musical();
+    if (musical.tempoMap.items.length === 0) {
+      throw new UAError('unavailable', 'transport.seconds: the tempo map is not loaded; await session.ready() (or session.musical.ready()) first', { path: this.path });
+    }
+    return musical.timeline.seconds(this.tick);
   }
 
   play(): Promise<void> {

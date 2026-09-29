@@ -85,12 +85,15 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
     await t.play();
     await sleep(700);
     const playing = t.playing.value;
+    const sample = t.location.value;
     await t.stop();
     await sleep(300);
     stop();
     assert(playing === true, 'playing ' + playing);
     assert(moved > 0, 'location moved ' + moved);
-    return `${moved} location pushes`;
+    assert(typeof t.seconds === 'number' && t.seconds >= 0, 'seconds ' + t.seconds);
+    // Fact 96: report what min_sec this engine pushes, so a run records its precision.
+    return `${moved} location pushes, seconds ${t.seconds.toFixed(3)}, min_sec ${JSON.stringify(sample?.min_sec) ?? 'absent'}`;
   });
   await step('marker and undo', async () => {
     session.markers.onChange(() => {});

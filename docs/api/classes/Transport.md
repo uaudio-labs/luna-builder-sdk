@@ -70,6 +70,34 @@ Last path segment: the uid or name the engine addresses this node by.
 
 ***
 
+### seconds
+
+#### Get Signature
+
+```ts
+get seconds(): number;
+```
+
+Current playhead in wall-clock seconds: [tick](#tick) converted through the session's
+tempo map (`session.musical.timeline.seconds`), so tempo changes are honoured. Like
+[tick](#tick), it is the live location while playing and the play start when stopped.
+
+The tempo map loads with the session (`session.ready()`, which `luna.session()` awaits),
+so it is safe to read on any session obtained normally. Read before that, it throws
+`unavailable` rather than converting at a guessed tempo.
+
+##### Example
+
+```ts
+el.textContent = Luna.formatMinSec(t.seconds, { fraction: 1 });
+```
+
+##### Returns
+
+`number`
+
+***
+
 ### tick
 
 #### Get Signature

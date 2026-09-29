@@ -117,6 +117,39 @@ describe('MockEngine / MockPort', () => {
     await expect(port.get('/sessions/abc/playing', { flatvalue: true })).resolves.toBe(false);
   });
 
+  it('re-reports location for an engine-side play_start set the way a client set does (fact 90)', async () => {
+    const engine = new MockEngine();
+    engine.addSession('abc');
+    const port = engine.port();
+    const seen: Event[] = [];
+    port.subscribe('/sessions/abc', (e) => seen.push(e), { recursive: true });
+
+    engine.setValue('/sessions/abc', 'play_start', 96e9 * 6); // beat 7: bar 2, beat 3
+    await engine.settled();
+    expect(engine.value('/sessions/abc', 'location')).toMatchObject({ tick: 96e9 * 6, bar_beat: { bar: 2, beat: 3, tick: 0 } });
+    expect(seen.some((e) => e.path === '/sessions/abc/location' && (e.data as { tick: number }).tick === 96e9 * 6)).toBe(true);
+
+    // Playing, the write only records the new start: the playhead carries on (fact 90).
+    engine.setValue('/sessions/abc', 'playing', true);
+    engine.setValue('/sessions/abc', 'play_start', 0);
+    await engine.settled();
+    expect(engine.value('/sessions/abc', 'location')).toMatchObject({ tick: 96e9 * 6 });
+  });
+
+  it('reports min_sec in location, integrating the tempo map (fact 96)', async () => {
+    const engine = new MockEngine();
+    engine.addSession('abc');
+    engine.setValue('/sessions/abc/tempo_map/1', 'tempo', 60);
+    // 90.5 beats at 60 BPM is 90.5 s
+    expect(engine.locationAt('/sessions/abc', 96e9 * 90.5)['min_sec']).toEqual({ minutes: 1, seconds: 30.5 });
+    // a second tempo event: 60 beats at 60 BPM, then 30.5 beats at 120 BPM = 60 + 15.25 s
+    engine.addNode('/sessions/abc/tempo_map/2', { properties: { tick: 96e9 * 60, time: 60, tempo: 120 } });
+    expect(engine.locationAt('/sessions/abc', 96e9 * 90.5)['min_sec']).toEqual({ minutes: 1, seconds: 15.25 });
+    // the play_start follow pushes it too
+    engine.setValue('/sessions/abc', 'play_start', 96e9 * 30);
+    expect(engine.value('/sessions/abc', 'location')).toMatchObject({ min_sec: { minutes: 0, seconds: 30 } });
+  });
+
   it('records every request and refuses after close or while disconnected', async () => {
     const engine = new MockEngine();
     const port = engine.port();

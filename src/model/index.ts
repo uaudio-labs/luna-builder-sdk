@@ -7,6 +7,8 @@ export { bindGesture } from './gesture';
 export type { Gesture, GestureOptions } from './gesture';
 export { bindRange, bindDrag } from './bind';
 export type { ControlBinding, RangeOptions, DragOptions } from './bind';
+export { bindClock } from './clock';
+export type { ClockOptions } from './clock';
 export { Bindings } from './bindings';
 export type { Releasable } from './bindings';
 export { Shortcuts, bindShortcuts, DEFAULT_SHORTCUTS } from './shortcuts';

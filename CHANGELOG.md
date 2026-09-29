@@ -56,6 +56,22 @@ Fixed
 - `session.transaction()` called inside another runs in the open batch instead of nesting.
 
 Added
+- `Transport.seconds`: the playhead in wall-clock seconds, `transport.tick` converted through
+  the session's tempo map. Safe on any session from `luna.session()` (the tempo map loads with
+  `session.ready()`); read earlier it throws `unavailable` instead of converting at a guessed
+  tempo. `TransportLocation.min_sec` is documented (fact 96): present on `location` pushes,
+  its `seconds` fractional on the wasm engine (measured); floor it for display.
+- `Luna.formatMinSec(seconds, { fraction })`: a zero-padded `MM:SS` clock as a companion to
+  `formatBarBeat`, with optional fractional digits, flooring rather than rounding and clamping
+  negatives to zero.
+- `Luna.bindClock(el, transport, { render, bindings })`: a smooth playback clock. The engine
+  pushes `location` only several times a second, so the binding anchors on each push (the push
+  stays authoritative) and interpolates with requestAnimationFrame while `transport.playing`,
+  cancels on stop, and returns a release function. Default paint is
+  `formatMinSec(seconds, { fraction: 1 })` into `el.textContent`.
+- `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
+  re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
+  `min_sec` integrated from the session's tempo map (fact 96).
 - `Luna.waveformColumns(range, width, nsAt, { gain })` reduces a `WaveformRange` to one min/max
   per drawn column per channel the way LUNA's timeline does (fact 93): the loudest pairs each
   column covers, every column touching the zero line, columns between pairs interpolated when

@@ -490,15 +490,22 @@ export class MockEngine {
 
   /** Engine-side property change: updates the tree and pushes to every subscribed port. */
   setValue(nodePath: string, property: string, value: unknown): void {
-    const node = this.nodes.get(normalize(nodePath));
+    const clean = normalize(nodePath);
+    const node = this.nodes.get(clean);
     if (!node) throw new Error(`MockEngine: no node ${nodePath}`);
     node.properties.set(property, value);
-    this.push({ path: `${normalize(nodePath)}/${property}/value`, data: value }, undefined);
+    this.push({ path: `${clean}/${property}/value`, data: value }, undefined);
+    // Stopped, the location follows the play start (fact 90) — engine-side too, so a test
+    // moving the play start behaves like LUNA whichever side set it.
+    if (property === 'play_start' && /^\/sessions\/[^/]+$/.test(clean) && node.properties.get('playing') !== true) {
+      this.setValue(clean, 'location', this.locationAt(clean, Number(value)));
+    }
   }
 
   /**
    * The session `location` LUNA reports for `tick`: bar|beat from the session's time
-   * signatures, whose `bar` numbers need not put bar 1 at tick 0 (fact 91).
+   * signatures, whose `bar` numbers need not put bar 1 at tick 0 (fact 91), and `min_sec`
+   * from the tempo map (fact 96).
    */
   locationAt(sessionPath: string, tick: number): Record<string, unknown> {
     const beatTicks = 96_000_000_000; // Luna.TICKS_PER_BEAT; the wire layer does not import the model
@@ -510,14 +517,38 @@ export class MockEngine {
     const beat = (beatTicks * 4) / sig.d;
     const rel = tick - sig.tick;
     const inBar = ((rel % (beat * sig.n)) + beat * sig.n) % (beat * sig.n);
+    const seconds = this.secondsAt(sessionPath, tick);
     const previous = this.nodes.get(sessionPath)?.properties.get('location') as { tempo?: number } | undefined;
     return {
       tick,
       bar_beat: { bar: sig.bar + Math.floor(rel / (beat * sig.n)), beat: 1 + Math.floor(inBar / beat), tick: inBar % beat },
+      min_sec: { minutes: Math.floor(seconds / 60), seconds: seconds % 60 },
       tempo: previous?.tempo ?? 120,
       time_signature: { numerator: sig.n, denominator: sig.d },
       playing: this.nodes.get(sessionPath)?.properties.get('playing') === true,
     };
+  }
+
+  /** Seconds at `tick`, integrating the session's tempo map (constant tempo between events). */
+  private secondsAt(sessionPath: string, tick: number): number {
+    const beatTicks = 96_000_000_000;
+    const tempos = this.children(`${sessionPath}/tempo_map`)
+      .map((id) => this.nodes.get(`${sessionPath}/tempo_map/${id}`)!.properties)
+      .map((p) => ({ tick: Number(p.get('tick') ?? 0), tempo: Number(p.get('tempo') ?? 120) }))
+      .sort((a, b) => a.tick - b.tick);
+    if (tempos.length === 0) return (tick / beatTicks) * 0.5;
+    let seconds = 0;
+    let at = 0;
+    let tempo = tempos[0]!.tempo;
+    for (const t of tempos) {
+      if (t.tick >= tick) break;
+      if (t.tick > at) {
+        seconds += ((t.tick - at) / beatTicks) * (60 / tempo);
+        at = t.tick;
+      }
+      tempo = t.tempo;
+    }
+    return Math.max(0, seconds + ((tick - at) / beatTicks) * (60 / tempo));
   }
 
   /**
