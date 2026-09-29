@@ -10,7 +10,7 @@
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
-| <a id="tempo"></a> `tempo` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
+| <a id="tempo"></a> `tempo` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | BPM from this event on. Writable: LUNA's own tempo field sets it directly (fact 95). | - |
 | <a id="tick"></a> `tick` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
 | <a id="time"></a> `time` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | Seconds at this event, as the engine computed it. | - |
 

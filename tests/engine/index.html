@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>UA engine lane</title></head>
+<body>
+<pre id="out">starting</pre>
+<script src="/__builder/dist/luna.global.js"></script>
+<script>
+// The engine lane: the SDK against the real wasm engine. Each step records pass/fail;
+// run.mjs reads globalThis.__results over CDP. Keep every step independent of DOM.
+const results = (globalThis.__results = []);
+const out = document.getElementById('out');
+const step = async (name, fn) => {
+  try {
+    const detail = await fn();
+    results.push({ name, ok: true, detail: detail === undefined ? '' : String(detail).slice(0, 200) });
+  } catch (e) {
+    results.push({ name, ok: false, detail: String(e && e.message ? e.message : e).slice(0, 300) });
+  }
+  out.textContent = results.map((r) => `${r.ok ? 'ok  ' : 'FAIL'} ${r.name} ${r.detail}`).join('\n');
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+(async () => {
+  let luna, session, track;
+  await step('connect wasm', async () => {
+    luna = await Luna.connect({ engine: 'wasm', engineUrl: '/__engine/', wasm: { persist: false, log: () => {} } });
+    assert(luna.engine === 'wasm', 'engine ' + luna.engine);
+    assert(luna.wasm && luna.wasm.state === 'running', 'state ' + (luna.wasm && luna.wasm.state));
+    return 'running';
+  });
+  await step('status', async () => {
+    const st = await luna.raw.get('/status', { flatvalue: true, children: false, commands: false });
+    assert(st.properties.name === 'devicedwasm', 'name ' + st.properties.name);
+    return st.properties.name;
+  });
+  await step('no session yet', async () => {
+    await luna.sessions.ready();
+    assert(luna.sessions.items.items.length === 0, 'expected no sessions');
+    let threw = false;
+    try { await luna.session(); } catch (e) { threw = e instanceof Luna.NoSessionOpen; }
+    assert(threw, 'session() should throw NoSessionOpen');
+  });
+  await step('create session', async () => {
+    session = await luna.sessions.create({ name: 'engine lane' });
+    assert(session.loaded.value === true, 'loaded ' + session.loaded.value);
+    assert(session.name.value === 'engine lane', 'name ' + session.name.value);
+    assert(luna.sessions.current() === session, 'current() is the created session');
+    assert(luna.sessions.items.byId(session.uid) === session, 'collection owns the instance');
+    return session.uid;
+  });
+  await step('session structure', async () => {
+    assert(session.master && session.master.isMaster, 'master bus');
+    assert(session.tracks.items.length >= 2, 'system tracks: ' + session.tracks.items.length);
+    assert(session.visibleTracks.length === 0, 'visible ' + session.visibleTracks.length);
+    assert(session.musical.tempoAt(0) === 120, 'tempo ' + session.musical.tempoAt(0));
+    assert(session.context.contextType.value === 'main', 'context');
+    return `${session.tracks.items.length} tracks, ${session.buses.items.length} buses, ${session.playlists.items.length} playlists`;
+  });
+  await step('new track via push', async () => {
+    const reply = await session.newTrack({ name: 'Lane Vocal' });
+    await sleep(600);
+    track = session.visibleTracks[0];
+    assert(track, 'track appeared; reply ' + JSON.stringify(reply));
+    assert(track.id === reply.uid, 'uid ' + track.id + ' vs ' + reply.uid);
+    assert(track.name.value === 'Lane Vocal', 'name ' + track.name.value);
+    return track.id;
+  });
+  await step('controls and touch', async () => {
+    await track.loadStrip();
+    assert(track.gain.controlType.value === 'gain', 'gain type ' + track.gain.controlType.value);
+    assert(track.mute.isSwitch, 'mute switch');
+    const before = track.mute.on;
+    await track.mute.toggle();
+    await sleep(300);
+    assert(track.mute.on === !before, 'mute toggled');
+    await track.gain.real.set(-6);
+    await sleep(300);
+    assert(track.gain.display.value === '-6.0', 'gain display ' + track.gain.display.value);
+    return track.gain.display.value;
+  });
+  await step('transport', async () => {
+    const t = session.transport;
+    let moved = 0;
+    const stop = t.location.onChange(() => moved++);
+    await t.play();
+    await sleep(700);
+    const playing = t.playing.value;
+    await t.stop();
+    await sleep(300);
+    stop();
+    assert(playing === true, 'playing ' + playing);
+    assert(moved > 0, 'location moved ' + moved);
+    return `${moved} location pushes`;
+  });
+  await step('marker and undo', async () => {
+    session.markers.onChange(() => {});
+    await session.addMarker(Luna.WHOLE_NOTE * 2, 'lane marker');
+    await sleep(300);
+    const m = session.markers.items.find((x) => x.name.value === 'lane marker');
+    assert(m, 'marker present: ' + session.markers.items.map((x) => x.name.value).join(','));
+    assert(m.location.value === Luna.WHOLE_NOTE * 2, 'location ' + m.location.value);
+    await session.undo();
+    await sleep(300);
+    return session.markers.items.length + ' markers after undo';
+  });
+  await step('effects and plugins', async () => {
+    await luna.plugins.load();
+    await track.effects.load();
+    assert(track.effectSlots.length >= 4, 'slots ' + track.effectSlots.length);
+    return `${luna.plugins.items.length} plugins, slots ${track.effectSlots.map((e) => e.id).join(',')}`;
+  });
+  await step('delete track', async () => {
+    await track.delete();
+    await sleep(600);
+    assert(session.visibleTracks.length === 0, 'visible after delete ' + session.visibleTracks.length);
+  });
+  await step('audio health', async () => {
+    const a = luna.wasm.audio();
+    return JSON.stringify(a);
+  });
+  await step('missing path is an error on wasm (fact 10)', async () => {
+    let code = '';
+    try { await luna.raw.get('/definitely/missing'); } catch (e) { code = e.code; }
+    assert(code === 'uasrv.invalid_object', 'code ' + code);
+    const empty = await luna.raw.get(session.path + '/markers', { properties: false, commands: false });
+    return 'missing -> ' + code + ', empty node -> ' + JSON.stringify(empty);
+  });
+  globalThis.__done = true;
+})().catch((e) => { results.push({ name: 'fatal', ok: false, detail: String(e) }); globalThis.__done = true; });
+</script>
+</body></html>

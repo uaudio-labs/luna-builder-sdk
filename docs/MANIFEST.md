@@ -21,7 +21,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 
 ```json
 {
-    "link_name": "My Add On",
+    "package_name": "My Add On",
     "id": "com.example.my_add_on",
     "title": "My Add On",
     "version": "0.1.0",
@@ -37,7 +37,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 
 ```json
 {
-    "link_name": "My Add Ons",
+    "package_name": "My Add Ons",
     "add_ons": [
         { "id": "com.example.a", "title": "A", "html": "a/index.html", "local_content_offset": "..", "width": 800, "height": 500 },
         { "id": "com.example.b", "title": "B", "html": "b/index.html", "local_content_offset": "..", "width": 800, "height": 500 }
@@ -82,7 +82,7 @@ compatibility.
 
 | Field | Notes |
 |---|---|
-| `link_name` | Name of the symlink `ua-builder install` creates. Must be a bare name. Falls back to the folder name. Ignored by LUNA. |
+| `package_name` | Name of the Add Ons folder entry: the symlink `ua-builder install` creates, or the folder LUNA installs a `.lunaaddon` file into. Must be a bare name. Falls back to the folder name. Does not affect menu names, which come from `title`. |
 
 ## How LUNA loads the page
 

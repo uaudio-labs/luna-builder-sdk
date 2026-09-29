@@ -1,5 +1,5 @@
 {
-    "link_name": "Builder SDK Examples",
+    "package_name": "Builder SDK Examples",
     "sdk_version": "0.1.0-alpha.0",
     "min_luna_version": "1.9.0",
     "add_ons": [

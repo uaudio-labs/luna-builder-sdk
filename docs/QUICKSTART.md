@@ -175,9 +175,11 @@ const cache = new Luna.Waveforms();
 const kind = Luna.kindForScale(nsPerPixel);               // 'coarse' past 31.25 ms per pixel
 const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
 const ns = Luna.audioNsAtTick(session.musical.timeline, clip, audio, tick);   // tick -> file offset
-// One min/max per pixel per channel; column i's left edge is file offset nsAt(i).
-const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(session.musical.timeline, clip, audio, tickAtPx(i)));
-const lanes = Luna.waveformLanes(cols.channels.length, top, height);   // stereo: left lane above right
+// One min/max per pixel per channel, linear at LUNA's waveform zoom times the clip gain; column i's left edge is file offset nsAt(i).
+const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);
+const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(session.musical.timeline, clip, audio, tickAtPx(i)), { gain });
+const lanes = Luna.waveformLanes(cols.channels.length, top, height, 0);   // stereo: left lane above right
+ctx.beginPath(); cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0)); ctx.fill();   // LUNA's shape (fact 93)
 ```
 
 `examples/arrangement.html` is the whole picture: lanes, ruler, waveforms and playhead, live.

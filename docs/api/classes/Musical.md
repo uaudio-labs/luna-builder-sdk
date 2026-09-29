@@ -96,7 +96,9 @@ tick): Promise<unknown>;
 setTempo(bpm, tick): Promise<unknown>;
 ```
 
-Set the tempo at a tick (default: the session start).
+Add a tempo event at a tick with `set_tempo` (default: the session start). On the measured
+build `set_tempo` answered `device.database_error`; to change the tempo in effect, use
+[setTempoInEffectAt](#settempoineffectat).
 
 #### Parameters
 
@@ -108,6 +110,37 @@ Set the tempo at a tick (default: the session start).
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### setTempoInEffectAt()
+
+```ts
+setTempoInEffectAt(bpm, tick): Promise<void>;
+```
+
+Change the tempo in effect at `tick` to `bpm`, as LUNA's own tempo field does: it writes
+the `tempo` of that tempo event rather than adding one (fact 95). In a single-tempo session
+that is the session tempo. Rejects with `out_of_range` for a non-positive or non-finite
+BPM, and `not_found` when the map has no events yet.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `bpm` | `number` |
+| `tick` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.musical.ready();
+await session.musical.setTempoInEffectAt(96, session.transport.tick);
+```
 
 ***
 
@@ -151,3 +184,30 @@ tempoAt(tick): number;
 #### Returns
 
 `number`
+
+***
+
+### tempoEventAt()
+
+```ts
+tempoEventAt(tick): TempoEvent | undefined;
+```
+
+The tempo event in effect at `tick`: the last one at or before it, or the first when the
+tick is before them all. `undefined` only while the map is empty or unloaded.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tick` | `number` |
+
+#### Returns
+
+[`TempoEvent`](TempoEvent.md) \| `undefined`
+
+#### Example
+
+```ts
+const row = session.musical.tempoEventAt(session.transport.tick);
+```

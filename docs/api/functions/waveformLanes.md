@@ -10,7 +10,7 @@ function waveformLanes(
 
 Split `height` pixels from `top` into one equal lane per channel, stacked in file order
 (left above right for stereo), each with a zero line and a full-scale half-height.
-`gap` pixels are kept clear at the top and bottom of every lane.
+`gap` pixels are kept clear at the top and bottom of every lane; LUNA keeps none.
 
 ## Parameters
 
@@ -28,5 +28,5 @@ readonly [`WaveformLane`](../interfaces/WaveformLane.md)[]
 ## Example
 
 ```ts
-const [left, right] = Luna.waveformLanes(2, 20, 80);   // left.mid 40, right.mid 80
+const [left, right] = Luna.waveformLanes(2, 20, 80, 0);   // left.mid 40, right.mid 80, half 20
 ```

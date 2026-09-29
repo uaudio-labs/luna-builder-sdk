@@ -1,5 +1,5 @@
 {
-    "link_name": "__TITLE__",
+    "package_name": "__TITLE__",
     "id": "__ID__",
     "title": "__TITLE__",
     "version": "0.1.0",

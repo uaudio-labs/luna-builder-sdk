@@ -36,6 +36,7 @@
     ".agents/plugins/marketplace.json"
   ],
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsup && node scripts/sync-plugin.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

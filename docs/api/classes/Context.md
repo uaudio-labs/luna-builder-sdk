@@ -26,6 +26,8 @@
 | <a id="selectionstop"></a> `selectionStop` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number` \| `null`\> | - | - |
 | <a id="selectiontracks"></a> `selectionTracks` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`[] \| `null`\> | - | - |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | - | - |
+| <a id="settings"></a> `settings` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The window's saved settings, a JSON string LUNA writes on a delayed save. | - |
+| <a id="waveformzoom"></a> `waveformZoom` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | LUNA's waveform zoom for this window: the amplitude multiplier its timeline draws audio with, 1 by default, doubled or halved by Zoom In/Out Waveform and bounded 1/8..256. Pass it with the clip gain to [waveformColumns](../functions/waveformColumns.md) to draw at LUNA's height. It is read from [settings](#settings), which LUNA saves some time after a change rather than at once (fact 94). **Example** `const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);` | - |
 
 ## Accessors
 

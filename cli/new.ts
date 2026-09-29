@@ -1,0 +1,82 @@
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { bundlePath, flagNumber, flagString, packageRoot, sdkVersion, type Args } from './util';
+
+function slug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function titleCase(name: string): string {
+  return name.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function walk(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) out.push(...walk(p));
+    else out.push(p);
+  }
+  return out;
+}
+
+/** Copy the vendored script-tag bundle into an Add On folder. */
+export function vendorBundle(target: string): void {
+  const src = bundlePath();
+  if (!src) throw new Error(`No SDK bundle under ${packageRoot()}. Run "npm run build" in the builder package.`);
+  mkdirSync(join(target, 'vendor'), { recursive: true });
+  cpSync(src, join(target, 'vendor', 'luna.global.js'));
+  if (existsSync(`${src}.map`)) cpSync(`${src}.map`, join(target, 'vendor', 'luna.global.js.map'));
+}
+
+export async function newAddOn(args: Args): Promise<number> {
+  const name = args.positional[0];
+  if (!name) {
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app] [--width N --height N] [--dir path]');
+    return 2;
+  }
+  const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
+  if (existsSync(dir)) {
+    console.error(`${dir} already exists`);
+    return 1;
+  }
+  const template = join(packageRoot(), 'templates', flagString(args, 'template') ?? 'add-on-basic');
+  if (!existsSync(template)) {
+    console.error(`template not found: ${template}`);
+    return 1;
+  }
+  const replacements: Record<string, string> = {
+    __NAME__: name,
+    __SLUG__: slug(name),
+    __ID__: flagString(args, 'id') ?? `com.example.${slug(name)}`,
+    __TITLE__: flagString(args, 'title') ?? titleCase(name),
+    __TARGET__: flagString(args, 'target') ?? 'window',
+    __WIDTH__: String(flagNumber(args, 'width', 900)),
+    __HEIGHT__: String(flagNumber(args, 'height', 600)),
+    __SDK_VERSION__: sdkVersion(),
+    __BUILDER_PATH__: packageRoot(),
+  };
+  for (const file of walk(template)) {
+    const rel = file.slice(template.length + 1);
+    const dest = join(dir, rel);
+    mkdirSync(join(dest, '..'), { recursive: true });
+    let text = readFileSync(file, 'utf8');
+    for (const [k, v] of Object.entries(replacements)) text = text.replaceAll(k, v);
+    writeFileSync(dest, text);
+  }
+  vendorBundle(dir);
+  console.log(`Created ${dir}
+
+Next:
+  cd ${name}
+  npm install                 # vitest + the SDK for tests
+  npm test                    # runs against Luna.MockEngine, no LUNA needed
+  npx ua-builder serve        # http://localhost:8790/ (LUNA must be running for live data)
+  npx ua-builder install      # link into LUNA's Add Ons folder; it appears under Window
+
+Edit main.js for the UI and logic.js for the parts tests exercise. See docs/QUICKSTART.md.`);
+  return 0;
+}

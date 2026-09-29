@@ -53,11 +53,21 @@ Fixed
 - `session.transaction()` called inside another runs in the open batch instead of nesting.
 
 Added
-- `Luna.waveformColumns(range, width, nsAt)` reduces a `WaveformRange` to one min/max per drawn
-  column per channel, keeping the loudest pair each column covers, and `NaN` where no pair
-  lies. `Luna.waveformLanes(channels, top, height)` stacks one lane per channel in file
-  order. Together they draw a stereo clip as two lanes, as LUNA does, instead of one folded
-  shape that looks mono.
+- `Luna.waveformColumns(range, width, nsAt, { gain })` reduces a `WaveformRange` to one min/max
+  per drawn column per channel the way LUNA's timeline does (fact 93): the loudest pairs each
+  column covers, every column touching the zero line, columns between pairs interpolated when
+  zoomed in, linear values times `gain` clipped to full scale, and `NaN` where no pair lies.
+  `Luna.waveformLanes(channels, top, height)` stacks one lane per channel in file order, and
+  `Luna.traceWaveform(ctx, channel, lane, x0)` adds LUNA's filled outline to a canvas path,
+  with a 0.5 px axis so silence draws a thin line. Together they draw a stereo clip as two
+  lanes, as LUNA does, instead of one folded shape that looks mono. `Luna.waveformPeak(range)`
+  gives the loudest value in a range, for normalizing.
+- `Musical.setTempoInEffectAt(bpm, tick)` changes the tempo in effect at a tick the way LUNA's
+  tempo field does, by writing that tempo event's `tempo` (now a `WritableProp`), verified live; new
+  `Musical.tempoEventAt(tick)` finds it (fact 95).
+- `Context.waveformZoom` is LUNA's waveform zoom for the window (1 by default, x2 per Zoom In
+  Waveform), read from the new `Context.settings`; multiply it into the `gain` above to draw at
+  LUNA's height. LUNA saves it with a delay, so it can lag the screen (fact 94).
 - `Luna.bindRange(input, control)` binds an `<input type="range">` to a control in one call:
   touch on press, a write per `input` (the input's `min`..`max` mapped onto 0..1, or units with
   `view: 'real'`), release once however the drag ends, LUNA's value followed except mid-drag

@@ -1,0 +1,142 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export interface Args {
+  positional: string[];
+  flags: Record<string, string | boolean>;
+}
+
+/** `--key value`, `--key=value`, `--flag`, positionals. */
+export function parseArgs(argv: string[]): Args {
+  const positional: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (!a.startsWith('--')) {
+      positional.push(a);
+      continue;
+    }
+    const eq = a.indexOf('=');
+    if (eq >= 0) {
+      flags[a.slice(2, eq)] = a.slice(eq + 1);
+      continue;
+    }
+    const key = a.slice(2);
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith('--')) {
+      flags[key] = next;
+      i++;
+    } else {
+      flags[key] = true;
+    }
+  }
+  return { positional, flags };
+}
+
+export function flagString(args: Args, key: string): string | undefined {
+  const v = args.flags[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+export function flagNumber(args: Args, key: string, fallback: number): number {
+  const v = flagString(args, key);
+  const n = v === undefined ? NaN : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** The @uaudio/ua-builder-sdk package root (this file lives in dist/ once built). */
+export function packageRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 4; i++) {
+    if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'templates'))) return dir;
+    dir = dirname(dir);
+  }
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+/**
+ * The script-tag bundle this CLI vendors into an Add On. A checkout builds it into `dist/`;
+ * the ua-luna-builder agent plugin ships a prebuilt copy in `sdk/` and has no `dist/`, so
+ * both layouts resolve. `undefined` means nothing is built yet.
+ */
+export function bundlePath(): string | undefined {
+  for (const dir of ['dist', 'sdk']) {
+    const p = join(packageRoot(), dir, 'luna.global.js');
+    if (existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+export function sdkVersion(): string {
+  try {
+    return (JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as { version: string }).version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
+/** LUNA's Add Ons folder for this platform. */
+export function addOnsFolder(): string {
+  if (process.platform === 'darwin') return '/Library/Application Support/Universal Audio/LUNA/Add Ons';
+  if (process.platform === 'win32') return join(process.env['LOCALAPPDATA'] ?? join(process.env['USERPROFILE'] ?? '', 'AppData', 'Local'), 'Universal Audio', 'LUNA', 'Add Ons');
+  throw new Error('LUNA Add Ons are supported on macOS and Windows only');
+}
+
+export interface Manifest {
+  package_name?: string;
+  add_ons?: ManifestEntry[];
+  [k: string]: unknown;
+}
+
+export interface ManifestEntry {
+  id: string;
+  title: string;
+  html?: string;
+  url?: string;
+  width: number;
+  height: number;
+  target?: string;
+  version?: string;
+  engines?: string[];
+  [k: string]: unknown;
+}
+
+/** Read and validate `manifest.json` in `dir`. Throws with a readable message on problems. */
+export function readManifest(dir: string): { manifest: Manifest; entries: ManifestEntry[] } {
+  const path = join(dir, 'manifest.json');
+  if (!existsSync(path)) throw new Error(`no manifest.json in ${dir}`);
+  let manifest: Manifest;
+  try {
+    manifest = JSON.parse(readFileSync(path, 'utf8')) as Manifest;
+  } catch (e) {
+    throw new Error(`manifest.json is not valid JSON: ${(e as Error).message}`);
+  }
+  const entries = Array.isArray(manifest.add_ons) ? manifest.add_ons : [manifest as unknown as ManifestEntry];
+  const problems: string[] = [];
+  for (const [i, e] of entries.entries()) {
+    const where = `entry ${i} (${e.id ?? 'no id'})`;
+    for (const k of ['id', 'title'] as const) if (typeof e[k] !== 'string' || !e[k]) problems.push(`${where}: "${k}" must be a non-empty string`);
+    for (const k of ['width', 'height'] as const) if (typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number`);
+    if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
+    if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
+    if (e.target !== undefined && !['window', 'app', 'page', 'browser'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
+  }
+  if (problems.length) throw new Error(`manifest.json problems:\n  - ${problems.join('\n  - ')}`);
+  return { manifest, entries };
+}
+
+export function usage(): string {
+  return `ua-builder ${sdkVersion()} — build LUNA Add Ons
+
+  ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app]
+                        [--width 900 --height 600] [--dir path]
+  ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
+  ua-builder test [dir] [--live]
+  ua-builder install [dir] [--name "Link Name"]
+  ua-builder pack [dir] [--out file.zip]
+  ua-builder doctor
+  ua-builder tree [path] [--levels 1] [--out tree.json]   the shape of LUNA's tree (read-only)
+
+Docs: docs/QUICKSTART.md, docs/MANIFEST.md in the @uaudio/ua-builder-sdk package.`;
+}

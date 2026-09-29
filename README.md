@@ -63,8 +63,9 @@ bar/beat counter." The catalog is
 `.agents/plugins/marketplace.json`; its source path resolves from the repository root.
 
 The marketplace needs the prebuilt `plugins/ua-luna-builder/` folder. In a source
-checkout, generate it with `npm run build` before installing; distributed SDK
-packages already include it. Node.js 22 or newer is required to run the bundled CLI.
+checkout, `npm ci` generates it (the `prepare` script runs the build), as does
+`npm run build`; distributed SDK packages already include it. Node.js 22 or newer
+is required to run the bundled CLI.
 
 The plugin carries both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
 Installing from a clone is not a release: the package is not published to npm, and nothing

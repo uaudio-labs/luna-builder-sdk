@@ -1,5 +1,5 @@
 {
-    "link_name": "Mute Button",
+    "package_name": "Mute Button",
     "id": "com.uaudio.builder.example_mute_button",
     "title": "Mute Button (ua-builder-sdk example)",
     "version": "0.1.0",

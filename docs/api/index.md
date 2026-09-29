@@ -124,6 +124,7 @@
 | [ShortcutsOptions](interfaces/ShortcutsOptions.md) | - |
 | [SocketLike](interfaces/SocketLike.md) | The subset of the WebSocket API this port uses; lets tests inject a fake. |
 | [SubscribeOptions](interfaces/SubscribeOptions.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/ua-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [TraceWaveformOptions](interfaces/TraceWaveformOptions.md) | - |
 | [TransactionOptions](interfaces/TransactionOptions.md) | - |
 | [TransportLocation](interfaces/TransportLocation.md) | The `location` property of a session. |
 | [UploadOptions](interfaces/UploadOptions.md) | - |
@@ -133,7 +134,9 @@
 | [WaveformChannel](interfaces/WaveformChannel.md) | - |
 | [WaveformColumns](interfaces/WaveformColumns.md) | - |
 | [WaveformLane](interfaces/WaveformLane.md) | - |
+| [WaveformPathTarget](interfaces/WaveformPathTarget.md) | The part of a canvas 2D context [traceWaveform](functions/traceWaveform.md) draws with; `CanvasRenderingContext2D` and `Path2D` both fit. |
 | [WaveformRange](interfaces/WaveformRange.md) | - |
+| [WaveformScale](interfaces/WaveformScale.md) | Options for [waveformColumns](functions/waveformColumns.md). |
 | [WebSocketPortOptions](interfaces/WebSocketPortOptions.md) | - |
 | [WireMessage](interfaces/WireMessage.md) | A message as it appears on the wire (JSON dialect), before normalisation. |
 | [WritableProp](interfaces/WritableProp.md) | A [Prop](interfaces/Prop.md) that can be written. `set` is optimistic: `value` moves at once and rolls back on rejection. |
@@ -254,8 +257,10 @@
 | [ticksToBeats](functions/ticksToBeats.md) | Ticks to beats (floating). |
 | [ticksToSeconds](functions/ticksToSeconds.md) | Ticks to seconds at a constant tempo. |
 | [toEvent](functions/toEvent.md) | Turn a decoded wire message into the normalised event the Store consumes. |
+| [traceWaveform](functions/traceWaveform.md) | Add one channel's waveform to a path as LUNA fills it: for every run of drawable columns, one closed shape through the column centres, the top outline (`mid - axis - max * half`) left to right and the bottom outline (`mid + axis - min * half`) back, squared off at the run's outer edges. `NaN` columns break the shape. It only adds subpaths; call `beginPath()` before and `fill()` after, so several channels or clips fill in one go. |
 | [wasmUpdateToEvent](functions/wasmUpdateToEvent.md) | Turn one `onUpdate(path, json)` into a normalised event. Exported for tests. |
-| [waveformColumns](functions/waveformColumns.md) | Reduce a [WaveformRange](interfaces/WaveformRange.md) to one min/max per drawn column, per channel: each column holds the loudest of every pair it covers, so peaks survive zooming out, and at least the pair under its left edge, so zooming in repeats pairs rather than leaving gaps. |
-| [waveformLanes](functions/waveformLanes.md) | Split `height` pixels from `top` into one equal lane per channel, stacked in file order (left above right for stereo), each with a zero line and a full-scale half-height. `gap` pixels are kept clear at the top and bottom of every lane. |
+| [waveformColumns](functions/waveformColumns.md) | Reduce a [WaveformRange](interfaces/WaveformRange.md) to one min/max per drawn column, per channel, the way LUNA's own timeline does: |
+| [waveformLanes](functions/waveformLanes.md) | Split `height` pixels from `top` into one equal lane per channel, stacked in file order (left above right for stereo), each with a zero line and a full-scale half-height. `gap` pixels are kept clear at the top and bottom of every lane; LUNA keeps none. |
+| [waveformPeak](functions/waveformPeak.md) | The loudest absolute value in a range, across every channel, in 0..1; 0 when the range is empty. To normalize a clip, pass `gain: 1 / peak` to [waveformColumns](functions/waveformColumns.md), taking the peak from the clip's whole range, not the visible columns, so the scale holds while scrolling. |
 | [writable](functions/writable.md) | Wrap a [Prop](interfaces/Prop.md) with a setter to make a [WritableProp](interfaces/WritableProp.md). |
 | [yieldTask](functions/yieldTask.md) | One macrotask later, through a `MessageChannel` where there is one. A background browser tab throttles timers to about one tick per second but never throttles messages, so a timer-only loop lands on its own timeout in a hidden page even though LUNA finished in milliseconds. |

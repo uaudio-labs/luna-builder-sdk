@@ -171,22 +171,15 @@ function paintTimeline() {
       ctx.strokeRect(x0 + 0.5, top + 14.5, Math.max(1, x1 - x0 - 1), laneH - 16);
       if (state === 'pending') { pending++; continue; }
       if (state === 'missing') { missing++; continue; }
-      // One min/max per pixel per channel, the loudest pair each pixel covers; a lane per channel.
+      // One min/max per pixel per channel at LUNA's waveform zoom and the clip's gain, one filled shape per lane.
       const px0 = Math.floor(x0);
       const cols = Luna.waveformColumns(range, Math.max(0, Math.ceil(x1) - px0), (i) =>
-        Luna.audioNsAtTick(t, clip, audio, start + (px0 + i) / W * span));
-      const waveLanes = Luna.waveformLanes(cols.channels.length, top + 15, laneH - 18);
-      cols.channels.forEach((ch, c) => {
-        const { mid, half } = waveLanes[c];
-        ctx.strokeStyle = audio.stretched ? '#f0c674' : '#64d7b2';
-        ctx.beginPath();
-        for (let i = 0; i < cols.width; i++) {
-          if (Number.isNaN(ch.max[i])) continue;
-          ctx.moveTo(px0 + i + 0.5, mid - ch.max[i] * half);
-          ctx.lineTo(px0 + i + 0.5, mid - ch.min[i] * half);
-        }
-        ctx.stroke();
-      });
+        Luna.audioNsAtTick(t, clip, audio, start + (px0 + i) / W * span), { gain: session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20) });
+      const waveLanes = Luna.waveformLanes(cols.channels.length, top + 15, laneH - 18, 0);
+      ctx.fillStyle = audio.stretched ? '#f0c674' : '#64d7b2';
+      ctx.beginPath();
+      cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, waveLanes[c], px0));
+      ctx.fill();
       ctx.fillStyle = '#e4eaf1';
       ctx.fillText(clip.name.value ?? clip.id, x0 + 4, top + 16);
       drawn++;
@@ -281,7 +274,7 @@ function bindAll() {
     liveOffs.push(p.name.onChange(() => renderClips()));
     liveOffs.push(p.clips.onChange(() => { events++; bindAll(); renderClips(); }));
     for (const clip of p.clips.items) {
-      for (const prop of [clip.name, clip.start, clip.stop, clip.sourceStart, clip.sourceStop, clip.renderSourceUid, clip.renderState]) {
+      for (const prop of [clip.name, clip.start, clip.stop, clip.sourceStart, clip.sourceStop, clip.renderSourceUid, clip.renderState, clip.gain]) {
         liveOffs.push(prop.onChange(() => bump(clip.id)));
       }
     }
@@ -301,6 +294,7 @@ function bindAll() {
     }));
   }
   liveOffs.push(session.transport.location.onChange(schedulePlayhead));
+  liveOffs.push(session.context.waveformZoom.onChange(() => renderClips()));
 }
 
 async function refresh() {
