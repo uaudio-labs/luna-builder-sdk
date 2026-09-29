@@ -58,6 +58,9 @@ Two files, two audiences:
   section at the top (below the intro paragraph), grouping bullets under `Changed
   (breaking)` / `Changed` / `Added` / `Fixed` as the existing sections do, with the same
   level of explanatory detail (what changed, why, and what a consumer must do about it).
+  Commits sometimes write their changelog bullets into the previous version's section as
+  they land; diff `CHANGELOG.md` against the last bump and move any post-bump bullets into
+  the new section — a version's section must describe only that version.
   Mirror the existing "Measured against LUNA <version>" line when the changes were
   verified against a live LUNA; ask the user for the LUNA build if unclear.
 
