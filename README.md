@@ -9,7 +9,26 @@ automation, renders and recording are implemented and tested against a live LUNA
 same Add On runs inside LUNA or, with `?engine=wasm`, on the in-page engine. See
 [CHANGELOG.md](CHANGELOG.md).
 
+## Get set up
+
+This repo holds the SDK source; the builds (`dist/`, the agent plugin) are generated.
+With Node.js 22 or newer:
+
+```sh
+git clone git@github.com:uaudio/ua-builder-sdk.git
+cd ua-builder-sdk
+npm ci        # the prepare script builds dist/ (the SDK and its CLI) and the agent plugin
+```
+
+That makes `npx ua-builder` work from this folder and from any Add On it scaffolds.
+Distributed SDK packages arrive already built and skip this step.
+
 ## Build an Add On
+
+Read `docs/QUICKSTART.md` first, then `docs/RECIPES.md` for eleven Add Ons worth asking an
+agent for. `docs/api/` is the generated reference, `docs/llms.txt`
+the index for coding agents, and `skills/` holds shared Claude Code and Codex skills for creating, extending,
+testing and debugging Add Ons. From this folder:
 
 ```sh
 npx ua-builder new my-add-on --title "My Add On"   # scaffold: manifest, page, logic, tests, vendored SDK
@@ -20,14 +39,9 @@ npx ua-builder pack                                 # zip for distribution
 npx ua-builder doctor                               # what is reachable from here
 ```
 
-Read `docs/QUICKSTART.md` first, then `docs/RECIPES.md` for eleven Add Ons worth asking an
-agent for. `docs/api/` is the generated reference, `docs/llms.txt`
-the index for coding agents, and `skills/` holds shared Claude Code and Codex skills for creating, extending,
-testing and debugging Add Ons.
-
 ## Install for an agent
 
-The same six skills ship as an agent plugin, [ua-luna-builder](plugins/ua-luna-builder/README.md),
+The same six skills ship as an agent plugin, [ua-luna-builder](plugin/README.md),
 which also carries the SDK builds, its CLI, the scaffold template, the examples and the
 consumer docs. An agent holding only the plugin can build, test and install an Add On with
 no checkout, no npm install and no network.
@@ -62,10 +76,9 @@ loads the skills. Try: "Use the create-add-on skill to build a LUNA Add On with 
 bar/beat counter." The catalog is
 `.agents/plugins/marketplace.json`; its source path resolves from the repository root.
 
-The marketplace needs the prebuilt `plugins/ua-luna-builder/` folder. In a source
-checkout, `npm ci` generates it (the `prepare` script runs the build), as does
-`npm run build`; distributed SDK packages already include it. Node.js 22 or newer
-is required to run the bundled CLI.
+The marketplace needs the generated `plugins/ua-luna-builder/` folder: the `npm ci`
+from "Get set up" creates it, as does `npm run build`; distributed SDK packages
+already include it.
 
 The plugin carries both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
 Installing from a clone is not a release: the package is not published to npm, and nothing
@@ -126,18 +139,27 @@ engine.addSession('abc', { tracks: ['Vocal', 'Bass'] });
 const luna = await Luna.connect({ port_: engine.port() });
 ```
 
-## What is in this package
+## Layout
 
 ```
-dist/         index.{js,cjs} + declarations, wire/, luna.global.js (script tag), cli.js (ua-builder)
+src/          the SDK source; everything public is exported from src/luna.ts as Luna.<Name>
+cli/          ua-builder new/serve/install/pack/doctor, built to dist/cli.js
+tests/        vitest: unit (Luna.MockEngine), live (a running LUNA), engine (wasm in Chrome)
 docs/         QUICKSTART.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
 skills/       create-add-on, add-feature, test-add-on, debug-connection, port-to-wasm, verify-add-on
 templates/    add-on-basic scaffold
 examples/     addon (master mute), mixer, inserts, ruler, sends, tracks (raw wire), plus
               check-*.mjs probes
-plugins/      ua-luna-builder: the skills, SDK builds, CLI, template, examples and docs as
-              an agent plugin; catalogs in .claude-plugin/ and .agents/plugins/
+plugin/       the hand-written shell of the agent plugin
+dist/         generated: index.{js,cjs} + declarations, wire/, luna.global.js (script tag),
+              cli.js (ua-builder)
+plugins/      generated: ua-luna-builder, the skills, SDK builds, CLI, template, examples and
+              docs as an agent plugin; catalogs in .claude-plugin/ and .agents/plugins/
 ```
+
+What ships -- an `npm pack` of this repo -- is the package.json `files` list: the docs,
+skills, templates, examples and the generated `dist/` and `plugins/`. See `DEVELOPING.md`
+to work on the SDK itself.
 
 Behaviour the SDK relies on that the protocol docs do not state is recorded, numbered, in
 `docs/EVIDENCE.md`.
