@@ -12,7 +12,8 @@ same Add On runs inside LUNA or, with `?engine=wasm`, on the in-page engine. See
 ## Get set up
 
 This repo holds the SDK source; the builds (`dist/`, the agent plugin) are generated.
-With Node.js 22 or newer:
+With Node.js 24 or newer (Node 22 works for the SDK itself, but its npm 10 fails to
+`npm install` a scaffolded Add On — npm 11 is needed for that):
 
 ```sh
 git clone git@github.com:uaudio/ua-builder-sdk.git

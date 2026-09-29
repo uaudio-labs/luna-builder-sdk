@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { bundlePath, flagNumber, flagString, packageRoot, sdkVersion, type Args } from './util';
 
 function slug(name: string): string {
@@ -21,6 +21,17 @@ function walk(dir: string): string[] {
     else out.push(p);
   }
   return out;
+}
+
+/**
+ * The SDK's `file:` spec for a scaffold's package.json. npm resolves it against the
+ * package.json, so a relative path keeps working when the Add On, or anything above both
+ * it and the SDK (a home folder, a synced drive), moves. Cross-drive on Windows has no
+ * relative form; only then is the absolute path written.
+ */
+function builderPath(dir: string): string {
+  const rel = relative(dir, packageRoot());
+  return isAbsolute(rel) ? packageRoot() : rel.split(sep).join('/');
 }
 
 /** Copy the vendored script-tag bundle into an Add On folder. */
@@ -57,7 +68,7 @@ export async function newAddOn(args: Args): Promise<number> {
     __WIDTH__: String(flagNumber(args, 'width', 900)),
     __HEIGHT__: String(flagNumber(args, 'height', 600)),
     __SDK_VERSION__: sdkVersion(),
-    __BUILDER_PATH__: packageRoot(),
+    __BUILDER_PATH__: builderPath(dir),
   };
   for (const file of walk(template)) {
     const rel = file.slice(template.length + 1);

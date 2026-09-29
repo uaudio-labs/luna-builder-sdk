@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@uaudio/ua-builder-sdk": "file:__BUILDER_PATH__",
+    "vite": "8.3.0",
     "vitest": "5.0.1"
   }
 }

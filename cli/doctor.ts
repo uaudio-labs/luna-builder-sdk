@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { resolveEngineDir } from './serve';
 import { addOnsFolder, bundlePath, sdkVersion, type Args } from './util';
 
@@ -16,11 +17,19 @@ function probe(port: number, host = '127.0.0.1', timeoutMs = 800): Promise<boole
   });
 }
 
-/** Report what an Add On can reach from this machine. */
+/** Report what an Add On can reach from this machine, creating LUNA's Add Ons folder if missing. */
 export async function doctor(_args: Args): Promise<number> {
   const rows: [string, string][] = [];
   rows.push(['ua-builder', sdkVersion()]);
   rows.push(['node', process.version + (Number(process.versions.node.split('.')[0]) >= 22 ? '' : '  (need >= 22)')]);
+  let npm = '';
+  try {
+    npm = execFileSync('npm', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' }).trim();
+  } catch {
+    /* not on PATH */
+  }
+  // npm 10 (Node 22's) crashes in arborist on a scaffold's file: dependency; Node 24 ships npm 11.
+  rows.push(['npm', npm ? npm + (Number(npm.split('.')[0]) >= 11 ? '' : '  (need >= 11 to npm install a scaffold; comes with Node.js 24)') : 'not found']);
   rows.push(['SDK bundle', bundlePath() ?? 'missing: run npm run build']);
   const engineDir = resolveEngineDir(undefined);
   rows.push(['wasm engine build', engineDir ?? 'not found (set UA_WASM_ENGINE or pass --engine to serve)']);
@@ -29,7 +38,16 @@ export async function doctor(_args: Args): Promise<number> {
   rows.push(['wasm bridge :4749', wasmBridge ? 'listening' : 'not listening (only with the luna_connects_to_wasm feature key)']);
   try {
     const folder = addOnsFolder();
-    rows.push(['Add Ons folder', `${folder} ${existsSync(folder) ? '' : '(does not exist yet)'}`]);
+    let note = '';
+    if (!existsSync(folder)) {
+      try {
+        mkdirSync(folder, { recursive: true });
+        note = ' (created)';
+      } catch {
+        note = process.platform === 'darwin' ? ` (could not create it; run: sudo mkdir -p "${folder}")` : ' (could not create it)';
+      }
+    }
+    rows.push(['Add Ons folder', `${folder}${note}`]);
   } catch (e) {
     rows.push(['Add Ons folder', (e as Error).message]);
   }
