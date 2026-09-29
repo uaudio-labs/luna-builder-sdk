@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Luna } from '../../src/index';
 
 async function tick(): Promise<void> {
@@ -12,6 +12,16 @@ async function connected(tracks: string[] = ['Vocal', 'Bass']) {
   const luna = await Luna.connect({ port_: engine.port() });
   return { engine, luna };
 }
+
+describe('Luna.clients', () => {
+  it('lists open clients so tooling can wait for a page to connect, and drops closed ones', async () => {
+    const { luna } = await connected();
+    expect(Luna.clients()).toContain(luna);
+    expect(Luna.clients().some((c) => c.connected)).toBe(true);
+    await luna.close();
+    expect(Luna.clients()).not.toContain(luna);
+  });
+});
 
 describe('Luna.Sessions', () => {
   it('lists open sessions and the focused one', async () => {
@@ -223,6 +233,34 @@ describe('Luna.Transport', () => {
     expect(calls).toBe(1);
     expect(Luna.formatBarBeat(t.location.value?.bar_beat)).toBe('2|2|120');
     expect(t.tick).toBe(Luna.TICKS_PER_BEAT * 5 + Luna.TICKS_PER_DISPLAY_TICK * 120);
+  });
+
+  it('reads current values after engine.settled() and flushes listeners on luna.settled()', async () => {
+    const { engine, luna } = await connected();
+    const t = (await luna.session()).transport;
+    // A browser coalesces notifications to the next animation frame; stub one that never
+    // fires so only the on-demand flush in luna.settled() can deliver the listener.
+    vi.stubGlobal('requestAnimationFrame', vi.fn());
+    try {
+      let calls = 0;
+      t.location.onChange(() => calls++);
+      engine.setValue('/sessions/abc', 'location', { tick: 7, bar_beat: { bar: 1, beat: 1, tick: 7 } });
+      await engine.settled();
+      expect(t.location.value?.tick).toBe(7); // the value is current before any notification
+      expect(calls).toBe(0); // the listener is coalesced…
+      const before = performance.now();
+      await luna.settled(); // …and delivered by the flush, not the 100 ms frame fallback
+      expect(calls).toBe(1);
+      expect(performance.now() - before).toBeLessThan(90);
+
+      // A push carrying an unchanged value fires no onChange (Luna.Cell drops equals, fact 6).
+      engine.setValue('/sessions/abc', 'location', { tick: 7, bar_beat: { bar: 1, beat: 1, tick: 7 } });
+      await engine.settled();
+      await luna.settled();
+      expect(calls).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('carves tempo and time signature out of location, notifying only when they move', async () => {

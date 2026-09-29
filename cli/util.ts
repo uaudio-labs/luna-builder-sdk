@@ -1,6 +1,24 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * Give `path` back its executable bit if it lost one (zip extractions and plain file copies
+ * drop it, and then `npx ua-builder` dies with "Permission denied"). Returns what happened:
+ * `'ok'` (already executable), `'fixed'`, or `'failed'` (read-only install). Windows has no
+ * executable bit, so there it is always `'ok'`.
+ */
+export function ensureExecutable(path: string): 'ok' | 'fixed' | 'failed' {
+  if (process.platform === 'win32') return 'ok';
+  try {
+    const mode = statSync(path).mode;
+    if ((mode & 0o111) !== 0) return 'ok';
+    chmodSync(path, mode | 0o755);
+    return 'fixed';
+  } catch {
+    return 'failed';
+  }
+}
 
 export interface Args {
   positional: string[];
@@ -133,6 +151,7 @@ export function usage(): string {
                         [--width 900 --height 600] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]
+  ua-builder probe <url> [--expr <js>] [--wait <js>] [--timeout <ms>]   read a served page's live DOM
   ua-builder install [dir] [--name "Link Name"]
   ua-builder pack [dir] [--out Name.lunaaddon]
   ua-builder doctor

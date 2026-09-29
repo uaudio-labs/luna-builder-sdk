@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { resolveEngineDir } from './serve';
-import { addOnsFolder, bundlePath, sdkVersion, type Args } from './util';
+import { addOnsFolder, bundlePath, ensureExecutable, sdkVersion, type Args } from './util';
 
 function probe(port: number, host = '127.0.0.1', timeoutMs = 800): Promise<boolean> {
   return new Promise((resolve) => {
@@ -31,6 +32,16 @@ export async function doctor(_args: Args): Promise<number> {
   // npm 10 (Node 22's) crashes in arborist on a scaffold's file: dependency; Node 24 ships npm 11.
   rows.push(['npm', npm ? npm + (Number(npm.split('.')[0]) >= 11 ? '' : '  (need >= 11 to npm install a scaffold; comes with Node.js 24)') : 'not found']);
   rows.push(['SDK bundle', bundlePath() ?? 'missing: run npm run build']);
+  // A zip-extracted or copied SDK can lose the CLI's executable bit, and then
+  // `npx ua-builder` dies with "Permission denied". Heal it here.
+  if (process.platform !== 'win32') {
+    const bin = join(process.cwd(), 'node_modules', '.bin', 'ua-builder');
+    if (existsSync(bin)) {
+      const target = realpathSync(bin);
+      const state = ensureExecutable(target);
+      rows.push(['project CLI', state === 'ok' ? `${target} (executable)` : state === 'fixed' ? `${target} (executable bit restored)` : `${target} is NOT executable and read-only; run: chmod +x "${target}"`]);
+    }
+  }
   const engineDir = resolveEngineDir(undefined);
   rows.push(['wasm engine build', engineDir ?? 'not found (set UA_WASM_ENGINE or pass --engine to serve)']);
   const [luna, wasmBridge] = await Promise.all([probe(4718), probe(4749)]);

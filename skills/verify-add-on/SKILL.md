@@ -32,10 +32,29 @@ await session.ready();
 const track = session.visibleTracks[0];
 const was = track.gain.real.value;
 await track.gain.real.set(-6);            // the page's fader and readout must move
-// ...look at the page, or poll its DOM from the browser tools...
+// ...read the page's DOM (below)...
 await track.gain.real.set(was);           // put back what you touched
 await luna.close();
 ```
+
+Read what the page renders with `ua-builder probe`: it opens the url in headless Chrome,
+waits until a `Luna` client on the page is connected **and its focused session is ready**
+(the `Luna.clients()` hook; `--wait <js>` overrides), then until the DOM holds still for one
+quiet period (`--settle <ms>`, default 250), evaluates `--expr` against the live DOM and
+prints JSON on stdout — no CDP boilerplate, no `--dump-dom` race against the connect, and no
+placeholder "connecting..." reads from a scaffold still binding its session.
+
+```sh
+npx ua-builder probe http://localhost:8790/ --expr "document.querySelector('.gain').textContent"
+npx ua-builder probe http://localhost:8790/   # default: document.body.innerText
+```
+
+Probe before and after each change from the second client; the two readouts are the proof.
+A page still in its `Luna.connect()` retry loop counts as not ready — the probe keeps waiting
+within `--timeout` (default 20 s) and on timeout prints `timed out ... waiting for:` with what
+the page shows. If it warns that the page's vendored SDK predates `Luna.clients()`, refresh
+the vendored bundle (`ua-builder pack`, or re-vendor) — until then the probe cannot see the
+page's connection state.
 
 Do the same for every value the page shows: a mute, a send's destination, a clip, a marker.
 `examples/check-sync.mjs` is a complete two-client check.

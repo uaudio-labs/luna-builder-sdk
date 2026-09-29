@@ -35,6 +35,7 @@ testing and debugging Add Ons. From this folder:
 npx ua-builder new my-add-on --title "My Add On"   # scaffold: manifest, page, logic, tests, vendored SDK
 cd my-add-on && npm install && npm test             # tests run against Luna.MockEngine, no LUNA
 npx ua-builder serve                                # http://localhost:8790/
+npx ua-builder probe http://localhost:8790/         # read the served page's live DOM as JSON
 npx ua-builder install                              # link into LUNA's Add Ons folder -> Window menu
 npx ua-builder pack                                 # .lunaaddon bundle for distribution
 npx ua-builder doctor                               # what is reachable from here

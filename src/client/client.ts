@@ -45,6 +45,7 @@ export class Client {
 
   /** @internal Use {@link connect}. */
   constructor(port: Port, engine: Engine, store = new Store(port)) {
+    registry.push(this);
     this.raw = port;
     this.store = store;
     this.engine = engine;
@@ -120,18 +121,41 @@ export class Client {
     return this.raw instanceof WasmPort ? this.raw.engine : undefined;
   }
 
-  /** Resolves after the next batch of change notifications has been delivered. Handy in tests. */
+  /**
+   * Deliver every pending change notification now, and resolve once they have run. Handy in
+   * tests: after `await engine.settled()` the prop *values* are already current, but
+   * `onChange` listeners are coalesced to the next frame — this flushes them immediately, so
+   * `await engine.settled(); await luna.settled();` is deterministic without waiting for a
+   * requestAnimationFrame or timer.
+   */
   settled(): Promise<void> {
+    this.store.scheduler.flush();
     return this.store.scheduler.settled();
   }
 
   /** Disconnect and release everything. */
   async close(): Promise<void> {
+    const at = registry.indexOf(this);
+    if (at >= 0) registry.splice(at, 1);
     this.statusUnsub();
     await this.store.close();
     await this.raw.close();
     this.statusCell.update('closed');
   }
+}
+
+const registry: Client[] = [];
+
+/**
+ * Every {@link Client} this page has made and not closed, in creation order. A tooling hook:
+ * `ua-builder probe` waits on `Luna.clients().some((c) => c.connected)` to know an Add On's
+ * page has finished connecting before it reads the DOM.
+ *
+ * @example
+ * Luna.clients().some((c) => c.connected); // is anything on this page live?
+ */
+export function clients(): readonly Client[] {
+  return [...registry];
 }
 
 /** Child names of a `get` reply, whatever shape the engine used for them. */

@@ -23,9 +23,14 @@ Drive the engine side with `engine.setValue(nodePath, prop, value)`, `engine.add
 
 Wait correctly:
 - `await engine.settled()` after anything that pushes (engine-side changes, commands that
-  mutate the tree).
-- `await luna.settled()` before asserting that an `onChange` listener fired.
+  mutate the tree). After it, every prop `value` reads current.
+- `await luna.settled()` before asserting that an `onChange` listener fired: listeners are
+  coalesced (next-frame in a browser) and this flushes them immediately. Asserting a listener
+  count after only `engine.settled()` races the frame.
 - `await node.load()` on a node that was just added by a push; adds carry no data.
+- A push carrying an unchanged value fires no `onChange` (`Luna.Cell` drops equals): pushing
+  the same location twice is silent the second time. The first value a prop ever receives
+  does fire — nothing swallows an "initial snapshot".
 
 Assert on:
 - the model (`track.name.value`, `session.tracks.items`),

@@ -39,7 +39,8 @@ const MIME: Record<string, string> = {
  */
 export async function serve(args: Args): Promise<number> {
   const dir = resolve(args.positional[0] ?? process.cwd());
-  const port = flagNumber(args, 'port', 8790);
+  const wantedPort = flagNumber(args, 'port', 8790);
+  const portExplicit = args.flags['port'] !== undefined;
   const host = flagString(args, 'host') ?? (args.flags['luna'] ? '0.0.0.0' : '127.0.0.1');
   const root = packageRoot();
   const engineDir = resolveEngineDir(flagString(args, 'engine'));
@@ -71,10 +72,16 @@ export async function serve(args: Args): Promise<number> {
     createReadStream(target).pipe(res);
   });
 
-  await new Promise<void>((resolveListen, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => resolveListen());
-  });
+  let port: number;
+  try {
+    port = await listenWithFallback(server, wantedPort, host, portExplicit);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
+    console.error(`port ${wantedPort} is already in use — a stale 'ua-builder serve' from another session?`);
+    console.error(`find it with: lsof -i :${wantedPort}   (or pick another with --port <n>)`);
+    return 1;
+  }
+  if (port !== wantedPort) console.error(`port ${wantedPort} is busy (a stale 'ua-builder serve'?); using ${port} instead`);
 
   const lines = [`Serving ${dir}`, `  http://localhost:${port}/`];
   lines.push(engineDir ? `  http://localhost:${port}/__engine/devicedwasm.js   (wasm engine from ${engineDir})` : '  no wasm engine mounted (--engine <dir>)');
@@ -100,6 +107,30 @@ export async function serve(args: Args): Promise<number> {
   console.log(lines.join('\n'));
   await new Promise(() => undefined);
   return 0;
+}
+
+/**
+ * Listen on `port`, and when it is taken and the port was not asked for explicitly, walk up
+ * to twenty ports until one is free (a stale serve from another session is common). An
+ * explicit `--port` never silently moves: EADDRINUSE is rethrown for a clear message.
+ */
+export async function listenWithFallback(server: ReturnType<typeof createHttpServer>, port: number, host: string, explicit: boolean): Promise<number> {
+  const tries = explicit ? 1 : 20;
+  for (let i = 0; ; i++) {
+    try {
+      await new Promise<void>((resolveListen, reject) => {
+        const onError = (err: Error) => reject(err);
+        server.once('error', onError);
+        server.listen(port + i, host, () => {
+          server.removeListener('error', onError);
+          resolveListen();
+        });
+      });
+      return port + i;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || i + 1 >= tries) throw err;
+    }
+  }
 }
 
 function safeJoin(base: string, pathname: string): string | undefined {

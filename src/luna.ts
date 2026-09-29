@@ -43,7 +43,7 @@ export * from './model/index';
 // client
 export { connect } from './client/connect';
 export type { ConnectOptions } from './client/connect';
-export { Client } from './client/client';
+export { Client, clients } from './client/client';
 export type { Engine } from './client/client';
 export { isEmbeddedInLuna, locationOptions, hasNativeBridge, isLunaEnginePort } from './client/detect';
 export type { LocationOptions } from './client/detect';

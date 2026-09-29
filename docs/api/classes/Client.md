@@ -117,7 +117,11 @@ console.log(session.name.value, session.tracks.items.length);
 settled(): Promise<void>;
 ```
 
-Resolves after the next batch of change notifications has been delivered. Handy in tests.
+Deliver every pending change notification now, and resolve once they have run. Handy in
+tests: after `await engine.settled()` the prop *values* are already current, but
+`onChange` listeners are coalesced to the next frame — this flushes them immediately, so
+`await engine.settled(); await luna.settled();` is deterministic without waiting for a
+requestAnimationFrame or timer.
 
 #### Returns
 

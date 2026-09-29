@@ -19,6 +19,11 @@ npx ua-builder install    # link into LUNA's Add Ons folder; appears in the Wind
 npx ua-builder pack       # .lunaaddon bundle for distribution
 ```
 
+If `npx ua-builder` fails with "Permission denied", the SDK's `cli.js` lost its executable
+bit in transit (zip extractions drop it). Run any command once through node —
+`node node_modules/.bin/ua-builder doctor` on macOS/Linux — and the CLI restores its own bit;
+`npx ua-builder` works from then on.
+
 `main.js` calls `Luna.bindShortcuts(luna)`, so LUNA's own undo, redo, play and record keys
 (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Space, Cmd/Ctrl+Space) keep working while the Add On has the
 focus. A key the page handles itself and claims with `preventDefault()` is left to the page.

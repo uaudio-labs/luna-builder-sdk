@@ -223,6 +223,7 @@
 | [bindRange](functions/bindRange.md) | Bind a native `<input type="range">` to `control`: touch on press, write on `input`, follow LUNA outside a drag, settle on LUNA's value on release, double-click to reset. Keyboard changes the browser makes are one-shot writes, which the control brackets itself. |
 | [bindShortcuts](functions/bindShortcuts.md) | Give an Add On LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind its own key handling. |
 | [bootWasmEngine](functions/bootWasmEngine.md) | Load and boot the engine once per page. Resolves when the services report `running`. Rejects with `Luna.Error` code `engine_boot` on failure or timeout. |
+| [clients](functions/clients.md) | Every [Client](classes/Client.md) this page has made and not closed, in creation order. A tooling hook: `ua-builder probe` waits on `Luna.clients().some((c) => c.connected)` to know an Add On's page has finished connecting before it reads the DOM. |
 | [clipAudio](functions/clipAudio.md) | Which audio a clip plays, or `undefined` when there is nothing safe to draw: no source, or a render LUNA has named but not yet announced. In that second case draw the clip's outline rather than the unstretched original at the wrong scale. |
 | [clipTypeFrom](functions/clipTypeFrom.md) | The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. |
 | [connect](functions/connect.md) | - |

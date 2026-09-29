@@ -296,8 +296,23 @@ await luna.settled();                                // listeners notified
 engine.requests; engine.touches; engine.transactions; engine.fail(path, code);
 ```
 
+Wait in that order, always. After `await engine.settled()` every prop `value` reads current,
+but `onChange` listeners are coalesced (one call per batch of changes, delivered on the next
+animation frame in a browser); `await luna.settled()` flushes and delivers them immediately.
+Asserting on a listener without it races the frame. Two more timing rules: a push carrying an
+unchanged value fires no `onChange` (`Luna.Cell` drops equals), so re-sending the same
+location is silent; and the first value a prop ever receives *does* fire — there is no
+swallowed "initial snapshot".
+
 The mock reproduces the engine's real behaviours (`docs/EVIDENCE.md`). Live tests against
 LUNA run with `UA_LIVE=1` and must leave the session as they found it.
+
+To check what a served page actually renders — for example that it follows an edit made by a
+second client — `ua-builder probe <url> [--expr <js>]` opens it in headless Chrome, waits
+until a `Luna` client on the page is connected and its focused session is ready
+(`Luna.clients()`; override with `--wait <js>`), lets the DOM go quiet (`--settle <ms>`,
+default 250, `0` to skip), evaluates the expression and prints JSON. A freshly served scaffold
+probes to its bound DOM with no hand-written wait.
 
 ## 15. Inside LUNA vs a browser vs wasm
 

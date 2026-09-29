@@ -25,6 +25,35 @@ Added
 - `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
   re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
   `min_sec` integrated from the session's tempo map (fact 96).
+- Fixed: `npx ua-builder` in a freshly scaffolded project could die with "Permission denied" —
+  the plugin sync copied `sdk/cli.js` (the plugin's bin) without its executable bit, and zip
+  extractions drop the bit too. The sync now chmods the copy, `check:plugin` gates on it, the
+  CLI restores its own bit whenever it is run via `node .../cli.js`, `ua-builder doctor`
+  reports and heals the project's installed bin, and the scaffold README documents the
+  one-time `node node_modules/.bin/ua-builder doctor` recovery.
+- `ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>]`: open a served page in
+  headless Chrome, wait until a `Luna` client on it is connected and its focused session is
+  ready (the new `Luna.clients()` registry of open clients, a tooling hook; `--wait`
+  overrides), let the DOM hold still for one quiet period (default 250 ms, bounded so a
+  playing clock cannot stall it; `--settle 0` skips), evaluate an expression against the live
+  DOM and print JSON — the scriptable half of a two-client "the page must follow" check, with
+  no hand-rolled CDP boilerplate, no `--dump-dom` race, and no placeholder reads from a
+  scaffold still binding its session. Every wait is gated on the real page having loaded (the
+  tab's initial blank document satisfies any DOM condition), a page still in its
+  `Luna.connect()` retry loop counts as not ready, a wait that never passes prints
+  `timed out ... waiting for: <condition>` plus what the page shows, and a page whose vendored
+  SDK predates `Luna.clients()` gets a warning instead of a silent wrong read. The
+  verify-add-on skill uses it.
+- `ua-builder serve` on a busy port now walks to the next free port with a notice (stale
+  serves from other sessions are common); an explicit `--port` fails with a clear message and
+  an `lsof` hint instead of a bare EADDRINUSE stack.
+- `luna.settled()` now flushes pending change notifications immediately instead of waiting
+  for the next animation frame (or its 100 ms fallback), so the test idiom
+  `await engine.settled(); await luna.settled();` is deterministic and prompt in any
+  environment. QUICKSTART's testing section and the test-add-on skill now spell out the
+  timing rules: values read current after `engine.settled()`, listeners land on
+  `luna.settled()`, an unchanged value fires no `onChange`, and the first value a prop
+  receives does fire.
 - `transport.tempo` and `transport.timeSignature`: typed Props carved out of the `location`
   pushes (the tempo and meter in effect at the playhead), notifying only when the value moves
   rather than on every playhead push. `Luna.formatTimeSignature` formats the meter as `4/4`

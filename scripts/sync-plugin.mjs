@@ -16,7 +16,7 @@
  *   - SKILL.md files gain the CLI note below, because inside the plugin there is no
  *     `npx ua-builder` yet.
  */
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -94,6 +94,9 @@ async function main() {
     const text = await read(`dist/${name}`);
     await write(`sdk/${name}`, name.endsWith('.ts') ? text : stripMap(text));
   }
+  // The plugin's package.json bin points here; writeFile drops the executable bit that
+  // `npx ua-builder` needs in a scaffold that file:-depends on this plugin.
+  await chmod(join(plugin, 'sdk', 'cli.js'), 0o755);
   await write('sdk/luna.global.d.ts', GLOBAL_DTS);
 
   for (const skill of (await readdir(join(root, 'skills'), { withFileTypes: true })).filter((e) => e.isDirectory())) {

@@ -93,6 +93,11 @@ try {
     assert.equal(await read(`${PLUGIN}/sdk/${name}`), name.endsWith('.ts') ? source : stripMap(source), stale(`${PLUGIN}/sdk/${name}`));
   }
   assert.equal(await read(`${PLUGIN}/sdk/luna.global.d.ts`), GLOBAL_DTS, stale('the Luna global declaration'));
+  if (process.platform !== 'win32') {
+    // The plugin's bin: without the executable bit, `npx ua-builder` in a scaffold that
+    // file:-depends on this plugin dies with "Permission denied".
+    assert.ok(((await stat(join(root, PLUGIN, 'sdk', 'cli.js'))).mode & 0o111) !== 0, `${PLUGIN}/sdk/cli.js is not executable; rebuild (npm run sync-plugin)`);
+  }
 
   const skills = (await readdir(join(root, 'skills'), { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
   assert.ok(skills.length, 'no skills to vendor');
