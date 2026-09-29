@@ -263,6 +263,60 @@ describe('Luna.Track and Luna.Control', () => {
     expect(engine.value(gain.path, 'normalized_value')).toBe(0.6);
   });
 
+  it('re-derives the other views of a control when one is written (fact 97)', async () => {
+    const { engine, luna } = await connected();
+    const track = (await luna.session()).tracks.byId('Vocal')!;
+    await track.loadStrip();
+    const { gain, pan, mute } = track;
+
+    // A real write updates what the UI renders: display and normalized follow by push.
+    await gain.real.set(-6);
+    await engine.settled();
+    await luna.settled();
+    expect(gain.display.value).toBe('-6.0');
+    expect(gain.normalized.value).toBeCloseTo(0.73125, 10);
+    expect(engine.value(gain.path, 'value')).toBe(-6);
+
+    // A normalized write keeps the written view verbatim and derives units and display.
+    await gain.normalized.set(0.5);
+    await engine.settled();
+    await luna.settled();
+    expect(gain.normalized.value).toBe(0.5);
+    expect(gain.real.value).toBeCloseTo(-34.46, 2);
+    expect(gain.display.value).toBe('-34.5');
+
+    // Pans format L/C/R around centre.
+    await pan.normalized.set(0.25);
+    await engine.settled();
+    await luna.settled();
+    expect(pan.real.value).toBe(-50);
+    expect(pan.display.value).toBe('L50');
+    await pan.real.set(0);
+    await engine.settled();
+    await luna.settled();
+    expect(pan.display.value).toBe('C');
+    expect(pan.normalized.value).toBe(0.5);
+
+    // A switch snaps every view to the step.
+    await mute.toggle();
+    await engine.settled();
+    await luna.settled();
+    expect([mute.on, mute.display.value, engine.value(mute.path, 'value'), mute.normalized.value]).toEqual([true, 'true', 1, 1]);
+  });
+
+  it("tracks a plugin parameter's value with its normalized view (facts 85, 97)", async () => {
+    const { engine, luna } = await connected();
+    const path = '/sessions/abc/tracks/Vocal/effects/effect_0/controls/wet';
+    engine.addControl(path, 'parameter', { discrete: false, value: 0.5, real: 0, str: '0.0', automatable: true, normalized: 0.5 });
+    const control = new Luna.Control(luna, path);
+    await control.load();
+    await control.normalized.set(0.4);
+    await engine.settled();
+    await luna.settled();
+    expect(engine.value(path, 'value')).toBe(0.4);
+    expect(control.display.value).toBe((control.real.value as number).toFixed(1));
+  });
+
   it('brackets switches even when not automatable, so exclusive solo applies (fact 78)', async () => {
     const { engine, luna } = await connected();
     const track = (await luna.session()).tracks.byId('Vocal')!;

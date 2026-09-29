@@ -1,7 +1,7 @@
 /**
  * Live lane for the mixer surface: send routing (facts 43, 83), the pan layout (fact 84),
- * breakpoint values on the wire (fact 82), touched writes and undo (fact 85), plugin slots
- * (fact 86) and meters.
+ * breakpoint values on the wire (fact 82), touched writes and undo (fact 85), derived view
+ * pushes (fact 97), plugin slots (fact 86) and meters.
  *
  * Needs LUNA on 4718 with a session open that has a mono and a stereo track. It adds an aux
  * bus if the session has none, uses each track's last send and last insert slot, and puts
@@ -101,6 +101,23 @@ describe.skipIf(!live)('live: mixer', () => {
     expect(names).toEqual(['Volume Change']);
     await session.undo();
     await Luna.settle(() => mono.gain.real.value === was, 'undo the fader', { refresh: () => mono.main.controls.reload() });
+  });
+
+  it('pushes the derived views to the writer after a real write (fact 97)', async () => {
+    await mono.loadStrip();
+    const was = mono.gain.real.value as number;
+    const normalizedWas = mono.gain.normalized.value;
+    const target = was === -6.5 ? -5.5 : -6.5;
+    try {
+      await mono.gain.real.set(target);
+      // The writer gets no echo of real_value (fact 6), but string_value and
+      // normalized_value are derived, so their pushes must arrive without a reload.
+      await Luna.settle(() => Number.parseFloat(mono.gain.display.value ?? '') === target, 'derived display push');
+      expect(Number.parseFloat(mono.gain.display.value!)).toBe(target);
+      expect(mono.gain.normalized.value).not.toBe(normalizedWas);
+    } finally {
+      await mono.gain.real.set(was);
+    }
   });
 
   it('resets gain and pan to their defaults as one undo entry each (fact 92)', async () => {

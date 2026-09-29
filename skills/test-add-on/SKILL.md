@@ -29,6 +29,11 @@ Wait correctly:
 
 Assert on:
 - the model (`track.name.value`, `session.tracks.items`),
+- derived control views: a write to one view re-derives the others (fact 97), so after
+  `await gain.real.set(-6)` then `await engine.settled(); await luna.settled();`,
+  `gain.display.value` is `"-6.0"` and `gain.normalized.value` moved. Exact numbers are the
+  mock's documented stand-ins, not LUNA's tapers — assert on your own code's output, not on a
+  taper value being LUNA-exact,
 - what the Add On sent: `engine.requests` (`{ verb, path, data }`), `engine.touches`,
   `engine.transactions`,
 - touch: every control edit is exactly one `<path>:on` then one `<path>:off` in

@@ -3,7 +3,7 @@
  *
  * Three views of one value: `value` (the engine's native number, the only undoable write),
  * `normalized` (0..1) and `real` (units, or boolean for switches), plus `display` (string).
- * Writes to any view are accepted by the engine; the others follow by push.
+ * Writes to any view are accepted by the engine; the others follow by push (fact 97).
  *
  * Touch: every user edit of an automatable control is bracketed by `set_touch` on and off so
  * LUNA records one undo step and one automation pass (fact 26). A discrete edit (a click) is

@@ -25,6 +25,12 @@ Added
 - `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
   re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
   `min_sec` integrated from the session's tempo map (fact 96).
+- `Luna.MockEngine` fidelity: writing one view of a control (`value`, `real_value`,
+  `normalized_value`, `string_value`) re-derives the other three and pushes them to every
+  client, the writer included (fact 97), so a test that sets `gain.real` can assert on
+  `gain.display` the way the UI renders it. The tapers and formats are documented stand-ins
+  (faders −96..0..+12 dB around normalized 0.78, pans `L<n>`/`C`/`R<n>`, switches snapping to
+  their steps), not LUNA's own.
 - Every skill, the scaffold README and `docs/llms.txt` ask an agent that hits a workflow the
   SDK could support better to end its reply with `UA BUILDER SDK FEEDBACK:` followed by a
   prompt that could be used to update the SDK for that workflow.

@@ -9,6 +9,9 @@
  * - child add/remove arrives on the child's own path with `operation` (fact 7);
  * - `set` on a node rather than a property fails with `uasrv.invalid_property`;
  * - read-only properties fail with `uasrv.read_only`;
+ * - a write to one view of a control (`value`, `real_value`, `normalized_value`,
+ *   `string_value`) re-derives the other three and pushes them to every port, the writer
+ *   included (fact 97); the mappings are the mock's documented stand-ins, not LUNA's;
  * - pushes are delivered on a later macrotask, never synchronously; `await engine.settled()`.
  *
  * @example
@@ -119,6 +122,40 @@ function wireFloat(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Number.isInteger(value) ? 0 : value;
 }
+
+/**
+ * The mock's control-view mappings (fact 97). LUNA's real tapers and formats are per control
+ * and not exposed (fact 85), so these are documented stand-ins chosen to agree with the
+ * mock's seeds: a fader maps normalized 0 → −96 dB, 0.78 → 0 dB (the measured resting point)
+ * and 1 → +12 dB, formatted with one decimal; a pan maps 0..1 linearly to −100..100,
+ * formatted `L<n>`/`C`/`R<n>`.
+ */
+const FADER_ZERO = 0.78;
+const FADER_MIN = -96;
+const FADER_MAX = 12;
+
+function faderToReal(n: number): number {
+  return n <= FADER_ZERO ? FADER_MIN - (n / FADER_ZERO) * FADER_MIN : ((n - FADER_ZERO) / (1 - FADER_ZERO)) * FADER_MAX;
+}
+
+function faderToNormalized(real: number): number {
+  const n = real <= 0 ? ((real - FADER_MIN) / -FADER_MIN) * FADER_ZERO : FADER_ZERO + (real / FADER_MAX) * (1 - FADER_ZERO);
+  return Math.min(1, Math.max(0, n));
+}
+
+function formatPan(real: number): string {
+  const n = Math.round(Math.abs(real));
+  return n === 0 ? 'C' : real < 0 ? `L${n}` : `R${n}`;
+}
+
+function parsePan(text: string): number {
+  const m = /^([LR])(\d+(?:\.\d+)?)$/.exec(text);
+  if (m) return (m[1] === 'L' ? -1 : 1) * Number(m[2]);
+  return text === 'C' ? 0 : Number(text) || 0;
+}
+
+/** The four coupled views of a control's value (fact 97). */
+const CONTROL_VIEWS = new Set(['value', 'real_value', 'normalized_value', 'string_value']);
 
 export class MockEngine {
   private readonly nodes = new Map<string, MockNode>();
@@ -1522,6 +1559,10 @@ export class MockEngine {
     if (isTrack && name === 'input_monitor' && data === true && this.value('/preferences', 'record_mute') === true) {
       throw new UAError('uasrv.invalid_value', `set ${path}: uasrv.invalid_value`, { cmd: 'set', path });
     }
+    if (node.properties.get('control_type') !== undefined && CONTROL_VIEWS.has(name)) {
+      this.writeControl(nodePath, node, name, data, from);
+      return null;
+    }
     node.properties.set(name, data);
     this.push({ path: `${nodePath}/${name}/value`, data }, from);
     if (name === 'record_enabled' && /^\/sessions\/[^/]+$/.test(nodePath)) this.runRecord(nodePath, data === true || data === 1);
@@ -1530,6 +1571,75 @@ export class MockEngine {
     // The live state follows the switch (fact 88); auto-monitoring an armed track is not modelled.
     if (isTrack && name === 'input_monitor') this.setValue(nodePath, 'input_monitor_state', data === true);
     return null;
+  }
+
+  /**
+   * A client write to one view of a control (fact 97): re-derive the other three and push
+   * them to every port — the writer too, since they are derived (fact 6); only the written
+   * view itself is withheld from the writer. A switch snaps to a step of its
+   * `real_values`/`string_values`; a continuous control goes through the mock's stand-in
+   * taper and format (see {@link faderToReal}); a plugin `parameter`'s `value` tracks its
+   * normalized view, since plugin units are plugin-specific (fact 85).
+   */
+  private writeControl(nodePath: string, node: MockNode, written: string, data: unknown, from: MockPort): void {
+    const p = node.properties;
+    const views: Record<string, unknown> = {};
+    if (p.get('discrete') === true) {
+      const reals = (p.get('real_values') as (number | boolean)[] | undefined) ?? [false, true];
+      const strings = (p.get('string_values') as string[] | undefined) ?? ['false', 'true'];
+      const steps = Math.max(reals.length, 2);
+      const index = Math.max(
+        0,
+        Math.min(
+          steps - 1,
+          written === 'real_value'
+            ? reals.includes(data as number | boolean)
+              ? reals.indexOf(data as number | boolean)
+              : data
+                ? 1
+                : 0
+            : written === 'string_value'
+              ? Math.max(0, strings.indexOf(String(data)))
+              : written === 'normalized_value'
+                ? Math.round(Number(data) * (steps - 1))
+                : Math.round(Number(data)),
+        ),
+      );
+      views['value'] = index;
+      views['real_value'] = reals[index] ?? index;
+      views['normalized_value'] = index / (steps - 1);
+      views['string_value'] = strings[index] ?? String(index);
+    } else {
+      const pan = String(p.get('control_type') ?? '').startsWith('pan');
+      const parameter = p.get('control_type') === 'parameter';
+      const real =
+        written === 'real_value'
+          ? Number(data)
+          : written === 'string_value'
+            ? pan
+              ? parsePan(String(data))
+              : Number(data) || 0
+            : written === 'normalized_value' || parameter
+              ? pan
+                ? Number(data) * 200 - 100
+                : faderToReal(Number(data))
+              : Number(data);
+      const normalized =
+        written === 'normalized_value' || (parameter && written === 'value')
+          ? Number(data)
+          : pan
+            ? Math.min(1, Math.max(0, (real + 100) / 200))
+            : faderToNormalized(real);
+      views['real_value'] = real;
+      views['normalized_value'] = normalized;
+      views['string_value'] = pan ? formatPan(real) : real.toFixed(1);
+      views['value'] = parameter ? normalized : real;
+    }
+    views[written] = data; // the written view passes through verbatim
+    for (const [prop, value] of Object.entries(views)) {
+      p.set(prop, value);
+      this.push({ path: `${nodePath}/${prop}/value`, data: value }, prop === written ? from : undefined);
+    }
   }
 
   /**
