@@ -3,34 +3,30 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
-## 0.1.0-alpha.2
+## 0.1.0-alpha.3
 
-Measured against the wasm LUNA engine (fact 96 in `docs/EVIDENCE.md`, 2026-09-29); native
-LUNA's `min_sec` precision is an open check for the live lane.
+Facts 97-99 in `docs/EVIDENCE.md`: the preset query and `set_inserts` preset fields are
+verified from deviced source; the MockEngine control-view tapers are documented stand-ins.
+
+Changed
+- `ua-builder pack` produces a `<name>.lunaaddon` bundle (a folder with the extension, shown
+  as a package in the macOS Finder) instead of a zip, matching LUNA's bundle-only installer.
+  The copy is pure Node, so the zip/PowerShell split is gone; `--out` gains the `.lunaaddon`
+  extension when it is missing, and a bundle inside the Add On folder is never packed into the
+  next one. Install by dropping the bundle into LUNA's Add Ons folder; a previously shipped
+  `.zip` must be repacked.
 
 Added
-- `Transport.seconds`: the playhead in wall-clock seconds, `transport.tick` converted through
-  the session's tempo map. Safe on any session from `luna.session()` (the tempo map loads with
-  `session.ready()`); read earlier it throws `unavailable` instead of converting at a guessed
-  tempo. `TransportLocation.min_sec` is documented (fact 96): present on `location` pushes,
-  its `seconds` fractional on the wasm engine (measured); floor it for display.
-- `Luna.formatMinSec(seconds, { fraction })`: a zero-padded `MM:SS` clock as a companion to
-  `formatBarBeat`, with optional fractional digits, flooring rather than rounding and clamping
-  negatives to zero.
-- `Luna.bindClock(el, transport, { render, bindings })`: a smooth playback clock. The engine
-  pushes `location` only several times a second, so the binding anchors on each push (the push
-  stays authoritative) and interpolates with requestAnimationFrame while `transport.playing`,
-  cancels on stop, and returns a release function. Default paint is
-  `formatMinSec(seconds, { fraction: 1 })` into `el.textContent`.
-- `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
-  re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
-  `min_sec` integrated from the session's tempo map (fact 96).
-- Fixed: `npx ua-builder` in a freshly scaffolded project could die with "Permission denied" —
-  the plugin sync copied `sdk/cli.js` (the plugin's bin) without its executable bit, and zip
-  extractions drop the bit too. The sync now chmods the copy, `check:plugin` gates on it, the
-  CLI restores its own bit whenever it is run via `node .../cli.js`, `ua-builder doctor`
-  reports and heals the project's installed bin, and the scaffold README documents the
-  one-time `node node_modules/.bin/ua-builder doctor` recovery.
+- `luna.presets` (`Luna.Presets`): `query({ pluginId | deviceTypeId, search?, favorite?,
+  limit? })` over `post /presets/query` (fact 98), returning rows decoded from LUNA's
+  columnar reply, and `find(pluginId, name)` for the exact-name match, preferring a user preset over a
+  factory one of the same name.
+- `Effect.setPlugin(pluginId, { presetUid })`: a `presetUid` from `luna.presets.find()` rides
+  in the same `set_inserts` entry, so LUNA adds the plugin already on that preset, state and
+  preset identity applied in one undo step (fact 99); `presetName` alone still only labels the
+  effect. `Luna.MockEngine.addPreset()` seeds a preset library that answers
+  `/presets/query` columnar with 0/1 flags, and `set_inserts` stores `preset_name`/`preset_uid`
+  on the slot (a known uid takes the library's name).
 - `ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>]`: open a served page in
   headless Chrome, wait until a `Luna` client on it is connected and its focused session is
   ready (the new `Luna.clients()` registry of open clients, a tooling hook; `--wait`
@@ -65,6 +61,37 @@ Added
   `gain.display` the way the UI renders it. The tapers and formats are documented stand-ins
   (faders −96..0..+12 dB around normalized 0.78, pans `L<n>`/`C`/`R<n>`, switches snapping to
   their steps), not LUNA's own.
+
+Fixed
+- `npx ua-builder` in a freshly scaffolded project could die with "Permission denied" —
+  the plugin sync copied `sdk/cli.js` (the plugin's bin) without its executable bit, and zip
+  extractions drop the bit too. The sync now chmods the copy, `check:plugin` gates on it, the
+  CLI restores its own bit whenever it is run via `node .../cli.js`, `ua-builder doctor`
+  reports and heals the project's installed bin, and the scaffold README documents the
+  one-time `node node_modules/.bin/ua-builder doctor` recovery.
+
+## 0.1.0-alpha.2
+
+Measured against the wasm LUNA engine (fact 96 in `docs/EVIDENCE.md`, 2026-09-29); native
+LUNA's `min_sec` precision is an open check for the live lane.
+
+Added
+- `Transport.seconds`: the playhead in wall-clock seconds, `transport.tick` converted through
+  the session's tempo map. Safe on any session from `luna.session()` (the tempo map loads with
+  `session.ready()`); read earlier it throws `unavailable` instead of converting at a guessed
+  tempo. `TransportLocation.min_sec` is documented (fact 96): present on `location` pushes,
+  its `seconds` fractional on the wasm engine (measured); floor it for display.
+- `Luna.formatMinSec(seconds, { fraction })`: a zero-padded `MM:SS` clock as a companion to
+  `formatBarBeat`, with optional fractional digits, flooring rather than rounding and clamping
+  negatives to zero.
+- `Luna.bindClock(el, transport, { render, bindings })`: a smooth playback clock. The engine
+  pushes `location` only several times a second, so the binding anchors on each push (the push
+  stays authoritative) and interpolates with requestAnimationFrame while `transport.playing`,
+  cancels on stop, and returns a release function. Default paint is
+  `formatMinSec(seconds, { fraction: 1 })` into `el.textContent`.
+- `Luna.MockEngine` fidelity: an engine-side `setValue('play_start', ...)` on a stopped session
+  re-reports `location` the way a client-side set does (fact 90), and `locationAt` now carries
+  `min_sec` integrated from the session's tempo map (fact 96).
 - Every skill, the scaffold README and `docs/llms.txt` ask an agent that hits a workflow the
   SDK could support better to end its reply with `UA BUILDER SDK FEEDBACK:` followed by a
   prompt that could be used to update the SDK for that workflow.

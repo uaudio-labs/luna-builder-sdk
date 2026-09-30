@@ -8,11 +8,11 @@
 
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
-| <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Session`](Session.md).[`client`](Session.md#client) |
+| <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Sessions`](Sessions.md).[`client`](Sessions.md#client) |
 | <a id="created"></a> `created` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`unknown`\> | - | - |
 | <a id="length"></a> `length` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | Duration in nanoseconds. | - |
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
-| <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Session`](Session.md).[`path`](Session.md#path) |
+| <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Sessions`](Sessions.md).[`path`](Sessions.md#path) |
 | <a id="samplerate"></a> `sampleRate` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
 | <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | `mono` or `stereo`. | - |
 

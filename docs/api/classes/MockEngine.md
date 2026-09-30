@@ -179,6 +179,35 @@ Add a plugin to the catalog.
 
 ***
 
+### addPreset()
+
+```ts
+addPreset(
+   pluginId, 
+   name, 
+   options): string;
+```
+
+Add a preset for a plugin to the library (fact 98). Returns its uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `pluginId` | `string` |
+| `name` | `string` |
+| `options` | \{ `factory?`: `boolean`; `favorite?`: `boolean`; `uid?`: `string`; `version?`: `number`; \} |
+| `options.factory?` | `boolean` |
+| `options.favorite?` | `boolean` |
+| `options.uid?` | `string` |
+| `options.version?` | `number` |
+
+#### Returns
+
+`string`
+
+***
+
 ### addSession()
 
 ```ts

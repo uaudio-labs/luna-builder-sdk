@@ -19,6 +19,7 @@
 - [`GuiWindow`](GuiWindow.md)
 - [`MidiClip`](MidiClip.md)
 - [`Plugin`](Plugin.md)
+- [`Presets`](Presets.md)
 - [`TempoEvent`](TempoEvent.md)
 - [`TimeSignature`](TimeSignature.md)
 - [`KeySignature`](KeySignature.md)

@@ -11,6 +11,7 @@
 | <a id="jobs"></a> `jobs` | `readonly` | [`Jobs`](Jobs.md) | - |
 | <a id="plugins"></a> `plugins` | `readonly` | [`Plugins`](Plugins.md) | The plugin catalog (`/plugins`). Call `load()` once before reading. |
 | <a id="preferences"></a> `preferences` | `readonly` | [`Preferences`](Preferences.md) | - |
+| <a id="presets"></a> `presets` | `readonly` | [`Presets`](Presets.md) | The preset library query (`/presets`). |
 | <a id="raw"></a> `raw` | `readonly` | [`Port`](../interfaces/Port.md) | The transport. Escape hatch: `luna.raw.get('/sessions')`. |
 | <a id="renders"></a> `renders` | `readonly` | [`Renders`](Renders.md) | - |
 | <a id="sessions"></a> `sessions` | `readonly` | [`Sessions`](Sessions.md) | Open sessions and the commands that create or open them. |

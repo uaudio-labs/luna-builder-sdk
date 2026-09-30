@@ -46,6 +46,7 @@
 | [Plugin](classes/Plugin.md) | - |
 | [Plugins](classes/Plugins.md) | An observable ordered collection with id lookup. |
 | [Preferences](classes/Preferences.md) | `/preferences`: engine preferences as writable properties by name. |
+| [Presets](classes/Presets.md) | - |
 | [Render](classes/Render.md) | `/renders/<uid>`: a bounce or an export. `state` runs `created` -> `running` -> `completed` | `aborted`, and LUNA drops the node shortly after it settles, so latch anything you still need rather than reading it later (fact 44). |
 | [Renders](classes/Renders.md) | An observable ordered collection with id lookup. |
 | [RequestTimeout](classes/RequestTimeout.md) | The engine did not answer a request within the port's timeout. |
@@ -111,6 +112,8 @@
 | [PairRange](interfaces/PairRange.md) | - |
 | [PluginManifest](interfaces/PluginManifest.md) | - |
 | [Port](interfaces/Port.md) | A connection to one engine. |
+| [PresetQueryOptions](interfaces/PresetQueryOptions.md) | - |
+| [PresetRow](interfaces/PresetRow.md) | - |
 | [ProgressTask](interfaces/ProgressTask.md) | - |
 | [Prop](interfaces/Prop.md) | A readable, observable value. `value` is `undefined` until the first load or push. |
 | [QueryOptions](interfaces/QueryOptions.md) | - |

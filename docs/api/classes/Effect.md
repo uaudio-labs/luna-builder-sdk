@@ -366,14 +366,19 @@ slot is the proof: an unknown or unusable plugin rejects with the slot's
 `plugin_error` as the code (for example `mixer.missing_plug-in`). Pass `wait: false`
 to resolve on the reply alone.
 
+A preset can ride in the same call: `presetUid` (from [Presets.find](Presets.md#find)) makes LUNA
+load that preset onto the effect — state and identity, which is what the preset browser
+keys on — while `presetName` alone only labels the effect (fact 99).
+
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `pluginId` | `string` |
-| `options` | \{ `pluginName?`: `string`; `presetName?`: `string`; `timeoutMs?`: `number`; `wait?`: `boolean`; \} |
+| `options` | \{ `pluginName?`: `string`; `presetName?`: `string`; `presetUid?`: `string`; `timeoutMs?`: `number`; `wait?`: `boolean`; \} |
 | `options.pluginName?` | `string` |
 | `options.presetName?` | `string` |
+| `options.presetUid?` | `string` |
 | `options.timeoutMs?` | `number` |
 | `options.wait?` | `boolean` |
 
@@ -386,6 +391,8 @@ to resolve on the reply alone.
 ```ts
 await slot.setPlugin('com.uaudio.uadx.1176');
 slot.loaded.value; // true
+const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
+await slot.setPlugin('uaudio_qi', { presetName: preset?.name, presetUid: preset?.uid });
 ```
 
 ***
