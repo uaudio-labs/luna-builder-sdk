@@ -79,6 +79,38 @@ output (fact 83). Orders after everything already in the session.
 
 ***
 
+### addChord()
+
+```ts
+addChord(
+   sessionUid, 
+   tick, 
+   name): number;
+```
+
+Put a chord on a session's Chord ruler, as a user typing one in LUNA would: it replaces
+any chord at `tick`, and `♭`/`♯` are stored as `b`/`#` (fact 100). Returns the rowid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `sessionUid` | `string` |
+| `tick` | `number` |
+| `name` | `string` |
+
+#### Returns
+
+`number`
+
+#### Example
+
+```ts
+engine.addChord('abc', 0, 'Am7');
+```
+
+***
+
 ### addDevice()
 
 ```ts

@@ -6,6 +6,12 @@ engine is versioned separately.
 ## Unreleased
 
 Added
+- `session.musical.chords`: LUNA's Chord ruler as a live `Luna.Chords` collection (`sorted`,
+  `at(tick)`) of `Luna.Chord` (`location`, `name`, `parsed`; `rename`, `moveTo`, `delete`).
+  `musical.addChord(tick, name)`, `musical.setChords(chords, { replaceRange })` (a whole
+  progression as one undo entry) and `musical.clearChords()`. `Luna.parseChord('Am7/G')`
+  gives `{ root, type, bass }`. `Luna.MockEngine` models the verbs and adds
+  `engine.addChord(sessionUid, tick, name)` for a chord typed in LUNA. Fact 100.
 - `session.focusedTrack`: a `Prop<Track>` for the track the user is working on. It is the main
   context's `lastSelectedTrack`, else the first selected track, else the first visible track.
   It notifies only when the answer moves to another track.

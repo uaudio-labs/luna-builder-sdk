@@ -68,7 +68,7 @@ The engine drops clients idle for `/status/timeout_ms` (30 s default). The SDK p
 | Effects | `<channel>/effects/<slot>` with `controls/` |
 | Playlists, clips | `/sessions/<uid>/playlists/<pl>/clips/<clip>` |
 | Audio sources | `/workspace/sessions/<package uid>/audio/<uid>` |
-| Tempo, meter, key, markers | `/sessions/<uid>/{tempo_map,time_signatures,key_signatures,markers}/<rowid>` |
+| Tempo, meter, key, markers, chords | `/sessions/<uid>/{tempo_map,time_signatures,key_signatures,markers,chords}/<rowid>` |
 | Edit context | `/sessions/<uid>/contexts/main` |
 | Plugin catalog | `/plugins/<plugin id>` |
 | Session packages | `/workspace/sessions/<uid>`, `post /workspace/query` |

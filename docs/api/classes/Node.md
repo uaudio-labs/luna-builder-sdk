@@ -12,6 +12,7 @@
 - [`AudioSource`](AudioSource.md)
 - [`Effect`](Effect.md)
 - [`Marker`](Marker.md)
+- [`Chord`](Chord.md)
 - [`Context`](Context.md)
 - [`BreakpointNode`](BreakpointNode.md)
 - [`Gui`](Gui.md)

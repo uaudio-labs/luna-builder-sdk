@@ -4,14 +4,63 @@ The musical structure of one session.
 
 ## Properties
 
-| Property | Modifier | Type |
-| ------ | ------ | ------ |
-| <a id="keysignatures"></a> `keySignatures` | `readonly` | [`Collection`](Collection.md)\<[`KeySignature`](KeySignature.md)\> |
-| <a id="tempomap"></a> `tempoMap` | `readonly` | [`Collection`](Collection.md)\<[`TempoEvent`](TempoEvent.md)\> |
-| <a id="timeline"></a> `timeline` | `readonly` | [`Timeline`](Timeline.md) |
-| <a id="timesignatures"></a> `timeSignatures` | `readonly` | [`Collection`](Collection.md)\<[`TimeSignature`](TimeSignature.md)\> |
+| Property | Modifier | Type | Description |
+| ------ | ------ | ------ | ------ |
+| <a id="chords"></a> `chords` | `readonly` | [`Chords`](Chords.md) | LUNA's Chord ruler. |
+| <a id="keysignatures"></a> `keySignatures` | `readonly` | [`Collection`](Collection.md)\<[`KeySignature`](KeySignature.md)\> | - |
+| <a id="tempomap"></a> `tempoMap` | `readonly` | [`Collection`](Collection.md)\<[`TempoEvent`](TempoEvent.md)\> | - |
+| <a id="timeline"></a> `timeline` | `readonly` | [`Timeline`](Timeline.md) | - |
+| <a id="timesignatures"></a> `timeSignatures` | `readonly` | [`Collection`](Collection.md)\<[`TimeSignature`](TimeSignature.md)\> | - |
 
 ## Methods
+
+### addChord()
+
+```ts
+addChord(tick, name): Promise<Chord>;
+```
+
+Add a chord to the Chord ruler at `tick` and resolve to it once it is in [chords](#chords).
+A chord already at `tick` is replaced, as in LUNA (fact 100). One undo entry.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tick` | `number` |
+| `name` | `string` |
+
+#### Returns
+
+`Promise`\<[`Chord`](Chord.md)\>
+
+#### Example
+
+```ts
+const chord = await session.musical.addChord(Luna.WHOLE_NOTE * 4, 'Am7');
+```
+
+***
+
+### clearChords()
+
+```ts
+clearChords(): Promise<void>;
+```
+
+Delete every chord on the ruler as one undo entry ("Clear Chords").
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.musical.clearChords();
+```
+
+***
 
 ### deleteTempo()
 
@@ -37,7 +86,7 @@ deleteTempo(tick): Promise<unknown>;
 ready(): Promise<void>;
 ```
 
-Load the three maps. Idempotent.
+Load the three maps and the Chord ruler. Idempotent.
 
 #### Returns
 
@@ -62,6 +111,43 @@ Move bar one to `tick`.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### setChords()
+
+```ts
+setChords(chords, options): Promise<void>;
+```
+
+Write a chord progression as one undo entry. Each chord replaces any chord at its tick.
+With `replaceRange: [start, stop]`, every other chord from `start` up to (not including)
+`stop` is deleted first, so the span holds exactly the progression. Chords already on the
+ruler as asked are not rewritten, and a call that changes nothing makes no undo entry.
+Resolves once [chords](#setchords-1) shows the result.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `chords` | readonly [`ChordSpec`](../interfaces/ChordSpec.md)[] |
+| `options` | \{ `replaceRange?`: \[`number`, `number`\]; `undoName?`: `string`; \} |
+| `options.replaceRange?` | \[`number`, `number`\] |
+| `options.undoName?` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+const bar = Luna.WHOLE_NOTE;
+await session.musical.setChords(
+  ['C', 'Am', 'F', 'G'].map((name, i) => ({ tick: i * bar, name })),
+  { replaceRange: [0, 4 * bar] },
+);
+```
 
 ***
 

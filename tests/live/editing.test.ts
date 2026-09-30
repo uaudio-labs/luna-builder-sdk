@@ -1,7 +1,7 @@
 /**
  * Live lane for the editing surface added for the recipes: note velocity, mute and
- * deletion through LUNA's edit selection (fact 74), marker verbs, and the waveform
- * placement that draws a clip (facts 72-73).
+ * deletion through LUNA's edit selection (fact 74), marker and Chord ruler verbs (fact 100),
+ * and the waveform placement that draws a clip (facts 72-73).
  *
  * Needs LUNA on 4718 with a session open and at least one track with an active playlist.
  * Everything it creates it removes; the undo entries remain, because the wire cannot drop
@@ -122,6 +122,30 @@ describe.skipIf(!live)('live: editing', () => {
     await marker!.delete();
     await Luna.settle(() => session.markers.byId(uid) === undefined, 'delete marker', { refresh: () => session.markers.reload() });
     marker = undefined;
+  });
+
+  it('writes a chord progression as one undo entry and edits a chord', async () => {
+    const chords = session.musical.chords;
+    const span: [number, number] = [base, base + 16 * B];
+    const before = chords.items.filter((c) => (c.location.value ?? 0) >= span[0] && (c.location.value ?? 0) < span[1]);
+    expect(before).toEqual([]); // past every clip, so past any chord a user put there too
+
+    await session.musical.setChords(
+      ['C', 'Am', 'F', 'G'].map((name, i) => ({ tick: base + i * 4 * B, name })),
+      { replaceRange: span },
+    );
+    const written = () => chords.sorted.filter((c) => (c.location.value ?? 0) >= span[0] && (c.location.value ?? 0) < span[1]);
+    expect(written().map((c) => c.name.value)).toEqual(['C', 'Am', 'F', 'G']);
+
+    await session.undo();
+    await Luna.settle(() => written().length === 0, 'undo set chords', { refresh: () => chords.reload() });
+
+    const chord = await session.musical.addChord(base, 'C');
+    await chord.rename('C/E');
+    expect(chord.parsed).toEqual({ root: 'C', type: '', bass: 'E' });
+    await chord.moveTo(base + 4 * B);
+    await chord.delete();
+    expect(written()).toEqual([]);
   });
 
   it('reads overview pairs at the size the engine really uses', async () => {

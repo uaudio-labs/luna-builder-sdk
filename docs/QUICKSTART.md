@@ -188,11 +188,12 @@ await slot.setIn(false);                            // bypass (not the `enabled`
 await slot.clear();
 ```
 
-## 9. Markers, tempo, selection
+## 9. Markers, chords, tempo, selection
 
 ```js
 await session.addMarker(Luna.WHOLE_NOTE * 8, 'Chorus'); session.markers.sorted; await marker.delete();
 await marker.rename('Verse'); await marker.moveTo(Luna.WHOLE_NOTE * 12);
+await session.musical.setChords([{ tick: 0, name: 'C' }, { tick: Luna.WHOLE_NOTE, name: 'Am7/G' }]); // Chord ruler, one undo entry; session.musical.chords.sorted[1].parsed → { root: 'A', type: 'm7', bass: 'G' }
 await session.musical.setTempo(96); await session.musical.setTimeSignature(3, 4, 5);
 session.focusedTrack.value;  // last selected track, else first selected, else first visible
 await session.context.select({ startTick, stopTick, trackUids: [track.id] });

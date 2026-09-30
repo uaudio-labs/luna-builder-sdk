@@ -1,10 +1,10 @@
 /**
- * Tempo map, time signatures and key signatures of a session, plus a {@link Timeline} that
- * converts between ticks, seconds and bar|beat using them.
+ * Tempo map, time signatures, key signatures and the Chord ruler of a session, plus a
+ * {@link Timeline} that converts between ticks, seconds and bar|beat using them.
  *
  * Nodes: `/sessions/<uid>/tempo_map/<rowid>` (`tick`, `time`, `tempo`),
  * `/sessions/<uid>/time_signatures/<rowid>` (`tick`, `bar`, `numerator`, `denominator`, `partial`),
- * `/sessions/<uid>/key_signatures/<rowid>`.
+ * `/sessions/<uid>/key_signatures/<rowid>`, `/sessions/<uid>/chords/<rowid>` (see {@link Chords}).
  *
  * @example
  * await session.musical.ready();
@@ -15,8 +15,10 @@
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
 import { UAError } from '../wire/errors';
+import { Chord, Chords, checkChordSpecs, normalizeChordName, type ChordSpec } from './chords';
 import { Collection } from './collection';
 import { Node } from './node';
+import { requireTick, settle } from './settle';
 import { TICKS_PER_BEAT, type BarBeat } from './ticks';
 
 export class TempoEvent extends Node {
@@ -207,6 +209,8 @@ export class Musical {
   readonly tempoMap: Collection<TempoEvent>;
   readonly timeSignatures: Collection<TimeSignature>;
   readonly keySignatures: Collection<KeySignature>;
+  /** LUNA's Chord ruler. */
+  readonly chords: Chords;
   readonly timeline: Timeline;
   private readyPromise: Promise<void> | undefined;
 
@@ -215,20 +219,22 @@ export class Musical {
     private readonly client: Client,
     private readonly sessionPath: string,
     private readonly sessionUid: string,
+    private readonly transaction: <T>(name: string, fn: () => Promise<T>) => Promise<T> = (_name, fn) => fn(),
   ) {
     const opts = { levels: 2, commands: false, flatvalue: true };
     this.tempoMap = new Collection<TempoEvent>(client, `${sessionPath}/tempo_map`, (p) => new TempoEvent(client, p), opts);
     this.timeSignatures = new Collection<TimeSignature>(client, `${sessionPath}/time_signatures`, (p) => new TimeSignature(client, p), opts);
     this.keySignatures = new Collection<KeySignature>(client, `${sessionPath}/key_signatures`, (p) => new KeySignature(client, p), opts);
+    this.chords = new Chords(client, sessionPath, sessionUid);
     this.timeline = new Timeline(
       () => this.tempoMap.items,
       () => this.timeSignatures.items,
     );
   }
 
-  /** Load the three maps. Idempotent. */
+  /** Load the three maps and the Chord ruler. Idempotent. */
   ready(): Promise<void> {
-    this.readyPromise ??= Promise.all([this.tempoMap.load(), this.timeSignatures.load(), this.keySignatures.load()]).then(() => undefined);
+    this.readyPromise ??= Promise.all([this.tempoMap.load(), this.timeSignatures.load(), this.keySignatures.load(), this.chords.load()]).then(() => undefined);
     return this.readyPromise;
   }
 
@@ -302,8 +308,87 @@ export class Musical {
     return this.post('set_bar_one', { tick });
   }
 
+  private settleChords(done: () => boolean, what: string): Promise<void> {
+    return settle(done, what, {
+      path: this.chords.path,
+      refresh: () => this.chords.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
+  private hasChord(tick: number, name: string, fresh: (c: Chord) => boolean = () => true): boolean {
+    const wanted = normalizeChordName(name);
+    return this.chords.items.some((c) => c.location.value === tick && c.name.value === wanted && fresh(c));
+  }
+
+  /**
+   * Add a chord to the Chord ruler at `tick` and resolve to it once it is in {@link chords}.
+   * A chord already at `tick` is replaced, as in LUNA (fact 100). One undo entry.
+   *
+   * @example
+   * const chord = await session.musical.addChord(Luna.WHOLE_NOTE * 4, 'Am7');
+   */
+  async addChord(tick: number, name: string): Promise<Chord> {
+    requireTick(tick, 'chord tick');
+    if (typeof name !== 'string' || name.trim() === '') throw new UAError('out_of_range', 'chord name must be a non-empty chord name');
+    const before = new Set(this.chords.items.map((c) => c.id));
+    await this.post('set_chord', { location: tick, name });
+    const fresh = (c: Chord): boolean => !before.has(c.id);
+    await this.settleChords(() => this.hasChord(tick, name, fresh), 'add chord');
+    return this.chords.items.find((c) => c.location.value === tick && fresh(c))!;
+  }
+
+  /**
+   * Write a chord progression as one undo entry. Each chord replaces any chord at its tick.
+   * With `replaceRange: [start, stop]`, every other chord from `start` up to (not including)
+   * `stop` is deleted first, so the span holds exactly the progression. Chords already on the
+   * ruler as asked are not rewritten, and a call that changes nothing makes no undo entry.
+   * Resolves once {@link chords} shows the result.
+   *
+   * @example
+   * const bar = Luna.WHOLE_NOTE;
+   * await session.musical.setChords(
+   *   ['C', 'Am', 'F', 'G'].map((name, i) => ({ tick: i * bar, name })),
+   *   { replaceRange: [0, 4 * bar] },
+   * );
+   */
+  async setChords(chords: readonly ChordSpec[], options: { replaceRange?: [number, number]; undoName?: string } = {}): Promise<void> {
+    checkChordSpecs(chords);
+    const range = options.replaceRange;
+    if (range) {
+      requireTick(range[0], 'replaceRange start');
+      requireTick(range[1], 'replaceRange stop');
+    }
+    const ticks = new Set(chords.map((c) => c.tick));
+    const inRange = (c: Chord): boolean => range !== undefined && (c.location.value ?? 0) >= range[0] && (c.location.value ?? 0) < range[1];
+    const stale = this.chords.items.filter((c) => inRange(c) && !ticks.has(c.location.value ?? 0));
+    const staleIds = new Set(stale.map((c) => c.id));
+    // A chord already on the ruler as asked is left alone rather than replaced by a copy.
+    const writes = chords.filter((c) => !this.hasChord(c.tick, c.name));
+    if (stale.length === 0 && writes.length === 0) return;
+    await this.transaction(options.undoName ?? 'Set Chords', async () => {
+      for (const c of stale) await this.post('delete_chord', { rowid: c.rowid.value ?? Number(c.id) });
+      for (const c of writes) await this.post('set_chord', { location: c.tick, name: c.name });
+    });
+    await this.settleChords(
+      () => chords.every((c) => this.hasChord(c.tick, c.name)) && !this.chords.items.some((c) => staleIds.has(c.id)),
+      'set chords',
+    );
+  }
+
+  /**
+   * Delete every chord on the ruler as one undo entry ("Clear Chords").
+   *
+   * @example await session.musical.clearChords();
+   */
+  async clearChords(): Promise<void> {
+    await this.post('delete_chord', { all: true });
+    await this.settleChords(() => this.chords.items.length === 0, 'clear chords');
+  }
+
   /** @internal */
   dispose(): void {
+    this.chords.dispose();
     this.tempoMap.dispose();
     this.timeSignatures.dispose();
     this.keySignatures.dispose();

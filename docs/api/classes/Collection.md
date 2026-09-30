@@ -6,6 +6,7 @@ An observable ordered collection with id lookup.
 
 - [`Controls`](Controls.md)
 - [`Markers`](Markers.md)
+- [`Chords`](Chords.md)
 - [`Automation`](Automation.md)
 - [`Plugins`](Plugins.md)
 - [`Devices`](Devices.md)

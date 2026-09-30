@@ -91,6 +91,9 @@ function decodeMidiTable(value: unknown): Required<MockMidiRow>[] {
   });
 }
 
+/** deviced's `NormalizeAccidentals`: chord names store `♭`/`♯` as `b`/`#` (fact 100). */
+const normalizeChordName = (name: string): string => name.replace(/\u266D/g, 'b').replace(/\u266F/g, '#');
+
 function groupByClip<T extends { clip_uid?: string }>(rows: readonly T[]): Map<string, T[]> {
   const out = new Map<string, T[]>();
   for (const row of rows) {
@@ -1083,6 +1086,31 @@ export class MockEngine {
         engine.removeNode(`${base}/markers/${body.rowid}`);
         return null;
       },
+      set_chord: (data, engine) => {
+        const body = (data ?? {}) as { rowid?: number; location?: number; name?: string };
+        if (body.rowid !== undefined) {
+          const path = `${base}/chords/${body.rowid}`;
+          if (!engine.has(path)) throw new UAError('device.database_error', 'set_chord: no such rowid', { cmd: 'post', path: `${base}/set_chord` });
+          if (body.location !== undefined) {
+            // deviced deletes whatever sits at the target tick first, this chord included (fact 100).
+            const occupant = engine.chordAt(uid, body.location);
+            if (occupant !== undefined) engine.removeNode(`${base}/chords/${occupant}`);
+            if (engine.has(path)) engine.setValue(path, 'location', body.location);
+          }
+          if (body.name) engine.setValue(path, 'name', normalizeChordName(body.name));
+          return null;
+        }
+        if (body.location === undefined) throw new UAError('uasrv.missing_field', 'set_chord: location is required to add a chord', { cmd: 'post', path: `${base}/set_chord` });
+        engine.addChord(uid, body.location, body.name ?? '');
+        return null;
+      },
+      delete_chord: (data, engine) => {
+        const body = (data ?? {}) as { rowid?: number; location?: number; all?: boolean };
+        const rows = body.all === true ? engine.children(`${base}/chords`) : body.rowid !== undefined ? [String(body.rowid)] : body.location !== undefined ? [engine.chordAt(uid, body.location)].filter((r) => r !== undefined) : undefined;
+        if (!rows) throw new UAError('uasrv.missing_field', 'delete_chord: rowid, location or all is required', { cmd: 'post', path: `${base}/delete_chord` });
+        for (const row of rows) engine.removeNode(`${base}/chords/${row}`);
+        return null;
+      },
     };
     this.addNode(base, {
       properties: {
@@ -1237,6 +1265,7 @@ export class MockEngine {
     this.addNode(`${base}/time_signatures/1`, { properties: { tick: 0, bar: 1, partial: false, numerator: 4, denominator: 4 } });
     this.addNode(`${base}/key_signatures`);
     this.addNode(`${base}/markers`);
+    this.addNode(`${base}/chords`);
     this.addPackage(pkg, { name: options.name ?? uid, lastOpened: Date.now() });
     // LUNA gives every session four cue buses before anything else (fact 83).
     for (let i = 0; i < 4; i++) this.addBus(uid, `cue${i + 1}_${uid}`, { name: `CUE ${i + 1}`, busType: `cue_${i}`, stemFormat: 'stereo' });
@@ -1357,6 +1386,27 @@ export class MockEngine {
       },
     });
     return clipUid;
+  }
+
+  /**
+   * Put a chord on a session's Chord ruler, as a user typing one in LUNA would: it replaces
+   * any chord at `tick`, and `♭`/`♯` are stored as `b`/`#` (fact 100). Returns the rowid.
+   *
+   * @example engine.addChord('abc', 0, 'Am7');
+   */
+  addChord(sessionUid: string, tick: number, name: string): number {
+    const base = `/sessions/${sessionUid}/chords`;
+    const existing = this.chordAt(sessionUid, tick);
+    if (existing !== undefined) this.removeNode(`${base}/${existing}`);
+    const rowid = this.nextRow();
+    this.addNode(`${base}/${rowid}`, { properties: { rowid, location: tick, name: normalizeChordName(name) } });
+    return rowid;
+  }
+
+  /** @internal The rowid of the chord at `tick`, if any. */
+  chordAt(sessionUid: string, tick: number): string | undefined {
+    const base = `/sessions/${sessionUid}/chords`;
+    return this.children(base).find((row) => this.value(`${base}/${row}`, 'location') === tick);
   }
 
   /**

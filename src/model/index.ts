@@ -36,6 +36,8 @@ export type { ClipAudio, ClipLike, PairRange, SourceLookup, TraceWaveformOptions
 export { Effect, PLUGIN_ERROR_MISSING } from './effect';
 export type { InsertSlot } from './effect';
 export { Marker, Markers } from './markers';
+export { Chord, Chords, parseChord, normalizeChordName } from './chords';
+export type { ChordSpec, ParsedChord } from './chords';
 export { Context, selectedNotes } from './context';
 export type { ContextType, SelectedNotes, SelectionSnapshot } from './context';
 export { Automation, BreakpointNode, AUTOMATION_MODES, automationModeOrdinal } from './automation';

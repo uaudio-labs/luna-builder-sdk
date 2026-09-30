@@ -12,6 +12,8 @@
 | [Bus](classes/Bus.md) | - |
 | [Cell](classes/Cell.md) | The concrete [Prop](interfaces/Prop.md): a value with a version stamp and listeners. The version lets the Store decide whether an incoming value is newer than a pending write. |
 | [Channel](classes/Channel.md) | - |
+| [Chord](classes/Chord.md) | - |
+| [Chords](classes/Chords.md) | An observable ordered collection with id lookup. |
 | [Client](classes/Client.md) | - |
 | [Clip](classes/Clip.md) | - |
 | [Collection](classes/Collection.md) | An observable ordered collection with id lookup. |
@@ -79,6 +81,7 @@
 | [BootOptions](interfaces/BootOptions.md) | - |
 | [BounceOptions](interfaces/BounceOptions.md) | - |
 | [Breakpoint](interfaces/Breakpoint.md) | - |
+| [ChordSpec](interfaces/ChordSpec.md) | A chord to write with `musical.setChords`. |
 | [ClipAudio](interfaces/ClipAudio.md) | - |
 | [ClipLike](interfaces/ClipLike.md) | The clip fields placement needs. A [Clip](classes/Clip.md) satisfies it, as does a plain snapshot. |
 | [ClipSnapshot](interfaces/ClipSnapshot.md) | A clip's state at one moment, as plain data: what a view draws from. |
@@ -110,6 +113,7 @@
 | [OverviewInfo](interfaces/OverviewInfo.md) | What LUNA reports about one analysis: total pairs, and a digest that changes when the pairs do. |
 | [OverviewOptions](interfaces/OverviewOptions.md) | - |
 | [PairRange](interfaces/PairRange.md) | - |
+| [ParsedChord](interfaces/ParsedChord.md) | A chord name split the way LUNA spells chords: root, type suffix, slash bass. |
 | [PluginManifest](interfaces/PluginManifest.md) | - |
 | [Port](interfaces/Port.md) | A connection to one engine. |
 | [PresetQueryOptions](interfaces/PresetQueryOptions.md) | - |
@@ -251,9 +255,11 @@
 | [listOf](functions/listOf.md) | A [List](interfaces/List.md) over a [Prop](interfaces/Prop.md) of arrays. |
 | [locationOptions](functions/locationOptions.md) | `host` and `port` from the page URL, if present. |
 | [midiByte](functions/midiByte.md) | A 7-bit MIDI value, or `out_of_range`. `min` is 1 for a velocity that must sound. |
+| [normalizeChordName](functions/normalizeChordName.md) | LUNA stores `♭` and `♯` as ASCII `b` and `#` (fact 100); the SDK compares names the same way. |
 | [pairNotes](functions/pairNotes.md) | Pair note-on rows with the next note-off of the same channel and pitch, in tick order. Pure, and exported because a page that draws its own lanes often wants it directly. |
 | [pairNs](functions/pairNs.md) | Nanoseconds one pair of this analysis covers. |
 | [pairRange](functions/pairRange.md) | The overview pairs covering `[startNs, stopNs)` of a source. Both are file offsets, never timeline ticks. |
+| [parseChord](functions/parseChord.md) | Split a chord name into root, type and bass. `undefined` when it does not start with a note letter, since the ruler accepts any text (`N.C.`, `riff`). |
 | [propertyValue](functions/propertyValue.md) | Unwrap a property reply. A `get` on a property answers `{ value: X }` unless `flatvalue` was requested, in which case it answers `X` directly. |
 | [requireTick](functions/requireTick.md) | Reject a non-integer tick before it reaches the wire: LUNA stores whatever it is given (fact 12). |
 | [secondsToTicks](functions/secondsToTicks.md) | Seconds to ticks at a constant tempo. |

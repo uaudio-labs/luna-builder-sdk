@@ -7,7 +7,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 
 ## Docs
 
-- [Quickstart](QUICKSTART.md): connect, session, props, tracks, controls, clips, effects, markers, workspace, gui, errors, testing.
+- [Quickstart](QUICKSTART.md): connect, session, props, tracks, controls, clips, effects, markers, chords, workspace, gui, errors, testing.
 - [Recipes](RECIPES.md): eleven Add Ons to ask an agent for, and the SDK each one leans on.
 - [Manifest](MANIFEST.md): `manifest.json` fields, Add Ons folder, how LUNA loads a page.
 - [Protocol](PROTOCOL.md): verbs, paths, correlation, pushes, error codes, where things live.
