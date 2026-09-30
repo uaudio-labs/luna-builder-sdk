@@ -47,7 +47,11 @@ placeholder "connecting..." reads from a scaffold still binding its session.
 ```sh
 npx ua-builder probe http://localhost:8790/ --expr "document.querySelector('.gain').textContent"
 npx ua-builder probe http://localhost:8790/   # default: document.body.innerText
+npx ua-builder probe http://localhost:8790/ --screenshot page.png   # also save what it drew
 ```
+
+`--mock [fixture.js]` probes the page on `?engine=mock` instead of LUNA, which is useful for
+checking layout offline. It is not proof that the page works with LUNA.
 
 Probe before and after each change from the second client; the two readouts are the proof.
 A page still in its `Luna.connect()` retry loop counts as not ready — the probe keeps waiting

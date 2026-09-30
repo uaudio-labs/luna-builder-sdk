@@ -3,6 +3,31 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
+## Unreleased
+
+Added
+- `session.focusedTrack`: a `Prop<Track>` for the track the user is working on. It is the main
+  context's `lastSelectedTrack`, else the first selected track, else the first visible track.
+  It notifies only when the answer moves to another track.
+- `Collection.membersReady()`: resolves once every member the engine added has its properties.
+- `Luna.connect({ engine: 'mock', setup })` and `?engine=mock` on the page URL: an in-memory
+  `Luna.MockEngine`, filled by `setup`, else by a page-defined `globalThis.LunaMockSetup`, else
+  by `Luna.MockEngine.demo()` (one session with four tracks). `luna.mock` is the engine, and
+  `MockPort.engine` is now public.
+- `ua-builder probe --mock [fixture.js]`: probes a real page with no LUNA running. The fixture
+  is installed before any page script runs. `--screenshot <file.png>` saves the page once it
+  is ready and has painted two animation frames.
+- `Store.readsSettled()`, `Store.pendingReads` and `Store.hasProperties(nodePath)`.
+
+Changed
+- A member a loaded collection learns of from an `added` push (native LUNA sends no data with
+  one, fact 7) is still in `items` at once. Its `onChange` now waits until the SDK's read of
+  the member lands, so listeners never see it with empty props. Removals still notify at once.
+- `luna.settled()` also waits for reads in flight, repeating flush-then-read until both are
+  quiet. After `await engine.settled(); await luna.settled();` a clip or track another client
+  just added has its values.
+- `ua-builder probe` opens a blank tab, then navigates it, so it can install scripts first.
+
 ## 0.1.0-alpha.3
 
 Facts 97-99 in `docs/EVIDENCE.md`: the preset query and `set_inserts` preset fields are

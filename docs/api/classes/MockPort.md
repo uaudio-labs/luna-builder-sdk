@@ -6,6 +6,12 @@ One client connection to a [MockEngine](MockEngine.md).
 
 - [`Port`](../interfaces/Port.md)
 
+## Properties
+
+| Property | Modifier | Type | Description |
+| ------ | ------ | ------ | ------ |
+| <a id="engine"></a> `engine` | `readonly` | [`MockEngine`](MockEngine.md) | The engine this port talks to, for driving it from a page that connected with `engine: 'mock'`. |
+
 ## Accessors
 
 ### connected

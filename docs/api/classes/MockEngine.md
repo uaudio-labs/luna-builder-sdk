@@ -621,3 +621,25 @@ Read a property directly (no port involved).
 #### Returns
 
 `unknown`
+
+***
+
+### demo()
+
+```ts
+static demo(): MockEngine;
+```
+
+A small ready-made engine: one focused session, `Demo`, with four audio tracks. What a
+page gets from `?engine=mock` when it defines no `LunaMockSetup`.
+
+#### Returns
+
+`MockEngine`
+
+#### Example
+
+```ts
+const engine = Luna.MockEngine.demo();
+const luna = await Luna.connect({ port_: engine.port() });
+```

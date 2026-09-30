@@ -69,6 +69,37 @@ describe('Luna.connect', () => {
     expect(err.code).toBe('engine_boot');
   });
 
+  it('connects to an in-memory engine with engine: mock, filled by setup, and exposes it as luna.mock', async () => {
+    const luna = await Luna.connect({ engine: 'mock', setup: (engine) => engine.addSession('s', { name: 'Fixture', tracks: ['Vox', 'Bass'] }) });
+    expect(luna.engine).toBe('mock');
+    const session = await luna.session();
+    expect(session.name.value).toBe('Fixture');
+    expect(session.tracks.items.map((t) => t.id)).toEqual(['Vox', 'Bass']);
+    luna.mock!.setValue('/sessions/s/tracks/Vox', 'name', 'Lead');
+    await luna.mock!.settled();
+    expect(session.tracks.byId('Vox')!.name.value).toBe('Lead');
+    await luna.close();
+  });
+
+  it('takes ?engine=mock from the page URL, using the page-defined LunaMockSetup or else the demo session', async () => {
+    (globalThis as G).location = { search: '?engine=mock&port=4718' };
+    expect(Luna.locationOptions().engine).toBe('mock');
+    const demo = await Luna.connect();
+    expect(demo.engine).toBe('mock');
+    expect((await demo.session()).tracks.items.map((t) => t.id)).toEqual(['Vocal', 'Guitar', 'Bass', 'Drums']);
+    await demo.close();
+
+    const g = globalThis as { LunaMockSetup?: (engine: InstanceType<typeof Luna.MockEngine>) => void };
+    g.LunaMockSetup = (engine) => engine.addSession('p', { name: 'From page', tracks: ['One'] });
+    try {
+      const luna = await Luna.connect();
+      expect((await luna.session()).name.value).toBe('From page');
+      await luna.close();
+    } finally {
+      delete g.LunaMockSetup;
+    }
+  });
+
   it('is not embedded without a port on the URL', () => {
     expect(Luna.isEmbeddedInLuna()).toBe(false);
     expect(Luna.hasNativeBridge()).toBe(false);

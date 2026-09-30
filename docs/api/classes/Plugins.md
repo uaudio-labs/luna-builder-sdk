@@ -147,6 +147,34 @@ Fetch the member list (and, with the default `levels: 2`, each member's properti
 
 ***
 
+### membersReady()
+
+```ts
+membersReady(): Promise<void>;
+```
+
+Resolve once every member the engine has added has its properties loaded. Resolves at
+once when nothing is being fetched.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.insertClip({ trackUid: track.id, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+await Luna.settle(() => lane.clips.items.length > before, 'insert clip');
+await lane.clips.membersReady();
+lane.clips.items.at(-1).start.value;   // loaded, not undefined
+```
+
+#### Inherited from
+
+[`Collection`](Collection.md).[`membersReady`](Collection.md#membersready)
+
+***
+
 ### onChange()
 
 ```ts

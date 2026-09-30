@@ -27,7 +27,9 @@ Wait correctly:
 - `await luna.settled()` before asserting that an `onChange` listener fired: listeners are
   coalesced (next-frame in a browser) and this flushes them immediately. Asserting a listener
   count after only `engine.settled()` races the frame.
-- `await node.load()` on a node that was just added by a push; adds carry no data.
+- A member added by a push is in `items` at once but empty (adds carry no data); its
+  collection reads it and fires `onChange` only then. `await luna.settled()` (or
+  `await coll.membersReady()`) waits for that read.
 - A push carrying an unchanged value fires no `onChange` (`Luna.Cell` drops equals): pushing
   the same location twice is silent the second time. The first value a prop ever receives
   does fire — nothing swallows an "initial snapshot".
@@ -66,7 +68,8 @@ never create or delete tracks in a user's session; use `session.visibleTracks[0]
 ## Structure
 
 Put engine logic in a DOM-free file (`logic.js`) and test that. Test DOM code only through
-`ua-builder serve` and a browser. A test that needs `document` is a sign logic leaked into
+`ua-builder serve` and a browser: `ua-builder probe <url> --mock fixture.js` runs the real page
+on a mock with no LUNA (the fixture sets `globalThis.LunaMockSetup = (engine) => { ... }`). A test that needs `document` is a sign logic leaked into
 `main.js`.
 
 ## SDK feedback

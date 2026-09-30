@@ -1465,6 +1465,20 @@ export class MockEngine {
     this.addNode(`${path}/automation`);
   }
 
+  /**
+   * A small ready-made engine: one focused session, `Demo`, with four audio tracks. What a
+   * page gets from `?engine=mock` when it defines no `LunaMockSetup`.
+   *
+   * @example
+   * const engine = Luna.MockEngine.demo();
+   * const luna = await Luna.connect({ port_: engine.port() });
+   */
+  static demo(): MockEngine {
+    const engine = new MockEngine();
+    engine.addSession('demo', { name: 'Demo', tracks: ['Vocal', 'Guitar', 'Bass', 'Drums'] });
+    return engine;
+  }
+
   /** Resolves once every queued push has been delivered. */
   settled(): Promise<void> {
     if (this.pendingDeliveries === 0) return Promise.resolve();
@@ -1770,7 +1784,10 @@ export class MockPort implements Port {
   private readonly statusListeners = new Set<StatusListener>();
 
   /** @internal */
-  constructor(private readonly engine: MockEngine) {}
+  constructor(
+    /** The engine this port talks to, for driving it from a page that connected with `engine: 'mock'`. */
+    readonly engine: MockEngine,
+  ) {}
 
   get connected(): boolean {
     return this.status === 'connected';

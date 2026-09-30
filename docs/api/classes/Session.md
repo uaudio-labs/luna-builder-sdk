@@ -17,6 +17,7 @@
 | <a id="commandstatus"></a> `commandStatus` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | - | - |
 | <a id="context"></a> `context` | `readonly` | [`Context`](Context.md) | The `main` edit context: selection, zoom and the context edit commands. | - |
 | <a id="contexts"></a> `contexts` | `readonly` | [`Collection`](Collection.md)\<[`Context`](Context.md)\> | Edit contexts (`main`, `editor`, `alt_<n>`). | - |
+| <a id="focusedtrack"></a> `focusedTrack` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`Track`](Track.md)\> | The track the user is working on: the main context's `lastSelectedTrack`, else the first selected track, else the first visible track. `undefined` only when the session has no visible track. Notifies when the answer moves to a different track, not on every selection write. The last fallback follows tracks being added and removed, not a reorder. **Example** `const draw = () => (label.textContent = session.focusedTrack.value?.name.value ?? 'No track'); session.focusedTrack.onChange(draw); draw();` | - |
 | <a id="loaded"></a> `loaded` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="markers"></a> `markers` | `readonly` | [`Markers`](Markers.md) | - | - |
 | <a id="musical"></a> `musical` | `readonly` | [`Musical`](Musical.md) | Tempo map, time and key signatures, and tick/bar/seconds conversion. | - |

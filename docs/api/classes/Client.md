@@ -35,6 +35,23 @@ get connected(): boolean;
 
 ***
 
+### mock
+
+#### Get Signature
+
+```ts
+get mock(): MockEngine | undefined;
+```
+
+The in-memory engine when `engine === 'mock'`, for driving the page as a second client
+would: `luna.mock.setValue(path, 'name', 'Lead')`.
+
+##### Returns
+
+[`MockEngine`](MockEngine.md) \| `undefined`
+
+***
+
 ### wasm
 
 #### Get Signature
@@ -123,6 +140,10 @@ tests: after `await engine.settled()` the prop *values* are already current, but
 `onChange` listeners are coalesced to the next frame — this flushes them immediately, so
 `await engine.settled(); await luna.settled();` is deterministic without waiting for a
 requestAnimationFrame or timer.
+
+It also waits for reads in flight, such as the properties of a member the engine just
+added (the collection holds that member's `onChange` until they land), so a new clip or
+track has its values when this resolves.
 
 #### Returns
 

@@ -37,6 +37,10 @@ export class Store {
   private readonly childCells = new Map<string, Cell<string[]>>();
   private readonly watches = new Map<string, Watch>();
   private readonly loaded = new Map<string, GetOptions | undefined>();
+  /** Nodes that have had at least one property written, by a read or a push. */
+  private readonly propertied = new Set<string>();
+  /** Reads sent and not yet answered, for {@link readsSettled}. */
+  private readonly inflight = new Set<Promise<unknown>>();
   private readonly eventListeners = new Set<(event: Event) => void>();
   /** The last value the engine confirmed for each property cell, for rolling back a refused write. */
   private readonly confirmed = new Map<string, unknown>();
@@ -86,7 +90,41 @@ export class Store {
    * its own cell; a node path fills its properties and children, recursing into nested children
    * when the reply carries them (`levels`/`recursive`).
    */
-  async load(path: string, options?: GetOptions): Promise<unknown> {
+  load(path: string, options?: GetOptions): Promise<unknown> {
+    const read = this.read(path, options);
+    this.inflight.add(read);
+    const done = (): void => {
+      this.inflight.delete(read);
+    };
+    read.then(done, done);
+    return read;
+  }
+
+  /**
+   * Resolve once no read is in flight, including reads started while waiting (a member the
+   * engine just added is fetched on its own, and that fetch can start another). Never
+   * rejects; a failed read counts as finished.
+   *
+   * @example
+   * await luna.store.readsSettled();
+   */
+  async readsSettled(): Promise<void> {
+    for (let round = 0; this.inflight.size > 0 && round < 16; round++) {
+      await Promise.allSettled([...this.inflight]);
+    }
+  }
+
+  /** How many reads are in flight. */
+  get pendingReads(): number {
+    return this.inflight.size;
+  }
+
+  /** True once any property of `nodePath` has been written by a read or a push. */
+  hasProperties(nodePath: string): boolean {
+    return this.propertied.has(nodePath);
+  }
+
+  private async read(path: string, options?: GetOptions): Promise<unknown> {
     const opts: GetOptions = { flatvalue: true, commands: false, ...options };
     // Stamp the reply with the moment the read was sent: anything that lands while it is in
     // flight is newer and must survive it.
@@ -205,6 +243,9 @@ export class Store {
     for (const key of [...this.loaded.keys()]) {
       if (key === nodePath || key.startsWith(nodePath + '/')) this.loaded.delete(key);
     }
+    for (const key of [...this.propertied]) {
+      if (key === nodePath || key.startsWith(nodePath + '/')) this.propertied.delete(key);
+    }
   }
 
   /** Re-`get` every loaded path. Called automatically after a reconnect. */
@@ -254,6 +295,7 @@ export class Store {
   /** Write a value the engine reported, and remember it as confirmed if it took. */
   private write(node: string, name: string, value: unknown, version: number): void {
     const cell = this.cell(node, name);
+    this.propertied.add(node);
     cell.update(value, version);
     if (cell.version === version) this.confirmed.set(`${node}/${name}`, value);
   }

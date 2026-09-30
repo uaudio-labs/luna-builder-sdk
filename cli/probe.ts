@@ -10,9 +10,12 @@
  *   ua-builder probe http://localhost:8790/ --expr "document.querySelector('#status').textContent"
  *   ua-builder probe http://localhost:8790/ --settle 0   # skip the DOM-quiet settle phase
  *   ua-builder probe http://localhost:8790/ --wait "!!globalThis.ready" --expr "ready.state"
+ *   ua-builder probe http://localhost:8790/ --mock               # no LUNA: the demo mock session
+ *   ua-builder probe http://localhost:8790/ --mock fixture.js    # no LUNA: fixture.js sets LunaMockSetup
+ *   ua-builder probe http://localhost:8790/ --screenshot page.png
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { flagNumber, flagString, type Args } from './util';
@@ -50,12 +53,41 @@ export const LOADED_GATE = "location.href !== 'about:blank' && document.readySta
 /** The default probe: what a user would see. */
 export const DEFAULT_EXPR = 'document.body.innerText';
 
+/**
+ * Evaluated before a screenshot: two animation frames, so a canvas the page draws from an
+ * `onChange` or a `requestAnimationFrame` loop has painted. Without it the capture can land
+ * before the first paint and come out blank.
+ */
+export const PAINTED = 'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))';
+
+/**
+ * The page URL a `--mock` probe opens: `?engine=mock` added, so a page that calls a bare
+ * `Luna.connect()` gets an in-memory engine instead of looking for LUNA.
+ */
+export function mockUrl(url: string): string {
+  const u = new URL(url);
+  u.searchParams.set('engine', 'mock');
+  return u.toString();
+}
+
 export async function probe(args: Args): Promise<number> {
   const url = args.positional[0];
   if (!url) {
-    console.error('usage: ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--chrome <path>]');
+    console.error('usage: ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--screenshot <file.png>] [--chrome <path>]');
     return 2;
   }
+  const mock = args.flags['mock'];
+  const mockSetup = typeof mock === 'string' ? mock : undefined;
+  if (mockSetup !== undefined && !existsSync(mockSetup)) {
+    console.error(`probe: no mock setup file ${mockSetup} (it should assign globalThis.LunaMockSetup = (engine) => { ... })`);
+    return 2;
+  }
+  const screenshot = flagString(args, 'screenshot');
+  if (args.flags['screenshot'] === true) {
+    console.error('probe: --screenshot needs a file name, for example --screenshot page.png');
+    return 2;
+  }
+  const target = mock ? mockUrl(url) : url;
   const expr = flagString(args, 'expr') ?? DEFAULT_EXPR;
   const wait = flagString(args, 'wait') ?? DEFAULT_WAIT;
   const timeoutMs = flagNumber(args, 'timeout', 20_000);
@@ -70,9 +102,13 @@ export async function probe(args: Args): Promise<number> {
   const browser = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-first-run', '--autoplay-policy=no-user-gesture-required', `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank'], { stdio: 'ignore' });
   try {
     const cdpPort = await devtoolsPort(profile, timeoutMs);
-    const tab = (await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })).json()) as { webSocketDebuggerUrl: string };
+    // Open blank and navigate once connected, so a mock setup can be installed before any page script runs.
+    const tab = (await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?about:blank`, { method: 'PUT' })).json()) as { webSocketDebuggerUrl: string };
     const page = await openPage(tab.webSocketDebuggerUrl);
     try {
+      await page.send('Page.enable');
+      if (mockSetup !== undefined) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(mockSetup, 'utf8') });
+      await page.send('Page.navigate', { url: target });
       const started = Date.now();
       const timedOut = async (condition: string): Promise<number> => {
         console.error(`probe: timed out after ${timeoutMs} ms waiting for: ${condition}`);
@@ -110,6 +146,16 @@ export async function probe(args: Args): Promise<number> {
           last = dom;
           await sleep(settleMs);
         }
+      }
+      if (screenshot !== undefined) {
+        await page.evaluate(PAINTED);
+        const shot = (await page.send('Page.captureScreenshot', { format: 'png' })) as { result?: { data?: string } };
+        if (!shot.result?.data) {
+          console.error('probe: Chrome returned no screenshot');
+          return 1;
+        }
+        writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
+        console.error(`probe: wrote ${screenshot}`);
       }
       const result = await page.evaluate(expr);
       if (result.exceptionDetails) {
@@ -168,6 +214,7 @@ interface EvalResult {
 }
 
 interface Page {
+  send(method: string, params?: object): Promise<{ result?: unknown }>;
   evaluate(expr: string): Promise<EvalResult>;
   evalJson(expr: string): Promise<unknown>;
   readonly errors: string[];
@@ -182,7 +229,7 @@ async function openPage(wsUrl: string): Promise<Page> {
     ws.onerror = rej;
   });
   let id = 0;
-  const pending = new Map<number, (m: { result?: EvalResult }) => void>();
+  const pending = new Map<number, (m: { result?: unknown }) => void>();
   const errors: string[] = [];
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data)) as { id?: number; method?: string; result?: EvalResult; params?: { exceptionDetails?: { exception?: { description?: string } } } };
@@ -191,15 +238,16 @@ async function openPage(wsUrl: string): Promise<Page> {
       pending.delete(m.id);
     } else if (m.method === 'Runtime.exceptionThrown') errors.push(m.params?.exceptionDetails?.exception?.description ?? 'exception');
   };
-  const send = (method: string, params: object = {}): Promise<{ result?: EvalResult }> =>
+  const send = (method: string, params: object = {}): Promise<{ result?: unknown }> =>
     new Promise((res) => {
       const i = ++id;
       pending.set(i, res);
       ws.send(JSON.stringify({ id: i, method, params }));
     });
   await send('Runtime.enable');
-  const evaluate = async (expr: string): Promise<EvalResult> => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })).result ?? {};
+  const evaluate = async (expr: string): Promise<EvalResult> => ((await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })).result ?? {}) as EvalResult;
   return {
+    send,
     evaluate,
     evalJson: async (expr) => (await evaluate(expr)).result?.value,
     errors,

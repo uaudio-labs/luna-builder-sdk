@@ -11,6 +11,7 @@
 | <a id="port"></a> `port?` | `number` | - |
 | <a id="port_"></a> `port_?` | [`Port`](Port.md) | Use this transport instead of opening one. Its status is taken as-is. |
 | <a id="requesttimeoutms"></a> `requestTimeoutMs?` | `number` | Per-request timeout. Default 10 000 ms. |
+| <a id="setup"></a> `setup?` | (`engine`) => `void` \| `Promise`\<`void`\> | For `engine: 'mock'`: fill the engine before the client connects. Without it the page's `globalThis.LunaMockSetup` is used, and without that [MockEngine.demo](../classes/MockEngine.md#demo)'s session. The client reaches the engine afterwards as `luna.mock`. **Example** `await Luna.connect({ engine: 'mock', setup: (engine) => engine.addSession('s', { tracks: ['Vox', 'Bass'] }) });` |
 | <a id="url"></a> `url?` | `string` | - |
 | <a id="wasm"></a> `wasm?` | `Omit`\<[`BootOptions`](BootOptions.md), `"engineUrl"`\> | Extra wasm boot options (persistence, logging, timeout). |
 | <a id="websocket"></a> `WebSocket?` | [`SocketConstructor`](../type-aliases/SocketConstructor.md) | Injected WebSocket implementation (tests, Node). |

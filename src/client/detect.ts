@@ -8,8 +8,8 @@ import { DEFAULT_LUNA_PORT } from '../wire/websocket-port';
 export interface LocationOptions {
   host?: string;
   port?: number;
-  /** `?engine=wasm` asks for the in-page engine. */
-  engine?: 'wasm' | 'luna';
+  /** `?engine=wasm` asks for the in-page engine; `?engine=mock` for an in-memory {@link MockEngine}. */
+  engine?: 'wasm' | 'luna' | 'mock';
   /** `?engine_url=/path/` overrides where the wasm engine is loaded from. */
   engineUrl?: string;
 }
@@ -30,7 +30,7 @@ export function locationOptions(): LocationOptions {
   if (host) out.host = host;
   if (port && Number.isFinite(Number(port))) out.port = Number(port);
   const engine = params.get('engine');
-  if (engine === 'wasm' || engine === 'luna') out.engine = engine;
+  if (engine === 'wasm' || engine === 'luna' || engine === 'mock') out.engine = engine;
   const engineUrl = params.get('engine_url');
   if (engineUrl) out.engineUrl = engineUrl;
   return out;

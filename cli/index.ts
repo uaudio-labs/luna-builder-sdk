@@ -4,7 +4,7 @@
  *   ua-builder new <name> [--id com.x.y] [--title "..."] [--target window|app] [--width N --height N] [--dir path]
  *   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
  *   ua-builder test [dir] [--live]
- *   ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--chrome <path>]
+ *   ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--screenshot <file.png>] [--chrome <path>]
  *   ua-builder install [dir] [--name "Link Name"]
  *   ua-builder pack [dir] [--out Name.lunaaddon]
  *   ua-builder doctor

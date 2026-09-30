@@ -26,6 +26,22 @@ new Store(port, scheduler): Store;
 | <a id="port"></a> `port` | `readonly` | [`Port`](../interfaces/Port.md) |
 | <a id="scheduler"></a> `scheduler` | `readonly` | [`Scheduler`](Scheduler.md) |
 
+## Accessors
+
+### pendingReads
+
+#### Get Signature
+
+```ts
+get pendingReads(): number;
+```
+
+How many reads are in flight.
+
+##### Returns
+
+`number`
+
 ## Methods
 
 ### cell()
@@ -107,6 +123,26 @@ Drop a subtree from the mirror (after a `removed`, or when a view is disposed).
 
 ***
 
+### hasProperties()
+
+```ts
+hasProperties(nodePath): boolean;
+```
+
+True once any property of `nodePath` has been written by a read or a push.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `nodePath` | `string` |
+
+#### Returns
+
+`boolean`
+
+***
+
 ### knowsNode()
 
 ```ts
@@ -167,6 +203,28 @@ Raw event tap, called before cells are written. For delta-stream properties.
 #### Returns
 
 [`Unsubscribe`](../type-aliases/Unsubscribe.md)
+
+***
+
+### readsSettled()
+
+```ts
+readsSettled(): Promise<void>;
+```
+
+Resolve once no read is in flight, including reads started while waiting (a member the
+engine just added is fetched on its own, and that fetch can start another). Never
+rejects; a failed read counts as finished.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.store.readsSettled();
+```
 
 ***
 

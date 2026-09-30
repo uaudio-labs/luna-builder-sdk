@@ -15,6 +15,7 @@ import { Devices, Drivers, Jobs, Preferences, Renders, type AudioInput } from '.
 import { Gui } from '../model/gui';
 import type { WasmEngine } from '../engine/loader';
 import { WasmPort } from '../wire/wasm-port';
+import { MockPort, type MockEngine } from '../wire/mock-port';
 
 export type Engine = 'luna' | 'wasm' | 'mock';
 
@@ -120,6 +121,14 @@ export class Client {
     return this.raw.connected;
   }
 
+  /**
+   * The in-memory engine when `engine === 'mock'`, for driving the page as a second client
+   * would: `luna.mock.setValue(path, 'name', 'Lead')`.
+   */
+  get mock(): MockEngine | undefined {
+    return this.raw instanceof MockPort ? this.raw.engine : undefined;
+  }
+
   /** The in-page wasm engine (audio, persistence, health) when `engine === 'wasm'`. */
   get wasm(): WasmEngine | undefined {
     return this.raw instanceof WasmPort ? this.raw.engine : undefined;
@@ -131,10 +140,20 @@ export class Client {
    * `onChange` listeners are coalesced to the next frame — this flushes them immediately, so
    * `await engine.settled(); await luna.settled();` is deterministic without waiting for a
    * requestAnimationFrame or timer.
+   *
+   * It also waits for reads in flight, such as the properties of a member the engine just
+   * added (the collection holds that member's `onChange` until they land), so a new clip or
+   * track has its values when this resolves.
    */
-  settled(): Promise<void> {
-    this.store.scheduler.flush();
-    return this.store.scheduler.settled();
+  async settled(): Promise<void> {
+    // A flush can start a read (a collection fetching a member it just learned of), and a read
+    // that lands queues more notifications, so alternate until both are quiet.
+    for (let round = 0; round < 8; round++) {
+      this.store.scheduler.flush();
+      await this.store.scheduler.settled();
+      if (!this.store.pendingReads) return;
+      await this.store.readsSettled();
+    }
   }
 
   /** Disconnect and release everything. */

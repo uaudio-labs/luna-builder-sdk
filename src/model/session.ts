@@ -12,7 +12,7 @@
  * await session.undo();
  */
 import type { Client } from '../client/client';
-import type { Prop, WritableProp } from '../store/prop';
+import { derived, type Prop, type WritableProp } from '../store/prop';
 import { UAError } from '../wire/errors';
 import type { Unsubscribe } from '../wire/port';
 import { AudioSource } from './audio-source';
@@ -134,6 +134,18 @@ export class Session extends Node {
   readonly contexts: Collection<Context>;
   /** The `main` edit context: selection, zoom and the context edit commands. */
   readonly context: Context;
+  /**
+   * The track the user is working on: the main context's `lastSelectedTrack`, else the first
+   * selected track, else the first visible track. `undefined` only when the session has no
+   * visible track. Notifies when the answer moves to a different track, not on every
+   * selection write. The last fallback follows tracks being added and removed, not a reorder.
+   *
+   * @example
+   * const draw = () => (label.textContent = session.focusedTrack.value?.name.value ?? 'No track');
+   * session.focusedTrack.onChange(draw);
+   * draw();
+   */
+  readonly focusedTrack: Prop<Track>;
   private sourcesCollection: Collection<AudioSource> | undefined;
   private sourcesRelease: Unsubscribe | undefined;
   private batchDepth = 0;
@@ -165,6 +177,21 @@ export class Session extends Node {
     this.markers = new Markers(client, this.path, uid);
     this.contexts = new Collection<Context>(client, `${this.path}/contexts`, (p) => new Context(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.context = new Context(client, `${this.path}/contexts/main`, uid);
+    const focusedId = derived([this.context.lastSelectedTrack, this.context.selectionTracks, this.tracks], () => this.focusedTrackId(), { distinct: true });
+    this.focusedTrack = derived([focusedId], () => {
+      const id = focusedId.value;
+      return id === undefined ? undefined : this.tracks.byId(id);
+    });
+  }
+
+  /** The uid behind {@link focusedTrack}; a uid that names no track (a bus, a deleted track) is skipped. */
+  private focusedTrackId(): string | undefined {
+    const isTrack = (id: unknown): id is string => typeof id === 'string' && this.tracks.byId(id) !== undefined;
+    const last = this.context.lastSelectedTrack.value;
+    if (isTrack(last)) return last;
+    const selected = this.context.selectionTracks.value;
+    const first = Array.isArray(selected) ? selected.find(isTrack) : undefined;
+    return first ?? this.visibleTracks[0]?.id;
   }
 
   /**

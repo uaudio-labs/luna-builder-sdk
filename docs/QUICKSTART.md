@@ -1,7 +1,6 @@
 # Quickstart
 
-Build a LUNA Add On with `@uaudio/ua-builder-sdk`. Everything is under the `Luna` namespace.
-Read this top to bottom once; afterwards the section headings are the index.
+Build a LUNA Add On with `@uaudio/ua-builder-sdk`, all under `Luna`. Read once; then use the headings.
 
 ## 1. Create and run
 
@@ -21,21 +20,18 @@ The scaffold has `index.html`, `logic.js` (engine logic, tested), `main.js` (DOM
 ```js
 const luna = await Luna.connect();               // inside LUNA (?port= on the URL) or LUNA on localhost
 const luna = await Luna.connect({ engine: 'wasm' }); // in-page wasm engine (or ?engine=wasm on the URL)
+const luna = await Luna.connect({ engine: 'mock', setup: (e) => e.addSession('s', { tracks: ['Vox'] }) }); // no engine (or ?engine=mock)
 ```
 
-The wasm engine needs the page served with COOP/COEP headers and the engine files on the same
-origin; `ua-builder serve --engine <dir>` does both and mounts them at `/__engine/`. It boots
-with no session (`luna.sessions.create(...)`), audio needs a click (`luna.wasm.resumeAudio()`),
-and it has no `luna.gui`. See `skills/port-to-wasm/SKILL.md`.
+Wasm needs COOP/COEP headers and same-origin engine files: `ua-builder serve --engine <dir>`.
+It boots with no session (`luna.sessions.create(...)`), audio needs a click
+(`luna.wasm.resumeAudio()`), and there is no `luna.gui`. See `skills/port-to-wasm/SKILL.md`.
 
-Throws `Luna.NotRunning` if nothing answers. After the first success the connection reconnects
-by itself and re-subscribes; `luna.status` is a Prop with `connecting | connected |
-disconnected | closed`. `luna.engine` says which engine you got.
+Throws `Luna.NotRunning` if nothing answers; afterwards it reconnects by itself. `luna.status`
+is a Prop (`connecting | connected | disconnected | closed`); `luna.engine` names the engine.
 
-An Add On has the keyboard focus while it is in front, so bind LUNA's standard shortcuts
-right after connecting. Undo (Cmd/Ctrl+Z), redo (Cmd/Ctrl+Shift+Z), play (Space, Numpad 0)
-and record (Cmd/Ctrl+Space, Numpad 3) then run on the focused session for any key the page
-does not claim with `preventDefault()` and that is not typed into a text field:
+An Add On has the keyboard while in front, so bind LUNA's shortcuts (undo, redo, play, record)
+after connecting; they act on any key the page does not `preventDefault()` outside a text field:
 
 ```js
 Luna.bindShortcuts(luna);                                                // fact 79
@@ -53,10 +49,10 @@ await track.name.set('Lead Vocal');     // optimistic write, rolls back on rejec
 stop();
 ```
 
-Every list is a `Collection`: `.items`, `.byId(id)`, `.onChange(fn)`, `.load()`.
-Change notifications are coalesced to one per frame. Writes resolve when the engine
-acknowledges. Native LUNA does not echo your own write back (the wasm engine does); either way
-`.value` already holds it, and derived properties arrive by push.
+Every list is a `Collection`: `.items`, `.byId(id)`, `.onChange(fn)`, `.load()`,
+`.membersReady()`. A member the engine adds is in `.items` at once but empty until the SDK has
+read it; `onChange` and `membersReady()` wait for that read. Notifications coalesce per frame.
+Writes resolve on acknowledgement; `.value` holds them at once, echoed or not (fact 6).
 
 ## 4. Session
 
@@ -67,9 +63,8 @@ await session.undo(); await session.redo(); await session.save({ label: 'v2' });
 await session.transaction('Rename all', async () => { /* many writes -> one undo step */ });
 ```
 
-`luna.sessions` lists open sessions (`items`, `focused`, `focusedUid`) and creates or
-opens them: `await luna.sessions.create({ name })`, `await luna.sessions.open(packageUid)`.
-Follow session changes with `luna.sessions.focused.onChange(...)`.
+`luna.sessions` lists open sessions (`items`, `focused`, `focusedUid`; follow `focused.onChange`)
+and makes them: `await luna.sessions.create({ name })`, `await luna.sessions.open(packageUid)`.
 
 ## 5. Transport
 
@@ -87,16 +82,12 @@ Luna.formatTimeSignature(t.timeSignature.value);  // "4/4"; "-/-" until loaded
 const release = Luna.bindClock(clockEl, t);       // smooth MM:SS.s clock while playing
 ```
 
-Tick 0 is not always bar 1: a session with bars before bar 1 starts earlier, so seek to
-`{ bar: 1 }` rather than `0`. `returnToZero()` goes where LUNA's button does, the arrangement
-start, which is tick 0 until one is set. A seek sets the play start and both loop marks, as
-LUNA's own locate does, and resolves once the playhead is there; while playing it jumps at
-once, or pass `{ sync: 'next_bar' }` or `{ sync: 'loop_end' }`.
+Tick 0 is not always bar 1, so seek to `{ bar: 1 }`; `returnToZero()` goes to the arrangement
+start. A seek sets the play start and both loop marks, like LUNA's locate, and resolves once
+the playhead is there; while playing it jumps at once unless given `{ sync: 'next_bar' | 'loop_end' }`.
 
-`location` is pushed only several times a second and carries `min_sec` (minutes, plus seconds
-in the minute — fractional on the wasm engine, fact 96). For a sub-second display use
-`Luna.bindClock(el, t, { render })`: it anchors on each push (the engine stays authoritative),
-interpolates with requestAnimationFrame while playing, and returns a release function.
+`location` arrives only several times a second (its `min_sec` is fractional on wasm, fact 96).
+`Luna.bindClock(el, t, { render })` anchors on each push and interpolates per frame while playing.
 
 Ticks: `Luna.TICKS_PER_BEAT` (96e9), `Luna.WHOLE_NOTE`, `Luna.QUARTER_NOTE`, ...
 `session.musical.timeline.barBeat(tick)` and `.seconds(tick)` honour tempo and meter changes.
@@ -133,17 +124,14 @@ track.meter.onChange(() => bar.width = track.meter.level.value[0]);  // subscrib
 
 Anything untyped: `track.property('latency_override')`, `track.command('name', payload)`.
 
-**Touch: every control a user edits must be touched.** LUNA makes a user edit one undo step
-and one automation pass only if the control is touched when the edit starts and released
-when it ends (fact 78). Every Add On control follows one of two patterns:
+**Touch every control a user edits**, or the edit is not one undo step and automation pass (fact 78):
 
-- **Discrete (click):** buttons, toggles, menus, steppers, double-click-to-reset. Write once
-  with `set()`, `toggle()` or `resetToDefault()`; the SDK sends touch, write, release, in
-  order, and resolves after the release. Do not wrap a click in `begin()`/`end()`.
-- **Continuous (drag):** faders, knobs, XY pads. Touch on pointer down, write on every move,
-  release on pointer up. `Luna.bindRange(input, control)` does it all for `<input type="range">`,
-  `Luna.bindDrag(element, control)` for a div or canvas knob (pointer travel, keys, double-click
-  reset, `role="slider"`). Both follow LUNA except mid-drag, and settle on its value on release.
+- **Discrete (click):** buttons, toggles, menus, steppers, reset. Write once with `set()`,
+  `toggle()` or `resetToDefault()`; the SDK touches, writes and releases. No `begin()`/`end()`.
+- **Continuous (drag):** faders, knobs, XY pads: touch on press, write per move, release on up.
+  `Luna.bindRange(input, control)` does it for `<input type="range">`, `Luna.bindDrag(el,
+  control)` for a div or canvas knob (keys, double-click reset, `role="slider"`). Both follow
+  LUNA except mid-drag and settle on its value on release.
 
 ```js
 muteButton.onclick = () => track.mute.toggle();                 // discrete
@@ -153,12 +141,9 @@ const strips = new Luna.Bindings();                              // pass { bindi
 session.tracks.onChange(() => void strips.whenIdle(render));    // render() begins with strips.clear()
 ```
 
-Writes inside a gesture are not bracketed individually. `control.touchable` says whether a
-control is bracketed at all: automatable controls and switches are (solo is, so exclusive solo
-works), a non-automatable continuous control is not. Never rebuild a fader mid-drag, or the
-release never arrives: `Luna.Bindings` collects listeners (`strips.on(prop, fn)`) and bindings,
-and `whenIdle` waits for its last drag. For your own pointer code, `Luna.bindGesture` does only
-the touch and release; by hand, `control.begin()` on press and `control.end()` on release.
+`control.touchable` is false only for a non-automatable continuous control. Never rebuild a
+fader mid-drag or its release is lost: `Luna.Bindings` collects listeners and bindings and
+`whenIdle` waits out a drag. Own pointer code: `Luna.bindGesture` or `control.begin()`/`end()`.
 
 ## 7. Playlists, clips, sources
 
@@ -174,9 +159,7 @@ const ov = await src.overview({ index: 0, count: 1024 });   // min/max floats -1
 await session.newPlaylists([track.id], { duplicate: true }); await session.setPlaylist(track.id, 2);
 ```
 
-Drawing a clip's waveform means asking which source it really plays. A clip whose tick span
-does not match its source span at the session tempo is time-stretched by LUNA into a render,
-and it is the render's pairs that line up with the clip (fact 73):
+A clip that does not fit its source's tempo plays a stretched render; draw what `clipAudio` picks (fact 73):
 
 ```js
 const audio = Luna.clipAudio(clip, session.sources);      // undefined => draw an outline, never silence
@@ -211,6 +194,7 @@ await slot.clear();
 await session.addMarker(Luna.WHOLE_NOTE * 8, 'Chorus'); session.markers.sorted; await marker.delete();
 await marker.rename('Verse'); await marker.moveTo(Luna.WHOLE_NOTE * 12);
 await session.musical.setTempo(96); await session.musical.setTimeSignature(3, 4, 5);
+session.focusedTrack.value;  // last selected track, else first selected, else first visible
 await session.context.select({ startTick, stopTick, trackUids: [track.id] });
 await session.context.duplicate(); await session.context.nudge(Luna.SIXTEENTH_NOTE);
 await session.moveClips(toTick, { copy: true });    // uses the selection when no range given
@@ -218,8 +202,8 @@ await track.gain.automation.insert([{ tick: 0, value: 0 }, { tick: Luna.WHOLE_NO
 await track.setAutomationMode('touch');
 ```
 
-An editing verb answers `null` whether or not anything happened (fact 71), so wait for the
-model rather than trust the reply:
+Editing verbs answer `null` whether or not anything happened (fact 71). Wait for the model
+with `Luna.settle`, which also waits for any other state, such as another client's clip:
 
 ```js
 await clip.delete();
@@ -228,9 +212,8 @@ await Luna.settle(() => !pl.clips.byId(uid), 'delete clip', { refresh: () => pl.
 
 ## 10. MIDI edits and recording
 
-Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74). The SDK saves
-your selection, writes its own, posts once, and puts yours back — so it cannot run inside a
-`transaction()` batch, which LUNA holds until commit.
+Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps
+in its own and restores yours, so they cannot run inside a `transaction()`.
 
 ```js
 await clip.midi.ready();
@@ -240,8 +223,7 @@ await clip.midi.setMuted(quietNotes, true);              // one "Mute Notes" ent
 await clip.midi.deleteNotes([note]);                     // one entry, selection restored
 ```
 
-A record pass is one call. It arms, rolls, waits through the count-in for the real punch,
-holds, stops, disarms, and resolves once the take **and its source** are listed (fact 75):
+One call records a pass (arm, count in, punch, stop, disarm) and resolves to a drawable take (fact 75):
 
 ```js
 const inputs = await luna.audioInputs();                 // /devices/<d>/inputs
@@ -259,8 +241,7 @@ await luna.gui.setPage('mixer'); await luna.gui.openUrl(url); await luna.gui.rev
 const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
 ```
 
-`luna.gui` exists only inside LUNA. `luna.drivers`, `luna.preferences`, `luna.jobs`,
-`luna.renders` cover the rest of the engine.
+`luna.gui` exists only inside LUNA; `luna.drivers`, `.preferences`, `.jobs`, `.renders` cover the rest.
 
 ## 12. Escape hatch
 
@@ -271,16 +252,14 @@ await luna.raw.post('/sessions/abc/new_track', { uid: 'abc', name: 'X' });
 luna.raw.subscribe('/sessions/abc', (e) => console.log(e.path, e.operation ?? e.data), { recursive: true });
 ```
 
-Every command self-describes: `get <node>?properties=0&children=0` returns each command's
-JSON schema. `luna.raw` is the interactive way in: `await luna.raw.get('/sessions')`.
+Every command self-describes: `get <node>?properties=0&children=0` returns its JSON schemas.
 
 ## 13. Errors
 
-All errors are `Luna.Error` with `.code`: the engine's own string (`uasrv.invalid_property`,
-`uasrv.read_only`, `uasrv.invalid_object`) or `not_running`, `timeout`, `disconnected`,
-`no_session`, `unsupported`, `no_effect` (LUNA answered but the edit never showed, fact 71) and
-`disposed` (`Luna.Disposed`: the object's node is gone; `node.onDispose(fn)` tells you when).
-A `get` on a missing path is not an error; it answers `{}`.
+All errors are `Luna.Error` with `.code`: the engine's string (`uasrv.invalid_property`,
+`uasrv.read_only`, `uasrv.invalid_object`), or `not_running`, `timeout`, `disconnected`,
+`no_session`, `unsupported`, `no_effect` (the edit never showed, fact 71) or `disposed` (the
+node is gone; `node.onDispose(fn)`). A `get` on a missing path answers `{}`, not an error.
 
 ## 14. Testing
 
@@ -296,31 +275,23 @@ await luna.settled();                                // listeners notified
 engine.requests; engine.touches; engine.transactions; engine.fail(path, code);
 ```
 
-Wait in that order, always. After `await engine.settled()` every prop `value` reads current,
-but `onChange` listeners are coalesced (one call per batch of changes, delivered on the next
-animation frame in a browser); `await luna.settled()` flushes and delivers them immediately.
-Asserting on a listener without it races the frame. Two more timing rules: a push carrying an
-unchanged value fires no `onChange` (`Luna.Cell` drops equals), so re-sending the same
-location is silent; and the first value a prop ever receives *does* fire — there is no
-swallowed "initial snapshot".
+Wait in that order, always. After `engine.settled()` pushed values are current, but listeners
+are coalesced to the next frame and a just-added member is still being read; `luna.settled()`
+waits for both. An unchanged value fires no `onChange`; a prop's first value does.
 
-The mock reproduces the engine's real behaviours (`docs/EVIDENCE.md`). Live tests against
-LUNA run with `UA_LIVE=1` and must leave the session as they found it.
+The mock mirrors LUNA (`docs/EVIDENCE.md`). Live tests use `UA_LIVE=1` and restore what they touch.
 
-To check what a served page actually renders — for example that it follows an edit made by a
-second client — `ua-builder probe <url> [--expr <js>]` opens it in headless Chrome, waits
-until a `Luna` client on the page is connected and its focused session is ready
-(`Luna.clients()`; override with `--wait <js>`), lets the DOM go quiet (`--settle <ms>`,
-default 250, `0` to skip), evaluates the expression and prints JSON. A freshly served scaffold
-probes to its bound DOM with no hand-written wait.
+`ua-builder probe <url> [--expr <js>]` checks what a served page renders: headless Chrome waits
+for a connected `Luna` client with its session ready (`--wait <js>` overrides), for the DOM to
+go quiet (`--settle <ms>`, default 250), then prints the expression as JSON. `--mock` runs the
+page on `?engine=mock` with no LUNA: a demo session, or `--mock fixture.js` setting
+`globalThis.LunaMockSetup = (engine) => { ... }`. `--screenshot page.png` saves it once painted.
 
 ## 15. Inside LUNA vs a browser vs wasm
 
-LUNA opens your page with `?port=<engine port>`; `Luna.isEmbeddedInLuna()` tells you. In a plain
-browser the same page reaches LUNA on localhost, or the in-page wasm engine with `?engine=wasm`.
-`luna.engine` reports which one you got. Nothing else differs. Windows loads Add Ons from `file://`, so keep the script-tag bundle and avoid
-`<script type="module">`. The LUNA WebSocket has no authentication; any page in the
-webview can control LUNA.
+LUNA adds `?port=` (`Luna.isEmbeddedInLuna()`); a browser reaches LUNA on localhost, or
+`?engine=wasm` / `?engine=mock`. Windows loads Add Ons from `file://`, so use the script-tag
+bundle, not `<script type="module">`. The WebSocket has no auth; any webview page controls LUNA.
 
 ## 16. Units, in one line
 

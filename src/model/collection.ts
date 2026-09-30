@@ -2,6 +2,11 @@
  * A live list of child Nodes under one parent path. Members are created from the parent's
  * child-name cell and disposed when the engine removes them.
  *
+ * Once the collection is loaded, a member the engine adds later is in `items` at once, but
+ * native LUNA announces an add with no data (fact 7), so its props read `undefined` until the
+ * SDK has fetched it. `onChange` waits for that fetch: a listener never sees the new member
+ * empty. `await collection.membersReady()`, or `await luna.settled()`, waits for it too.
+ *
  * @example
  * session.tracks.items.map((t) => t.name.value);
  * session.tracks.byId(uid);
@@ -21,6 +26,11 @@ export class Collection<T extends Node> implements List<T> {
   private syncedVersion = -1;
   /** Member paths already fetched, so a new child is loaded once and only once. */
   private readonly fetched = new Set<string>();
+  /** Added members whose first read has not landed, by name. `onChange` waits for them. */
+  private readonly pending = new Map<string, Promise<void>>();
+  private disposed = false;
+  /** The members listeners were last told about. */
+  private announced: readonly T[] = [];
 
   /** @internal */
   constructor(
@@ -31,11 +41,13 @@ export class Collection<T extends Node> implements List<T> {
     private readonly loadOptions: GetOptions = { levels: 2 },
   ) {
     this.sync();
+    this.announced = this.ordered;
     // Follow the child list from the start, not only while someone listens, so a member the
     // engine removed is disposed when it goes rather than on the next read.
     this.namesUnsub = this.client.store.children(this.path).onChange(() => {
       this.sync();
-      for (const l of [...this.listeners]) l();
+      // An add still being fetched is announced when it lands, not now while it is empty.
+      this.announce();
     });
   }
 
@@ -52,6 +64,21 @@ export class Collection<T extends Node> implements List<T> {
   byId(id: string): T | undefined {
     this.ensureSynced();
     return this.members.get(id);
+  }
+
+  /**
+   * Resolve once every member the engine has added has its properties loaded. Resolves at
+   * once when nothing is being fetched.
+   *
+   * @example
+   * await session.insertClip({ trackUid: track.id, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+   * await Luna.settle(() => lane.clips.items.length > before, 'insert clip');
+   * await lane.clips.membersReady();
+   * lane.clips.items.at(-1).start.value;   // loaded, not undefined
+   */
+  async membersReady(): Promise<void> {
+    this.ensureSynced();
+    while (this.pending.size > 0) await Promise.allSettled([...this.pending.values()]);
   }
 
   /** Fetch the member list (and, with the default `levels: 2`, each member's properties). */
@@ -105,6 +132,8 @@ export class Collection<T extends Node> implements List<T> {
 
   /** @internal */
   dispose(): void {
+    this.disposed = true;
+    this.pending.clear();
     this.namesUnsub?.();
     this.namesUnsub = undefined;
     this.listeners.clear();
@@ -132,21 +161,48 @@ export class Collection<T extends Node> implements List<T> {
       if (!next.has(name)) {
         member.dispose();
         this.fetched.delete(`${this.path}/${name}`);
+        this.pending.delete(name);
       }
     }
     // A child announced by an `added` push carries no properties on native LUNA (fact 7),
     // so a member that appears after the folder was read has nothing in its cells. Fetch
-    // it once; the load notifies through the same cells when it lands.
+    // it once, and hold its onChange until the read lands so no listener sees it empty.
+    // One that already has properties (the wasm engine sends them with the add, fact 13, and
+    // a folder read fills every member) shows at once.
     if (this.loading) {
       for (const [name] of next) {
         const path = `${this.path}/${name}`;
         if (this.members.has(name) || this.fetched.has(path)) continue;
         this.fetched.add(path);
-        void this.client.store.load(path, this.loadOptions).catch(() => this.fetched.delete(path));
+        const hold = !this.client.store.hasProperties(path);
+        const read = this.client.store.load(path, this.loadOptions).then(
+          () => undefined,
+          () => {
+            this.fetched.delete(path);
+          },
+        );
+        if (!hold) continue;
+        const arrived: Promise<void> = read.then((): void => this.arrived(name, arrived));
+        this.pending.set(name, arrived);
       }
     }
     this.members = next;
     this.ordered = names.map((n) => next.get(n)!);
+  }
+
+  /** A held member's first read landed (or failed): tell listeners. */
+  private arrived(name: string, read: Promise<void>): void {
+    if (this.disposed || this.pending.get(name) !== read) return;
+    this.pending.delete(name);
+    this.announce();
+  }
+
+  /** Notify if the members a listener can see differ from those it was last told about. */
+  private announce(): void {
+    const now = this.pending.size ? this.ordered.filter((m) => !this.pending.has(nameOf(m))) : this.ordered;
+    if (sameMembers(this.announced, now)) return;
+    this.announced = now;
+    for (const l of [...this.listeners]) l();
   }
 
   /** @internal Re-read the child cell without notifying (used before first `onChange`). */
@@ -154,4 +210,12 @@ export class Collection<T extends Node> implements List<T> {
     this.sync();
     return this.ordered;
   }
+}
+
+function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((m, i) => m === b[i]);
+}
+
+function nameOf(node: Node): string {
+  return node.path.slice(node.path.lastIndexOf('/') + 1);
 }

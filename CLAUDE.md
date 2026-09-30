@@ -30,8 +30,8 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 - Write engine-behaviour tests against the mock, and when the mock's behaviour
   is a guess, mark the fact `unverified` in EVIDENCE.md and add a live check to
   `tests/live/`.
-- Use `await engine.settled()` for mock pushes and `await store.scheduler.settled()`
-  for change notifications; never rely on synchronous delivery.
+- Use `await engine.settled()` for mock pushes and `await luna.settled()` for change
+  notifications and member reads still in flight; never rely on synchronous delivery.
 - Three lanes: `npm test` (mock), `UA_LIVE=1 npm run test:live` (native LUNA on 4718, restore
   what you touch), `npm run test:engine` (real wasm build in headless Chrome over CDP; needs
   Chrome and `UA_WASM_ENGINE` or a sibling `hbsystem/wasm_engine/dist/Release`). The mock
