@@ -84,6 +84,43 @@ describe('Luna.Effect and Luna.Plugins', () => {
     await expect(track.insert('com.nope.nothing')).rejects.toMatchObject({ code: 'mixer.missing_plug-in' });
   });
 
+  it('queries the preset library and finds a preset uid by exact name (fact 98)', async () => {
+    const { engine, luna } = await connected();
+    engine.addPreset('com.uaudio.uadx.1176', 'All Buttons In', { uid: 'p_abi', factory: true });
+    engine.addPreset('com.uaudio.uadx.1176', 'Vocal Smash', { uid: 'p_smash', favorite: true });
+    const rows = await luna.presets.query({ pluginId: 'com.uaudio.uadx.1176' });
+    expect(rows).toEqual([
+      { uid: 'p_abi', name: 'All Buttons In', version: 1, favorite: false, factory: true, path: '' },
+      { uid: 'p_smash', name: 'Vocal Smash', version: 1, favorite: true, factory: false, path: '' },
+    ]);
+    expect(await luna.presets.query({ pluginId: 'com.uaudio.uadx.1176', search: 'smash' })).toHaveLength(1);
+    expect((await luna.presets.find('com.uaudio.uadx.1176', 'vocal smash'))?.uid).toBe('p_smash');
+    expect(await luna.presets.find('com.uaudio.uadx.1176', 'Vocal')).toBeUndefined(); // exact name only
+    await expect(luna.presets.query()).rejects.toMatchObject({ code: 'uasrv.invalid_type' });
+  });
+
+  it('prefers a user preset over a factory preset of the same name', async () => {
+    const { engine, luna } = await connected();
+    engine.addPreset('com.uaudio.uadx.1176', 'Default', { uid: 'p_factory', factory: true });
+    engine.addPreset('com.uaudio.uadx.1176', 'Default', { uid: 'p_user' });
+    expect((await luna.presets.find('com.uaudio.uadx.1176', 'Default'))?.uid).toBe('p_user');
+  });
+
+  it('carries a preset name and uid through setPlugin onto the slot (fact 99)', async () => {
+    const { engine, session } = await connected();
+    engine.addPreset('com.uaudio.uadx.1176', 'All Buttons In', { uid: 'p_abi' });
+    const track = session.tracks.byId('Vocal')!;
+    await track.effects.load();
+    const slot = track.effects.byId('effect_0')!;
+    await slot.setPlugin('com.uaudio.uadx.1176', { presetName: 'All Buttons In', presetUid: 'p_abi' });
+    await engine.settled();
+    expect(slot.presetName.value).toBe('All Buttons In');
+    expect(slot.presetUid.value).toBe('p_abi');
+    expect(engine.requests.find((r) => r.path === '/sessions/abc/set_inserts')).toMatchObject({
+      data: { inserts: [{ insert_type: 'effect_0', plugin_id: 'com.uaudio.uadx.1176', preset_name: 'All Buttons In', preset_uid: 'p_abi' }] },
+    });
+  });
+
   it('touch-brackets a one-shot parameter write, which is what makes it undoable (fact 85)', async () => {
     const { engine, session } = await connected();
     const track = session.tracks.byId('Vocal')!;

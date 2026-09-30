@@ -49,6 +49,8 @@ export { EDIT_TIMEOUT_MS, midiByte, requireTick, settle, yieldTask } from './set
 export type { SettleOptions } from './settle';
 export { Plugin, Plugins } from './plugins';
 export type { PluginManifest } from './plugins';
+export { Presets } from './presets';
+export type { PresetRow, PresetQueryOptions } from './presets';
 export { Musical, Timeline, TempoEvent, TimeSignature, KeySignature } from './musical';
 export { Workspace, SessionPackage } from './workspace';
 export type { SessionPackageRow, QueryOptions } from './workspace';

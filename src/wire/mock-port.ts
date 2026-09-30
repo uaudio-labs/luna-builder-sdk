@@ -291,6 +291,32 @@ export class MockEngine {
       },
     });
     this.addNode('/plugins', { properties: { type: 'folder' }, commands: { rescan: () => null } });
+    // The preset library: rows seeded with `addPreset`, queried columnar like the workspace
+    // (fact 98). `favorite` and `factory` are 0/1 integers on the wire, as LUNA sends them.
+    this.addNode('/presets', {
+      properties: { type: 'folder' },
+      commands: {
+        query: (data, engine) => {
+          const body = (data ?? {}) as { plugin_id?: string; device_type_id?: string; search?: string; favorite?: boolean; limit?: number };
+          if (!body.plugin_id && !body.device_type_id) throw new UAError('uasrv.invalid_type', 'query: plugin_id or device_type_id required', { cmd: 'post', path: '/presets/query' });
+          const root = `/presets/plugins/${body.plugin_id ?? ''}/presets`;
+          let rows = engine.children(root).map((uid) => ({
+            uid,
+            name: String(engine.value(`${root}/${uid}`, 'preset_name') ?? uid),
+            version: Number(engine.value(`${root}/${uid}`, 'version') ?? 1),
+            favorite: engine.value(`${root}/${uid}`, 'favorite') ? 1 : 0,
+            factory: engine.value(`${root}/${uid}`, 'factory') ? 1 : 0,
+            path: String(engine.value(`${root}/${uid}`, 'path') ?? ''),
+          }));
+          if (body.search) rows = rows.filter((r) => r.name.toLowerCase().includes(body.search!.toLowerCase()));
+          if (body.favorite) rows = rows.filter((r) => r.favorite === 1);
+          if (body.limit !== undefined) rows = rows.slice(0, body.limit);
+          const results: Record<string, unknown> = { num_rows: rows.length };
+          for (const k of Object.keys(rows[0] ?? { uid: 0 })) results[k] = rows.map((r) => (r as Record<string, unknown>)[k]);
+          return { results, folders: [] };
+        },
+      },
+    });
     this.addNode('/drivers', { properties: { connected: [{ id: 'mock', name: 'Mock Device', type: 'built_in', num_inputs: 2, num_outputs: 2 }], unsupported: [], sample_rates: [44100, 48000] } });
     this.addNode('/preferences', { properties: { io_buffer_size: 256, play_from_stop_location: false, record_mute: false, metronome_sound: 'click', metronome_sounds: ['click', 'beep'] } });
     // Renders: `new` creates the node in `created`, `start` moves it to `running`, and the
@@ -472,6 +498,16 @@ export class MockEngine {
         manifest: { manufacturer: options.manufacturer ?? 'Mock', name: options.name ?? pluginId, plugin_id: pluginId, categories: options.categories ?? [], short_names: [] },
       },
     });
+  }
+
+  /** Add a preset for a plugin to the library (fact 98). Returns its uid. */
+  addPreset(pluginId: string, name: string, options: { uid?: string; factory?: boolean; favorite?: boolean; version?: number } = {}): string {
+    const root = `/presets/plugins/${pluginId}/presets`;
+    const uid = options.uid ?? `preset_${this.children(root).length + 1}_${pluginId}`;
+    this.addNode(`${root}/${uid}`, {
+      properties: { uid, preset_name: name, version: options.version ?? 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: '' },
+    });
+    return uid;
   }
 
   /** Register a session package in the workspace. */
@@ -838,7 +874,7 @@ export class MockEngine {
       },
       set_playlists: () => null,
       set_inserts: (data, engine) => {
-        const body = (data ?? {}) as { channel_uid?: string; inserts?: { insert_type?: string; index?: number; plugin_id?: string; plugin_name?: string }[] };
+        const body = (data ?? {}) as { channel_uid?: string; inserts?: { insert_type?: string; index?: number; plugin_id?: string; plugin_name?: string; preset_name?: string; preset_uid?: string }[] };
         const channel = engine.has(`${base}/tracks/${body.channel_uid}`) ? `${base}/tracks/${body.channel_uid}` : `${base}/buses/${body.channel_uid}`;
         for (const ins of body.inserts ?? []) {
           const slot = ins.insert_type ?? `effect_${ins.index ?? 0}`;
@@ -851,6 +887,15 @@ export class MockEngine {
           // answers null and leaves `plugin_error` on the slot.
           engine.setValue(path, 'plugin_id', empty ? null : ins.plugin_id);
           engine.setValue(path, 'plugin_name', null);
+          // Preset identity rides in the same call and lands only with a plugin id. A
+          // `preset_uid` makes LUNA load that preset onto the effect, which stamps the
+          // library's own name over any `preset_name` the caller sent (fact 99).
+          if (!empty && ins.preset_name !== undefined) engine.setValue(path, 'preset_name', ins.preset_name);
+          if (!empty && ins.preset_uid !== undefined) {
+            engine.setValue(path, 'preset_uid', ins.preset_uid);
+            const preset = `/presets/plugins/${ins.plugin_id}/presets/${ins.preset_uid}`;
+            if (engine.has(preset)) engine.setValue(path, 'preset_name', engine.value(preset, 'preset_name'));
+          }
           engine.setValue(path, 'plugin_error', empty || known ? null : 'mixer.missing_plug-in');
           engine.setValue(path, 'external_sdk_instance_id', known ? engine.nextRow() : null);
           if (empty || !known) {

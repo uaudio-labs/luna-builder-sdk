@@ -9,6 +9,7 @@ import { Store } from '../store/store';
 import type { Session } from '../model/session';
 import { Sessions } from '../model/sessions';
 import { Plugins } from '../model/plugins';
+import { Presets } from '../model/presets';
 import { Workspace } from '../model/workspace';
 import { Devices, Drivers, Jobs, Preferences, Renders, type AudioInput } from '../model/system';
 import { Gui } from '../model/gui';
@@ -30,6 +31,8 @@ export class Client {
   readonly sessions: Sessions;
   /** The plugin catalog (`/plugins`). Call `load()` once before reading. */
   readonly plugins: Plugins;
+  /** The preset library query (`/presets`). */
+  readonly presets: Presets;
   /** Session packages on disk and the workspace query. */
   readonly workspace: Workspace;
   readonly drivers: Drivers;
@@ -54,6 +57,7 @@ export class Client {
     this.statusUnsub = port.onStatus((s) => this.statusCell.update(s));
     this.sessions = new Sessions(this);
     this.plugins = new Plugins(this);
+    this.presets = new Presets(this);
     this.workspace = new Workspace(this);
     this.drivers = new Drivers(this);
     this.devices = new Devices(this);

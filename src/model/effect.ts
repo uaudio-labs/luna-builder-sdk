@@ -141,14 +141,21 @@ export class Effect extends Node {
    * `plugin_error` as the code (for example `mixer.missing_plug-in`). Pass `wait: false`
    * to resolve on the reply alone.
    *
+   * A preset can ride in the same call: `presetUid` (from {@link Presets.find}) makes LUNA
+   * load that preset onto the effect — state and identity, which is what the preset browser
+   * keys on — while `presetName` alone only labels the effect (fact 99).
+   *
    * @example
    * await slot.setPlugin('com.uaudio.uadx.1176');
    * slot.loaded.value; // true
+   * const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
+   * await slot.setPlugin('uaudio_qi', { presetName: preset?.name, presetUid: preset?.uid });
    */
-  async setPlugin(pluginId: string, options: { pluginName?: string; presetName?: string; wait?: boolean; timeoutMs?: number } = {}): Promise<unknown> {
+  async setPlugin(pluginId: string, options: { pluginName?: string; presetName?: string; presetUid?: string; wait?: boolean; timeoutMs?: number } = {}): Promise<unknown> {
     const insert: Record<string, unknown> = { insert_type: this.id, plugin_id: pluginId };
     if (options.pluginName !== undefined) insert['plugin_name'] = options.pluginName;
     if (options.presetName !== undefined) insert['preset_name'] = options.presetName;
+    if (options.presetUid !== undefined) insert['preset_uid'] = options.presetUid;
     const reply = await this.wire.post(`/sessions/${this.sessionUid}/set_inserts`, { session_uid: this.sessionUid, channel_uid: this.channelUid, inserts: [insert] });
     if (options.wait === false) return reply;
     await this.waitForPlugin(options.timeoutMs, pluginId);
