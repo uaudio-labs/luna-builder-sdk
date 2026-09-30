@@ -115,6 +115,7 @@ export interface ManifestEntry {
   width: number;
   height: number;
   target?: string;
+  floating?: boolean;
   version?: string;
   engines?: string[];
   [k: string]: unknown;
@@ -139,6 +140,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
     if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
     if (e.target !== undefined && !['window', 'app', 'page', 'browser'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
+    if (e.floating !== undefined && typeof e.floating !== 'boolean') problems.push(`${where}: "floating" must be true or false`);
   }
   if (problems.length) throw new Error(`manifest.json problems:\n  - ${problems.join('\n  - ')}`);
   return { manifest, entries };
@@ -148,7 +150,7 @@ export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
   ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app]
-                        [--width 900 --height 600] [--dir path]
+                        [--no-floating] [--width 900 --height 600] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]
   ua-builder probe <url> [--expr <js>] [--wait <js>] [--timeout <ms>]   read a served page's live DOM

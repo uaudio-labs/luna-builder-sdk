@@ -8,6 +8,7 @@
     "engines": ["luna", "wasm"],
     "html": "index.html",
     "target": "window",
+    "floating": true,
     "width": 360,
     "height": 260
 }

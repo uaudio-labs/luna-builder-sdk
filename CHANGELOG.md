@@ -24,6 +24,11 @@ Added
   is installed before any page script runs. `--screenshot <file.png>` saves the page once it
   is ready and has painted two animation frames.
 - `Store.readsSettled()`, `Store.pendingReads` and `Store.hasProperties(nodePath)`.
+- Manifest `floating` (boolean, default `true`) for `"window"` Add Ons: the window floats with
+  LUNA's plugin windows (above LUNA while it is active, hidden by Hide Floating Windows), or
+  with `false` is an ordinary window. `ua-builder new` writes `"floating": true`;
+  `--no-floating` writes `false`. `readManifest()` rejects a non-boolean. `Luna.AddOn.floating`
+  reads it from `/gui/add_ons/<id>`. Needs a LUNA that reads the field; earlier builds ignore it.
 
 Changed
 - A member a loaded collection learns of from an `added` push (native LUNA sends no data with

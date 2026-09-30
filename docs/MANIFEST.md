@@ -6,8 +6,8 @@ folder, their identity, their page and how they open. `ua-builder new` writes on
 
 This page describes what LUNA does with the manifest. `ua-builder` is stricter: it refuses
 to install or pack a manifest that LUNA would partly drop or silently correct (a missing
-field, an unknown `target`, an `html` file that does not exist), so you see the problem
-before LUNA does.
+field, an unknown `target`, a `floating` that is not a boolean, an `html` file that does not
+exist), so you see the problem before LUNA does.
 
 ## Where it lives
 
@@ -36,6 +36,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
     "engines": ["luna", "wasm"],
     "html": "index.html",
     "target": "window",
+    "floating": true,
     "width": 900,
     "height": 600
 }
@@ -75,13 +76,16 @@ An entry missing any of these is dropped.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `target` | string | `"window"` | Where the Add On opens. See below. |
+| `floating` | boolean | `true` | `"window"` only: whether the window floats with LUNA's plugin windows or is an ordinary window. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
 | `icon` | string | none | Image path, resolved like `html`. Works for `url` entries too. See below. |
 | `local_content_offset` | string | none | `html` only. Relative path from the manifest folder to the folder your page loads resources from. See below. |
 
 `target` values:
 
-- **`"window"`**: a floating window, listed in LUNA's **Window** menu.
+- **`"window"`**: its own window, listed in LUNA's **Window** menu. Choosing the menu item
+  opens the window, brings it to the front if it is behind, and closes it if it is already
+  in front. See `floating` for how it layers.
 - **`"app"`**: a full LUNA page alongside Timeline and Mixer, listed in the **View** menu and
   check-marked while it is the current page. `"page"` is an accepted synonym for backwards
   compatibility; write `"app"` in new manifests.
@@ -90,12 +94,30 @@ An entry missing any of these is dropped.
 An unrecognized `target` silently becomes `"window"`, so in LUNA a typo shows up as an Add
 On in the wrong menu rather than an error. `ua-builder` rejects it.
 
+`floating`:
+
+- `true` (the default): the window floats like a plugin window. It stays above LUNA's own
+  windows while LUNA is the active app and drops behind other apps when LUNA is not. **Hide
+  Floating Windows** hides it along with the plugin windows and **Show Floating Windows**
+  brings it back; LUNA may also hide and restore floating windows itself as its main window
+  changes page. A window hidden that way still counts as open: it comes back when floating
+  windows are shown and when LUNA relaunches.
+- `false`: an ordinary window. Other LUNA windows can cover it, and it ignores **Show/Hide
+  Floating Windows**.
+- A value that is not a boolean (such as the string `"false"`) is ignored, so the window
+  floats. `ua-builder` rejects it.
+- It has no effect on `"app"` or `"browser"` entries.
+- If you change it while LUNA is running and the window has already been opened, the change
+  applies after LUNA restarts.
+- LUNA reports it as the `floating` property under `/gui/add_ons/<id>`
+  (`luna.gui.addOns` in the SDK).
+
 `icon`:
 
 - LUNA does not check that the file exists or read it when the manifest loads; a bad path is
   not an error, and an empty string is the same as leaving it out.
 - LUNA reports the resolved absolute path as the `icon` property under `/gui/add_ons/<id>`
-  (next to `id`, `title` and `target`), or an empty string when there is none. It is not yet
+  (next to `id`, `title`, `target` and `floating`), or an empty string when there is none. It is not yet
   drawn in LUNA's menus.
 
 `local_content_offset`:
@@ -167,6 +189,8 @@ goes over the engine connection, including LUNA UI actions through `luna.gui`.
 2. Keep `id` and `title` unique across everything installed.
 3. Relative `html`; set `local_content_offset` only if the page reaches above its folder.
 4. `target: "app"` only for a full LUNA page; never `"browser"`.
+   For a `"window"`, set `floating: false` if it should be an ordinary window rather than
+   float with the plugin windows.
 5. Fill `version`, `sdk_version`, `min_luna_version`, `engines`.
 6. Add `icon` with a relative path if the Add On ships one.
 7. Add `package_name` if the folder name is not what the Add Ons folder should show.

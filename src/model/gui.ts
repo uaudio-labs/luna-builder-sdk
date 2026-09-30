@@ -24,6 +24,8 @@ export class AddOn extends Node {
   readonly target: Prop<AddOnTarget>;
   /** Absolute file path of the icon, or `''`. */
   readonly icon: Prop<string>;
+  /** The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. */
+  readonly floating: Prop<boolean>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -32,6 +34,7 @@ export class AddOn extends Node {
     this.title = this.prop<string>('title');
     this.target = this.prop<AddOnTarget>('target');
     this.icon = this.prop<string>('icon');
+    this.floating = this.prop<boolean>('floating');
   }
 
   show(): Promise<unknown> {

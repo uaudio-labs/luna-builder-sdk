@@ -9,9 +9,11 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 
 1. Scaffold. From the folder that should contain the Add On:
    ```sh
-   npx ua-builder new <name> --title "<Title>" [--target window|app] [--width 900 --height 600]
+   npx ua-builder new <name> --title "<Title>" [--target window|app] [--no-floating] [--width 900 --height 600]
    cd <name> && npm install && npm test
    ```
+   The default is a `"window"` Add On with `"floating": true`, which floats with LUNA's plugin
+   windows. Pass `--no-floating` for an ordinary window. See `docs/MANIFEST.md` (`floating`).
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
    run `node <builder>/dist/cli.js new ...` after `npm run build` in the builder package.
 

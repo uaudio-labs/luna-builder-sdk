@@ -46,7 +46,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app] [--width N --height N] [--dir path]');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app] [--no-floating] [--width N --height N] [--dir path]');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
@@ -65,6 +65,7 @@ export async function newAddOn(args: Args): Promise<number> {
     __ID__: flagString(args, 'id') ?? `com.example.${slug(name)}`,
     __TITLE__: flagString(args, 'title') ?? titleCase(name),
     __TARGET__: flagString(args, 'target') ?? 'window',
+    __FLOATING__: String(!args.flags['no-floating']),
     __WIDTH__: String(flagNumber(args, 'width', 900)),
     __HEIGHT__: String(flagNumber(args, 'height', 600)),
     __SDK_VERSION__: sdkVersion(),

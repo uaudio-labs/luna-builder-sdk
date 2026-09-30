@@ -8,6 +8,7 @@
     "engines": ["luna", "wasm"],
     "html": "index.html",
     "target": "__TARGET__",
+    "floating": __FLOATING__,
     "width": __WIDTH__,
     "height": __HEIGHT__
 }

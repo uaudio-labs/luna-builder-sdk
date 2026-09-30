@@ -9,7 +9,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 
 - [Quickstart](QUICKSTART.md): connect, session, props, tracks, controls, clips, effects, markers, chords, workspace, gui, errors, testing.
 - [Recipes](RECIPES.md): eleven Add Ons to ask an agent for, and the SDK each one leans on.
-- [Manifest](MANIFEST.md): `manifest.json` fields, Add Ons folder, how LUNA loads a page.
+- [Manifest](MANIFEST.md): `manifest.json` fields (`target`, `floating`, ...), Add Ons folder, how LUNA loads a page.
 - [Protocol](PROTOCOL.md): verbs, paths, correlation, pushes, error codes, where things live.
 - [Evidence](EVIDENCE.md): numbered measured facts about engine behaviour; cite as "fact N".
 - [Tree snapshot](tree/luna-3.0.0.15776.json): the shape of the nodes the SDK builds on, for one LUNA build. `ua-builder tree <path>` prints any node's shape; `ua-builder tree --out file.json` snapshots the running build.

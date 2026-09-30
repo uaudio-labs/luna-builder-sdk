@@ -10,6 +10,7 @@
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="addonid"></a> `addOnId` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
+| <a id="floating"></a> `floating` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. | - |
 | <a id="icon"></a> `icon` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | Absolute file path of the icon, or `''`. | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="target"></a> `target` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`AddOnTarget`](../type-aliases/AddOnTarget.md)\> | - | - |
