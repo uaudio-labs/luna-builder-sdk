@@ -379,6 +379,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     await Promise.all([luna.gui.addOns.load(), luna.gui.windows.load()]);
     expect(luna.gui.addOns.items.map((a) => a.title.value)).toEqual(['Demo']);
     expect(luna.gui.addOns.items[0]!.floating.value).toBe(true);
+    expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
     expect(luna.gui.main.page.value).toBe('timeline');
     const w = luna.gui.main.watch(); // outside a session: subscribe explicitly to follow pushes
     await w.ready;

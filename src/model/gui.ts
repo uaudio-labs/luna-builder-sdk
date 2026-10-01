@@ -26,6 +26,8 @@ export class AddOn extends Node {
   readonly icon: Prop<string>;
   /** The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. */
   readonly floating: Prop<boolean>;
+  /** The manifest's `show_with_session`: `false` unless it says `true`. Meaningful for `'window'` only. */
+  readonly showWithSession: Prop<boolean>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -35,6 +37,7 @@ export class AddOn extends Node {
     this.target = this.prop<AddOnTarget>('target');
     this.icon = this.prop<string>('icon');
     this.floating = this.prop<boolean>('floating');
+    this.showWithSession = this.prop<boolean>('show_with_session');
   }
 
   show(): Promise<unknown> {

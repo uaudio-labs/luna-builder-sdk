@@ -414,7 +414,7 @@ export class MockEngine {
     });
     this.addNode('/gui/windows/main', { properties: { page: 'timeline' } });
     this.addNode('/gui/transport', { properties: { arm_mode: false } });
-    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', title: 'Demo', target: 'window', icon: '', floating: true } });
+    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', title: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false } });
     this.addNode('/gui/file_chooser');
   }
 

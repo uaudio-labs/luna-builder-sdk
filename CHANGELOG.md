@@ -29,6 +29,11 @@ Added
   with `false` is an ordinary window. `ua-builder new` writes `"floating": true`;
   `--no-floating` writes `false`. `readManifest()` rejects a non-boolean. `Luna.AddOn.floating`
   reads it from `/gui/add_ons/<id>`. Needs a LUNA that reads the field; earlier builds ignore it.
+- Manifest `show_with_session` (boolean, default `false`) for `"window"` Add Ons: with `true`
+  the window and its menu item are hidden while no session is open, and the window
+  comes back when one opens if the user had it open. `ua-builder new` writes `false`;
+  `--show-with-session` writes `true`. `readManifest()` rejects a non-boolean.
+  `Luna.AddOn.showWithSession` reads it. Needs a LUNA that reads the field.
 
 Changed
 - A member a loaded collection learns of from an `added` push (native LUNA sends no data with

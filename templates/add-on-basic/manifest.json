@@ -9,6 +9,7 @@
     "html": "index.html",
     "target": "__TARGET__",
     "floating": __FLOATING__,
+    "show_with_session": __SHOW_WITH_SESSION__,
     "width": __WIDTH__,
     "height": __HEIGHT__
 }

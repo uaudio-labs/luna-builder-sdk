@@ -49,7 +49,7 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 - `skills/*/SKILL.md` are shared Claude Code and Codex skills. Keep them procedural and short, pointing at doc
   sections rather than repeating them.
 - `templates/add-on-basic/` is what `ua-builder new` copies; placeholders are `__NAME__`,
-  `__SLUG__`, `__ID__`, `__TITLE__`, `__TARGET__`, `__FLOATING__`, `__WIDTH__`, `__HEIGHT__`, `__SDK_VERSION__`,
+  `__SLUG__`, `__ID__`, `__TITLE__`, `__TARGET__`, `__FLOATING__`, `__SHOW_WITH_SESSION__`, `__WIDTH__`, `__HEIGHT__`, `__SDK_VERSION__`,
   `__BUILDER_PATH__`. Run the scaffold's own tests after changing it.
 
 ## The agent plugin

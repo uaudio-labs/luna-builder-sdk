@@ -31,4 +31,11 @@ describe('readManifest', () => {
     expect(() => readManifest(addOn({ floating: 'false' }))).toThrow(/"floating" must be true or false/);
     expect(() => readManifest(addOn({ floating: 0 }))).toThrow(/"floating" must be true or false/);
   });
+
+  it('accepts show_with_session true, false, or absent, and rejects a non-boolean', () => {
+    expect(readManifest(addOn({ show_with_session: true })).entries[0]!.show_with_session).toBe(true);
+    expect(readManifest(addOn({ show_with_session: false })).entries[0]!.show_with_session).toBe(false);
+    expect(readManifest(addOn({})).entries[0]!.show_with_session).toBeUndefined();
+    expect(() => readManifest(addOn({ show_with_session: 'true' }))).toThrow(/"show_with_session" must be true or false/);
+  });
 });

@@ -9,6 +9,7 @@
     "html": "index.html",
     "target": "window",
     "floating": true,
+    "show_with_session": false,
     "width": 360,
     "height": 260
 }
