@@ -78,7 +78,7 @@ An entry missing any of these is dropped.
 |---|---|---|---|
 | `target` | string | `"window"` | Where the Add On opens. See below. |
 | `floating` | boolean | `true` | `"window"` only: whether the window floats with LUNA's plugin windows or is an ordinary window. See below. |
-| `show_with_session` | boolean | `false` | `"window"` only: show the window, and its menu item, only while a session is open. See below. |
+| `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
 | `icon` | string | none | Image path, resolved like `html`. Works for `url` entries too. See below. |
 | `local_content_offset` | string | none | `html` only. Relative path from the manifest folder to the folder your page loads resources from. See below. |
@@ -116,8 +116,9 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 
 `show_with_session`:
 
-- `true`: the Add On belongs to a session. While no session is open it is left out of
-  LUNA's menus (the **Add Ons** menu in current LUNA builds) and its window is hidden. When a session opens, the window comes back if
+- `true`: the Add On belongs to a session. While no session is open it is still listed in
+  LUNA's menus (the **Add Ons** menu in current LUNA builds) but disabled, and its window is
+  hidden. When a session opens, the window comes back if
   the user had it open; if they had closed it, it stays closed until they choose it from the
   menu again.
 - Whether the user had it open is remembered across sessions and across LUNA launches. A
