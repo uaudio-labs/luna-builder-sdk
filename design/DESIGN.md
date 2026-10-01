@@ -43,7 +43,7 @@ Goals, in priority order:
 | 4 | uanet-clients | Kept indefinitely. builder is a separate SDK. |
 | 5 | Naming | Wire layer is `Luna.Port` (`Luna.WebSocketPort`, `Luna.WasmPort`, `Luna.MockPort`). `Luna.Transport` is the DAW transport. Package `@uaudio/ua-builder-sdk`, script-tag global `Luna`. |
 | 6 | Tests | Standalone npm package using vitest. Not a pac/Amber target. vitest (and Playwright for the engine lane) are new packages and must be raised in `hb-platform` before they land. |
-| 7 | Wasm delivery | UA hosts the engine artifacts on a URL with COOP/COEP headers. `Luna.connect({ engine: 'wasm' })` defaults to that URL and accepts an override. |
+| 7 | Wasm delivery | The engine is not part of the SDK package: it is built and versioned separately. `Luna.connect({ engine: 'wasm' })` loads it from `engineUrl`, default `/__engine/` (the `ua-builder serve --engine` mount), and accepts an override. A UA-hosted copy with COOP/COEP is still planned, but it has to be served same-origin with the page (fact 38), so it cannot be the default. (Revised from "defaults to a hosted URL".) |
 | 8 | Jira | No issue yet; commits are unprefixed until one exists. |
 | 9 | Manifest | Add `version`, `sdk_version`, `min_luna_version`, `engines` to `manifest.json` (v1). |
 | 10 | Dev tooling | `docs/EVIDENCE.md` records measured daemon behaviours. A `serve` command hosts pages with COOP/COEP, with an optional proxy to native LUNA. |
@@ -157,7 +157,7 @@ injection, and a `settled()` await.
 
 ```ts
 const luna = await Luna.connect();                       // inside LUNA: ?port= present → WebSocketPort
-const luna = await Luna.connect({ engine: 'wasm' });     // browser: boots the hosted wasm engine
+const luna = await Luna.connect({ engine: 'wasm' });     // browser: boots the wasm engine from engineUrl
 const luna = await Luna.connect({ host, port });         // explicit WebSocket target
 const luna = await Luna.connect({ port_: mockPort });    // tests
 
@@ -305,34 +305,43 @@ What lowers tokens, in order of impact:
 | `test-add-on` | Choose lane, write a MockPort fixture, run vitest. |
 | `port-to-wasm` | Make an existing Add On run in a browser on the wasm engine. |
 | `debug-connection` | Diagnose connect failures on either engine. |
+| `verify-add-on` | Prove an Add On against a running LUNA from a second client and check the undo queue. |
 
 ## Repository layout
 
+The SDK is its own repo, `uaudio/ua-builder-sdk` on GitHub (in an HB tree,
+`<tree>/github-repos/ua-builder-sdk`). It is not a pac target. `design/PLATFORM.md` maps it
+against the rest of the platform.
+
 ```
-packages/sdk/luna/ua-builder-sdk/
-  package.json            @uaudio/ua-builder-sdk, type: module, vitest, tsup, typescript
+ua-builder-sdk/
+  package.json            @uaudio/ua-builder-sdk, type: module; prepare builds, so npm ci yields dist/ and plugins/
   src/
     index.ts              export * as Luna from './luna'
-    ua.ts                 namespace barrel
+    luna.ts               namespace barrel
+    global.ts             IIFE entry (dist/luna.global.js, globalThis.Luna)
     wire/                 port.ts, websocket-port.ts, wasm-port.ts, mock-port.ts, codec.ts, multi.ts, errors.ts
-    store/                cell.ts, store.ts, prop.ts (Prop, List, Scheduler)
-    client/               connect.ts, client.ts, detect.ts
-    engine/               loader.ts, lifecycle.ts, audio.ts, persist.ts
-    host/                 detect.ts, manifest.ts, drag-drop.ts
-    model/                sessions/, tracks/, buses/, controls/, playlists/, clips/, editing/, automation/,
-                          midi/, drivers/, preferences/, presets/, jobs/, workspace/, gui/, defs/, utils/
-  cli/                    new.ts, serve.ts, test.ts, pack.ts
-  templates/              add-on-basic/, add-on-wasm/
-  examples/               the ua-luna plugin's set ported to Luna.*: addon/, mixer, inserts, ruler,
-                          sends, tracks, check-*.mjs
-  tests/                  unit/, engine/, live/, doc-examples.ts
-  docs/                   QUICKSTART.md, PROTOCOL.md, EVIDENCE.md, MANIFEST.md, api/ (consumer docs, shipped)
-  design/                 DESIGN.md (this), PLAN.md (not shipped)
-  skills/                 create-add-on/, add-feature/, test-add-on/, port-to-wasm/, debug-connection/
+    store/                store.ts, prop.ts (Prop, Cell, List, Scheduler)
+    client/               connect.ts, client.ts, detect.ts (host detection lives here)
+    engine/               loader.ts (bootWasmEngine, WasmEngine)
+    model/                one file per domain object: session, sessions, track, bus, channel, output, control,
+                          effect, playlist, clip, midi, automation, musical, chords, markers, context, waveform,
+                          workspace, plugins, presets, system, gui, plus bind, gesture, shortcuts, bindings, settle
+  cli/                    new, serve, test, probe, install, pack, doctor, tree
+  templates/              add-on-basic/
+  examples/               addon/, mixer, inserts, ruler, sends, tracks, arrangement, automation, editor,
+                          import, jobs, pianoroll pages, plus check-*.mjs probes
+  tests/                  unit/, live/, engine/, helpers/
+  docs/                   QUICKSTART, RECIPES, MANIFEST, PROTOCOL, EVIDENCE, llms.txt, tree/, api/ (shipped)
+  design/                 DESIGN.md (this), PLAN.md, PLATFORM.md (not shipped)
+  skills/                 create-add-on, add-feature, test-add-on, debug-connection, port-to-wasm, verify-add-on
+  plugin/                 hand-written shell of the agent plugin
+  plugins/                generated ua-luna-builder plugin (git-ignored)
+  scripts/                sync-plugin.mjs, check-plugin.mjs
 ```
 
-The `sdk-luna` git repo already holds `LUNA SDK`; `ua-builder-sdk` is a sibling folder in
-the same repo and the same pac target (`index/sdk/luna/package.info`).
+The `sdk-luna` Stash repo keeps `LUNA SDK` and the two tree targets that consume this
+checkout: `sdk/luna/ua-builder-installer` and `sdk/luna/builder-examples/studiolo`.
 
 ## Risks and dependencies
 

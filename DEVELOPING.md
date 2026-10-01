@@ -1,8 +1,9 @@
 # Developing ua-builder-sdk
 
-For work on the SDK itself, in the `sdk-luna` repo. None of this ships: package.json
-"files" lists what does, and `README.md` is the consumer-facing page. Architecture and
-recorded decisions are in `design/DESIGN.md`, phases and status in `design/PLAN.md`.
+For work on the SDK itself, in this repo (`uaudio/ua-builder-sdk` on GitHub). None of this
+ships: package.json "files" lists what does, and `README.md` is the consumer-facing page.
+Architecture and recorded decisions are in `design/DESIGN.md`, phases and status in
+`design/PLAN.md`, and `design/PLATFORM.md` maps every piece of the platform.
 
 ## Develop the SDK
 
@@ -52,20 +53,20 @@ of `npm run check`.
 
 ## Publish to GitHub
 
-A Release `pac build sdk/luna/ua-builder-sdk` whose smoke tests pass mirrors the shipped
-files into `<tree>/github-repos/ua-builder-sdk`, cloning `git@github.com:uaudio/ua-builder-sdk.git`
-there first if needed (`rsync --delete`, `.git` kept). It never commits or pushes; that is
-manual:
+This repo is the SDK source; there is no pac target and no mirror step. In an HB tree the
+checkout lives at `<tree>/github-repos/ua-builder-sdk`. Commit and push by hand after
+`npm run check` passes:
 
 ```sh
-cd <tree>/github-repos/ua-builder-sdk
 git status && git diff
-git add -A && git commit -m "Publish <version> from sdk-luna@<sha>"
+git add -A && git commit -m "<JIRA-ID>: <change>"
 git push
 ```
 
-Debug builds and `pac test` leave the clone alone. No GitHub access or no rsync is a warning,
-not a build failure.
+`dist/` and `plugins/` are git-ignored; `npm ci` regenerates them in any checkout through
+the `prepare` script. Two tree targets consume this checkout, so rebuild it (`npm ci`) after
+a pull before building them: `sdk/luna/ua-builder-installer` (`npm pack` of it, zipped with
+setup scripts) and `sdk/luna/builder-examples/studiolo` (npm-installs it).
 
 ## Source layout
 
@@ -77,15 +78,14 @@ src/model/    Luna.Sessions, Session, Transport, Track, Bus, Control, Meter, Eff
 src/client/   Luna.connect, Luna.Client, host detection
 examples/     the ua-luna plugin's example set on Luna.*: addon (master mute), mixer, inserts,
               ruler, sends, tracks (raw wire), plus check-*.mjs probes
-cli/          ua-builder: new, serve, test, install, pack, doctor, tree
+cli/          ua-builder: new, serve, test, probe, install, pack, doctor, tree
 templates/    add-on-basic scaffold
 docs/         consumer docs: QUICKSTART.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
-design/       DESIGN.md, PLAN.md (not shipped)
+design/       DESIGN.md, PLAN.md, PLATFORM.md (not shipped)
 skills/       create-add-on, add-feature, test-add-on, debug-connection, port-to-wasm, verify-add-on
 plugin/       the agent plugin's hand-written shell; catalogs in .claude-plugin/ and .agents/plugins/
 plugins/      generated, git-ignored: ua-luna-builder, the shell plus copies of everything it carries
 scripts/      sync-plugin.mjs (generate the plugin), check-plugin.mjs (prove it is current)
-pkg_scripts/  pac build/test (npm ci, build, npm pack into the output dir)
 src/engine/   wasm engine loader and lifecycle (Luna.bootWasmEngine, Luna.WasmEngine)
 tests/        unit/ (always), live/ (UA_LIVE=1), engine/ (real wasm engine in headless Chrome)
 ```

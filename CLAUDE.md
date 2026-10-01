@@ -42,7 +42,7 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 - What ships (package.json `files`, and so the SDK's GitHub repo) is public: `README.md`,
   `CHANGELOG.md`, `NOTICE`, `docs/`, `skills/`, `templates/`, `examples/`, `plugins/`. Keep
   tree paths, pac, Jira and planning out of them. Internal material goes in `design/`
-  (DESIGN.md, PLAN.md), `DEVELOPING.md` or here.
+  (DESIGN.md, PLAN.md, PLATFORM.md), `DEVELOPING.md` or here.
 - `docs/QUICKSTART.md` is the user-facing entry point; keep it under 300 lines and keep every
   snippet runnable. `docs/api/` is generated (`npm run docs:api`); never edit it by hand.
 - `docs/llms.txt` indexes everything for agents; update it when a doc or skill is added.
@@ -85,17 +85,13 @@ npm run check:plugin # prove the plugin is current, consistent and self-containe
 npm run check       # all of the above
 ```
 
-## pac target
+## Repo and consumers
 
-A pac target wraps the npm scripts above (NEXT-2176); vitest stays the test runner.
+This repo is the SDK source (`uaudio/ua-builder-sdk`); it is not a pac target. `npm ci`
+builds `dist/` and `plugins/` through `prepare`. Two tree targets consume the checkout at
+`<tree>/github-repos/ua-builder-sdk`: `sdk/luna/ua-builder-installer` (`npm pack` of it) and
+`sdk/luna/builder-examples/studiolo` (npm-installs it), so package.json `files` is the one
+list of what ships. `design/PLATFORM.md` maps every piece of the platform.
 
-`pac build sdk/luna/ua-builder-sdk` — npm only, any platform: `npm ci`, `npm run build`,
-`npm pack` (to a temp dir; the tarball is discarded), unpacked to
-`output/<host>/<Config>/<platform>/ua-builder-sdk/`. That folder is
-exactly package.json `files`, so `files` is the one list of what ships. Smoke: typecheck,
-unit tests, `check:plugin`. `pac test --type=regression` runs `test:engine`.
-`docs:api` is not run (its output is committed). The staged folder is the layout of the
-SDK's GitHub repo.
-
-The engine never goes into git: it is versioned separately and delivered as a release asset
-(later a hosted URL) that `engine.json` names and hashes.
+The engine never goes into git: it is built and versioned separately (a release asset, later
+a hosted URL). No manifest pins a compatible engine version yet.

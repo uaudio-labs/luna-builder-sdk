@@ -17,7 +17,7 @@
       "author": {
         "name": "Universal Audio"
       },
-      "repository": "ssh://git@stash.uaudio.com:7999/uapkg/sdk-luna.git",
+      "repository": "https://github.com/uaudio/ua-builder-sdk",
       "license": "Apache-2.0",
       "keywords": [
         "luna",
