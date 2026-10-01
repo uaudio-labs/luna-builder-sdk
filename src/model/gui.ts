@@ -40,6 +40,8 @@ export class AddOn extends Node {
     this.showWithSession = this.prop<boolean>('show_with_session');
   }
 
+  /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
+   *  menu item), or show a `'browser'` in the secondary browser (never toggling it closed). */
   show(): Promise<unknown> {
     return this.wire.post('/gui/show_add_on', { id: this.id });
   }

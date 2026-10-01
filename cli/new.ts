@@ -46,7 +46,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);

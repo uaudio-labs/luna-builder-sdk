@@ -9,13 +9,14 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 
 1. Scaffold. From the folder that should contain the Add On:
    ```sh
-   npx ua-builder new <name> --title "<Title>" [--target window|app] [--no-floating] [--show-with-session] [--width 900 --height 600]
+   npx ua-builder new <name> --title "<Title>" [--target window|app|browser] [--no-floating] [--show-with-session] [--width 900 --height 600]
    cd <name> && npm install && npm test
    ```
    The default is a `"window"` Add On with `"floating": true`, which floats with LUNA's plugin
    windows. Pass `--no-floating` for an ordinary window. Pass `--show-with-session` for a
-   window that only shows while a session is open. See `docs/MANIFEST.md` (`floating`,
-   `show_with_session`).
+   window that only shows while a session is open. Pass `--target browser` for a panel in
+   LUNA's secondary browser beside the Timeline or Mixer, or `--target app` for a full page.
+   See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`).
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
    run `node <builder>/dist/cli.js new ...` after `npm run build` in the builder package.
 

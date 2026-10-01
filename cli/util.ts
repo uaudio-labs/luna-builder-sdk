@@ -150,7 +150,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
 export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
-  ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app]
+  ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser]
                         [--no-floating] [--show-with-session] [--width 900 --height 600] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]

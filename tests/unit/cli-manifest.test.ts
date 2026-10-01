@@ -21,6 +21,13 @@ afterEach(() => {
 });
 
 describe('readManifest', () => {
+  it('accepts every target LUNA shows, and rejects one it would turn into "window"', () => {
+    for (const target of ['window', 'app', 'page', 'browser']) {
+      expect(readManifest(addOn({ target })).entries[0]!.target).toBe(target);
+    }
+    expect(() => readManifest(addOn({ target: 'panel' }))).toThrow(/unknown target "panel"/);
+  });
+
   it('accepts floating true, false, or absent', () => {
     expect(readManifest(addOn({ floating: true })).entries[0]!.floating).toBe(true);
     expect(readManifest(addOn({ floating: false })).entries[0]!.floating).toBe(false);

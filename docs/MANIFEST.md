@@ -69,7 +69,7 @@ An entry missing any of these is dropped.
 |---|---|---|
 | `id` | string | Unique across everything installed. Reverse-DNS by convention. |
 | `title` | string | Menu name. Also unique; duplicates collapse into one. |
-| `width`, `height` | int | Initial window size in pixels. |
+| `width`, `height` | int | Initial window size in pixels. Required for every `target`, but only a `"window"` uses them. |
 | `html` or `url` | string | Exactly one; an entry with neither or both is dropped. `html` is a page shipped with the Add On, relative to the manifest folder (preferred, so the Add On stays relocatable) or absolute. `url` is a hosted page used as-is; you are responsible for it being well formed. Either may carry its own query string (`index.html?page=a`). |
 
 ### Optional
@@ -85,13 +85,23 @@ An entry missing any of these is dropped.
 
 `target` values:
 
-- **`"window"`**: its own window, listed in LUNA's **Window** menu. Choosing the menu item
-  opens the window, brings it to the front if it is behind, and closes it if it is already
-  in front. See `floating` for how it layers.
-- **`"app"`**: a full LUNA page alongside Timeline and Mixer, listed in the **View** menu and
-  check-marked while it is the current page. `"page"` is an accepted synonym for backwards
-  compatibility; write `"app"` in new manifests.
-- **`"browser"`**: accepted but not reachable from any menu. Do not ship it.
+LUNA lists every Add On in its **Add Ons** menu, grouped by target: windows, then browsers,
+then apps.
+
+- **`"window"`**: its own window. Choosing the menu item opens the window, brings it to the
+  front if it is behind, and closes it if it is already in front. The item is check-marked
+  while the window is open. See `floating` for how it layers.
+- **`"browser"`**: a panel in LUNA's secondary browser, the right-hand side panel that also
+  shows Media, Markers and Lyrics, with the Add On's `title` as its header. Listed only on the
+  Timeline and Mixer pages, where that panel lives. Choosing the menu item shows the Add On,
+  replacing whatever the panel showed (another browser Add On included); choosing it while it
+  is showing closes the panel. The item is check-marked while it is showing. The panel's width
+  is LUNA's and the user's to set; `width` and `height` are not used. Only one browser Add On
+  shows at a time. When the panel moves on to something else, your page stays loaded (it keeps
+  running, hidden); it reloads only when another browser Add On takes the panel.
+- **`"app"`**: a full LUNA page alongside Timeline and Mixer, check-marked while it is the
+  current page. `"page"` is an accepted synonym for backwards compatibility; write `"app"` in
+  new manifests.
 
 An unrecognized `target` silently becomes `"window"`, so in LUNA a typo shows up as an Add
 On in the wrong menu rather than an error. `ua-builder` rejects it.
@@ -207,7 +217,8 @@ goes over the engine connection, including LUNA UI actions through `luna.gui`.
    of `html`/`url`.
 2. Keep `id` and `title` unique across everything installed.
 3. Relative `html`; set `local_content_offset` only if the page reaches above its folder.
-4. `target: "app"` only for a full LUNA page; never `"browser"`.
+4. `target: "app"` only for a full LUNA page; `"browser"` for a panel beside the Timeline
+   or Mixer, which should lay out for a narrow, user-resizable width.
    For a `"window"`, set `floating: false` if it should be an ordinary window rather than
    float with the plugin windows, and `show_with_session: true` if it only makes sense with
    a session open.

@@ -214,6 +214,9 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 show(): Promise<unknown>;
 ```
 
+Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
+ menu item), or show a `'browser'` in the secondary browser (never toggling it closed).
+
 #### Returns
 
 `Promise`\<`unknown`\>
