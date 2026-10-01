@@ -98,7 +98,9 @@ then apps.
   is showing closes the panel. The item is check-marked while it is showing. The panel's width
   is LUNA's and the user's to set; `width` and `height` are not used. Only one browser Add On
   shows at a time. When the panel moves on to something else, your page stays loaded (it keeps
-  running, hidden); it reloads only when another browser Add On takes the panel.
+  running, hidden); it reloads only when another browser Add On takes the panel. Which browser
+  Add On is showing is saved with the session: reopening the session shows it again (if it is
+  still installed), and a session that was not showing one opens without it.
 - **`"app"`**: a full LUNA page alongside Timeline and Mixer, check-marked while it is the
   current page. `"page"` is an accepted synonym for backwards compatibility; write `"app"` in
   new manifests.

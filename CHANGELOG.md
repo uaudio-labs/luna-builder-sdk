@@ -8,7 +8,8 @@ engine is versioned separately.
 Added
 - Manifest `target: "browser"` is now shown by LUNA: a panel in the secondary browser beside
   the Timeline and Mixer, chosen from the Add Ons menu (choosing it again closes it), and by
-  `Luna.AddOn.show()`. `ua-builder new --target browser` scaffolds one. Needs a LUNA that
+  `Luna.AddOn.show()`. Which one is showing is saved with the session and restored when it
+  reopens. `ua-builder new --target browser` scaffolds one. Needs a LUNA that
   shows browser Add Ons; earlier builds list them but open nothing.
 - `session.musical.chords`: LUNA's Chord ruler as a live `Luna.Chords` collection (`sorted`,
   `at(tick)`) of `Luna.Chord` (`location`, `name`, `parsed`; `rename`, `moveTo`, `delete`).
