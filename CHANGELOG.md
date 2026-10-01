@@ -6,6 +6,10 @@ engine is versioned separately.
 ## Unreleased
 
 Added
+- `Transport.setPlayStart(to, { sync })`: move the play start alone, to a tick or a
+  `{ bar, beat, tick }`, leaving the loop range where it is (`seek()` collapses it, as LUNA's
+  locate does). Resolves once LUNA shows the move; while playing, the playhead jumps as
+  `sync` says. Fact 90.
 - Manifest `target: "browser"` is now shown by LUNA: a panel in the secondary browser beside
   the Timeline and Mixer, chosen from the Add Ons menu (choosing it again closes it), and by
   `Luna.AddOn.show()`. Which one is showing is saved with the session and restored when it

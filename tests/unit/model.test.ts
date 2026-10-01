@@ -194,6 +194,35 @@ describe('Luna.Transport', () => {
     await expect(t.seek(1.5)).rejects.toMatchObject({ code: 'out_of_range' });
   });
 
+  it('moves the play start alone, keeping the loop range (fact 90)', async () => {
+    const { engine, luna } = await connected();
+    const t = (await luna.session()).transport;
+    await t.setLoop(Luna.WHOLE_NOTE * 4, Luna.WHOLE_NOTE * 8);
+    await t.setPlayStart({ bar: 3 });
+    expect(engine.value('/sessions/abc', 'play_start')).toBe(Luna.WHOLE_NOTE * 2);
+    expect(engine.value('/sessions/abc', 'loop_start')).toBe(Luna.WHOLE_NOTE * 4);
+    expect(engine.value('/sessions/abc', 'loop_stop')).toBe(Luna.WHOLE_NOTE * 8);
+    expect(t.location.value?.tick).toBe(Luna.WHOLE_NOTE * 2); // stopped, the playhead rests there
+    await t.setPlayStart(Luna.QUARTER_NOTE);
+    expect(t.tick).toBe(Luna.QUARTER_NOTE);
+    expect(engine.requests.some((r) => r.path === '/sessions/abc/sync_playback')).toBe(false);
+    await expect(t.setPlayStart(1.5)).rejects.toMatchObject({ code: 'out_of_range' });
+  });
+
+  it('jumps to a new play start while playing, as sync says (fact 90)', async () => {
+    const { engine, luna } = await connected();
+    const t = (await luna.session()).transport;
+    await t.setLoop(Luna.WHOLE_NOTE * 4, Luna.WHOLE_NOTE * 8);
+    await t.play();
+    await engine.settled();
+    await t.setPlayStart({ bar: 2 });
+    expect(engine.requests.filter((r) => r.path === '/sessions/abc/sync_playback').at(-1)).toMatchObject({ data: { next_bar: false, loop_end: false } });
+    await t.setPlayStart({ bar: 3 }, { sync: 'loop_end' });
+    expect(engine.requests.filter((r) => r.path === '/sessions/abc/sync_playback').at(-1)).toMatchObject({ data: { next_bar: false, loop_end: true } });
+    expect(t.playStart.value).toBe(Luna.WHOLE_NOTE * 2);
+    expect(engine.value('/sessions/abc', 'loop_stop')).toBe(Luna.WHOLE_NOTE * 8);
+  });
+
   it('returns to the arrangement start, which is tick 0 until set (fact 89)', async () => {
     const { engine, luna } = await connected();
     const t = (await luna.session()).transport;

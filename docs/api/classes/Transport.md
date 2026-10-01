@@ -372,6 +372,39 @@ setLoop(startTick, stopTick): Promise<void>;
 
 ***
 
+### setPlayStart()
+
+```ts
+setPlayStart(to, options): Promise<void>;
+```
+
+Move the play start alone, leaving the loop range where it is: [seek](#seek) without
+collapsing the loop marks. Resolves once LUNA shows the move (fact 90): stopped, the
+playhead rests there; while playing, the playhead jumps as `options.sync` says.
+Writing `playStart.set(tick)` instead only records the start, and while playing the
+playhead carries on until a `sync`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `to` | [`SeekTarget`](../type-aliases/SeekTarget.md) |
+| `options` | [`SeekOptions`](../interfaces/SeekOptions.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await t.setLoop(Luna.WHOLE_NOTE * 4, Luna.WHOLE_NOTE * 8);
+await t.setPlayStart({ bar: 3 });               // start before the loop; the loop stays
+await t.setPlayStart({ bar: 5 }, { sync: 'next_bar' });
+```
+
+***
+
 ### stop()
 
 ```ts

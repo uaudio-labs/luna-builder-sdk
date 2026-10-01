@@ -7,6 +7,7 @@
  * t.location.onChange(() => counter.textContent = Luna.formatBarBeat(t.location.value?.bar_beat));
  * await t.play();
  * await t.seek({ bar: 5 });
+ * await t.setPlayStart({ bar: 9 });   // like seek, but the loop range stays
  * await t.returnToZero();
  * await t.setLoop(0, Luna.WHOLE_NOTE * 4);
  */
@@ -181,16 +182,38 @@ export class Transport extends Node {
   async seek(to: SeekTarget, options: SeekOptions = {}): Promise<void> {
     const tick = requireTick(await this.resolve(to), 'seek target');
     await Promise.all([this.playStart.set(tick), this.loopStart.set(tick), this.loopStop.set(tick)]);
+    await this.confirmPlayStart(tick, 'seek', options);
+  }
+
+  /**
+   * Move the play start alone, leaving the loop range where it is: {@link seek} without
+   * collapsing the loop marks. Resolves once LUNA shows the move (fact 90): stopped, the
+   * playhead rests there; while playing, the playhead jumps as `options.sync` says.
+   * Writing `playStart.set(tick)` instead only records the start, and while playing the
+   * playhead carries on until a `sync`.
+   *
+   * @example
+   * await t.setLoop(Luna.WHOLE_NOTE * 4, Luna.WHOLE_NOTE * 8);
+   * await t.setPlayStart({ bar: 3 });               // start before the loop; the loop stays
+   * await t.setPlayStart({ bar: 5 }, { sync: 'next_bar' });
+   */
+  async setPlayStart(to: SeekTarget, options: SeekOptions = {}): Promise<void> {
+    const tick = requireTick(await this.resolve(to), 'play start');
+    await this.playStart.set(tick);
+    await this.confirmPlayStart(tick, 'setPlayStart', options);
+  }
+
+  private async confirmPlayStart(tick: number, what: string, options: SeekOptions): Promise<void> {
     if (this.playing.value === true) {
       const at = options.sync ?? 'now';
       await this.sync(at);
       // The playhead moves on, so the play start read back is the proof.
       await this.reread(['play_start', 'loop_start', 'loop_stop', 'playing']);
-      if (this.playStart.value !== tick) throw new UAError('no_effect', `seek: play start reads ${String(this.playStart.value)}, not ${tick}`, { path: this.path });
+      if (this.playStart.value !== tick) throw new UAError('no_effect', `${what}: play start reads ${String(this.playStart.value)}, not ${tick}`, { path: this.path });
       return;
     }
     // Stopped, the location follows the play start (fact 90); the writer sees that push.
-    await settle(() => this.location.value?.tick === tick, 'seek', {
+    await settle(() => this.location.value?.tick === tick, what, {
       path: this.path,
       refresh: () => this.reread(['play_start', 'location', 'playing']),
       flush: () => this.client.store.scheduler.flush(),

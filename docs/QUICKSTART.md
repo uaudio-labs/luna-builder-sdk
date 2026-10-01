@@ -83,8 +83,8 @@ const release = Luna.bindClock(clockEl, t);       // smooth MM:SS.s clock while 
 ```
 
 Tick 0 is not always bar 1, so seek to `{ bar: 1 }`; `returnToZero()` goes to the arrangement
-start. A seek sets the play start and both loop marks, like LUNA's locate, and resolves once
-the playhead is there; while playing it jumps at once unless given `{ sync: 'next_bar' | 'loop_end' }`.
+start. A seek sets the play start and both loop marks, like LUNA's locate; `setPlayStart(to)` keeps
+the loop. Both resolve once LUNA shows it; playing, they jump unless `{ sync: 'next_bar' | 'loop_end' }`.
 
 `location` arrives only several times a second (its `min_sec` is fractional on wasm, fact 96).
 `Luna.bindClock(el, t, { render })` anchors on each push and interpolates per frame while playing.
