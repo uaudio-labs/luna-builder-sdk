@@ -41,6 +41,9 @@ Added
   `Luna.AddOn.showWithSession` reads it. Needs a LUNA that reads the field.
 
 Changed
+- LUNA's Add Ons menu now holds one submenu per target (Apps, Browsers, Windows); Windows
+  lists `show_with_session` Add Ons first. Browser Add Ons are listed on every page, disabled
+  off the Timeline and Mixer. See `docs/MANIFEST.md` (`target`).
 - A member a loaded collection learns of from an `added` push (native LUNA sends no data with
   one, fact 7) is still in `items` at once. Its `onChange` now waits until the SDK's read of
   the member lands, so listeners never see it with empty props. Removals still notify at once.

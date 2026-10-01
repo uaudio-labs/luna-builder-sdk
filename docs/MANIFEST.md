@@ -85,15 +85,17 @@ An entry missing any of these is dropped.
 
 `target` values:
 
-LUNA lists every Add On in its **Add Ons** menu, grouped by target: windows, then browsers,
-then apps.
+LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Apps**,
+**Browsers** and **Windows**. A submenu with nothing in it is left out. **Windows** lists the
+`show_with_session` Add Ons first, then a separator, then the rest.
 
 - **`"window"`**: its own window. Choosing the menu item opens the window, brings it to the
   front if it is behind, and closes it if it is already in front. The item is check-marked
   while the window is open. See `floating` for how it layers.
 - **`"browser"`**: a panel in LUNA's secondary browser, the right-hand side panel that also
-  shows Media, Markers and Lyrics, with the Add On's `title` as its header. Listed only on the
-  Timeline and Mixer pages, where that panel lives. Choosing the menu item shows the Add On,
+  shows Media, Markers and Lyrics, with the Add On's `title` as its header. Its menu item is
+  enabled only on the Timeline and Mixer pages, where that panel lives, and disabled
+  everywhere else, including while no session is open. Choosing the menu item shows the Add On,
   replacing whatever the panel showed (another browser Add On included); choosing it while it
   is showing closes the panel. The item is check-marked while it is showing. The panel's width
   is LUNA's and the user's to set; `width` and `height` are not used. Only one browser Add On
