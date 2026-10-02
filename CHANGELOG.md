@@ -23,6 +23,9 @@ Changed
 - `ua-builder new` rejects an unknown `--target`.
 
 Fixed
+- `ua-builder pack` leaves dotfiles (`.DS_Store`, `._*`, `.git`, `.gitignore`, `.env`, editor
+  folders) and Windows metadata files (`Thumbs.db`, `desktop.ini`) out of the `.lunaaddon`
+  bundle at every depth, and says how many it left out. It copied them all before.
 - Docs: `BarBeat.tick` (from `timeline.barBeat()` and `location.bar_beat`) is engine ticks,
   and `Luna.formatBarBeat` converts it to display ticks. The docs said "display tick", which
   led to converting twice.
