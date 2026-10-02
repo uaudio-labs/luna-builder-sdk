@@ -374,6 +374,53 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     });
   });
 
+  it('adds several MIDI notes to a clip in one post', async () => {
+    const { engine, session } = await connected(['Keys']);
+    const track = session.tracks.byId('Keys')!;
+    const pl = session.playlistFor(track)!;
+    pl.clips.onChange(() => undefined);
+    const reply = (await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'midi' })) as { uid: string };
+    await engine.settled();
+    const clip = pl.clips.byId(reply.uid)!;
+    const before = engine.requests.length;
+    await clip.addNotes([
+      { pitch: 60, tick: 0, lengthTicks: Luna.QUARTER_NOTE },
+      { pitch: 64, tick: Luna.QUARTER_NOTE, lengthTicks: Luna.QUARTER_NOTE, velocity: 80, channel: 2 },
+    ]);
+    expect(engine.requests.length).toBe(before + 1);
+    expect(engine.requests.at(-1)).toMatchObject({
+      path: '/sessions/abc/add_midi',
+      data: {
+        session_uid: 'abc',
+        midi: [
+          { clip_uid: reply.uid, tick: 0, byte_0: 0x90, byte_1: 60, byte_2: 100 },
+          { clip_uid: reply.uid, tick: Luna.QUARTER_NOTE, byte_0: 0x80, byte_1: 60, byte_2: 0 },
+          { clip_uid: reply.uid, tick: Luna.QUARTER_NOTE, byte_0: 0x92, byte_1: 64, byte_2: 80 },
+          { clip_uid: reply.uid, tick: Luna.HALF_NOTE, byte_0: 0x82, byte_1: 64, byte_2: 0 },
+        ],
+      },
+    });
+  });
+
+  it('refuses bad notes in addNotes before the wire', async () => {
+    const { engine, session } = await connected(['Keys']);
+    const track = session.tracks.byId('Keys')!;
+    const pl = session.playlistFor(track)!;
+    pl.clips.onChange(() => undefined);
+    const reply = (await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'midi' })) as { uid: string };
+    await engine.settled();
+    const clip = pl.clips.byId(reply.uid)!;
+    const before = engine.requests.length;
+    const q = Luna.QUARTER_NOTE;
+    await expect(clip.addNotes([])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(clip.addNotes([{ pitch: 128, tick: 0, lengthTicks: q }])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(clip.addNotes([{ pitch: 60, tick: 0.5, lengthTicks: q }])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(clip.addNotes([{ pitch: 60, tick: 0, lengthTicks: 0 }])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(clip.addNotes([{ pitch: 60, tick: 0, lengthTicks: q, velocity: 0 }])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(clip.addNotes([{ pitch: 60, tick: 0, lengthTicks: q, channel: 16 }])).rejects.toMatchObject({ code: 'out_of_range' });
+    expect(engine.requests.length).toBe(before);
+  });
+
   it('talks to the LUNA host surface: pages, add-ons, dialogs, tasks', async () => {
     const { engine, luna } = await connected();
     await Promise.all([luna.gui.addOns.load(), luna.gui.windows.load()]);

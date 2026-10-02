@@ -44,7 +44,7 @@ export { Automation, BreakpointNode, AUTOMATION_MODES, automationModeOrdinal } f
 export type { AutomationModeName, Breakpoint } from './automation';
 export { Gui, AddOn, GuiWindow } from './gui';
 export type { GuiPage, AddOnTarget, ProgressTask } from './gui';
-export type { MidiEvent } from './clip';
+export type { MidiEvent, ClipNote } from './clip';
 export { MidiClip, pairNotes, decodeMidiData, encodeMidiData } from './midi';
 export type { MidiRow, Note, MidiRowData, MidiHost } from './midi';
 export { EDIT_TIMEOUT_MS, midiByte, requireTick, settle, yieldTask } from './settle';

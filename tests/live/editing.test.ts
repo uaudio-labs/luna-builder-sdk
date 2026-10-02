@@ -105,6 +105,26 @@ describe.skipIf(!live)('live: editing', () => {
     ).rejects.toMatchObject({ code: 'busy' });
   });
 
+  it('adds several notes to a clip in one undo entry', async () => {
+    const midi = clip!.midi;
+    const was = midi.notes.items.length;
+    const added = () => midi.notes.items.filter((n) => n.pitch === 72 || n.pitch === 76);
+    await clip!.addNotes([
+      { pitch: 72, tick: 0, lengthTicks: B / 2 },
+      { pitch: 76, tick: B, lengthTicks: B / 2, velocity: 70 },
+    ]);
+    await Luna.settle(() => added().length === 2, 'add notes', { refresh: () => midi.refresh() });
+    const notes = added().sort((a, b) => a.startTick - b.startTick);
+    expect(notes).toMatchObject([
+      { pitch: 72, startTick: 0, stopTick: B / 2 },
+      { pitch: 76, startTick: B, stopTick: B + B / 2, velocity: 70 },
+    ]);
+
+    await session.undo();
+    await Luna.settle(() => added().length === 0, 'undo add notes', { refresh: () => midi.refresh() });
+    expect(midi.notes.items.length).toBe(was);
+  });
+
   it('adds, renames, nudges and deletes a marker', async () => {
     const before = new Set(session.markers.items.map((m) => m.id));
     await session.addMarker(base, 'SDK live marker');

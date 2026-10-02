@@ -137,6 +137,23 @@ describe('Luna.MidiClip', () => {
     expect(midi.notes.items[0]).toMatchObject({ pitch: 60, startTick: 0, stopTick: BEAT });
   });
 
+  it('reads notes added with addNotes back as clip-relative notes (fact 41)', async () => {
+    const { engine, luna, clip, midi } = await midiClip();
+    engine.setValue(clip.path, 'midi_source_start', 4 * BEAT);
+    await engine.settled();
+    await luna.settled();
+    await clip.addNotes([
+      { pitch: 60, tick: 0, lengthTicks: BEAT },
+      { pitch: 67, tick: BEAT, lengthTicks: 2 * BEAT, velocity: 90 },
+    ]);
+    await engine.settled();
+    await luna.settled();
+    expect(midi.notes.items).toMatchObject([
+      { pitch: 60, startTick: 0, stopTick: BEAT },
+      { pitch: 67, startTick: BEAT, stopTick: 3 * BEAT, velocity: 90 },
+    ]);
+  });
+
   it('notifies listeners once per frame', async () => {
     const { engine, luna, clip, midi } = await midiClip();
     let calls = 0;

@@ -84,6 +84,7 @@
 | [ChordSpec](interfaces/ChordSpec.md) | A chord to write with `musical.setChords`. |
 | [ClipAudio](interfaces/ClipAudio.md) | - |
 | [ClipLike](interfaces/ClipLike.md) | The clip fields placement needs. A [Clip](classes/Clip.md) satisfies it, as does a plain snapshot. |
+| [ClipNote](interfaces/ClipNote.md) | One note for [Clip.addNotes](classes/Clip.md#addnotes). `tick` is relative to the clip start. |
 | [ClipSnapshot](interfaces/ClipSnapshot.md) | A clip's state at one moment, as plain data: what a view draws from. |
 | [ClockOptions](interfaces/ClockOptions.md) | - |
 | [ConnectOptions](interfaces/ConnectOptions.md) | - |

@@ -14,9 +14,9 @@
 import type { Client } from '../client/client';
 import { derived, type Prop, type WritableProp } from '../store/prop';
 import { MidiClip } from './midi';
-import { Disposed } from '../wire/errors';
+import { Disposed, UAError } from '../wire/errors';
 import { Node } from './node';
-import { requireTick, settle } from './settle';
+import { midiByte, requireTick, settle } from './settle';
 
 export type ClipType = 'audio' | 'video' | 'midi';
 
@@ -36,6 +36,17 @@ export interface MidiEvent {
   status: number;
   data1: number;
   data2?: number;
+}
+
+/** One note for {@link Clip.addNotes}. `tick` is relative to the clip start. */
+export interface ClipNote {
+  pitch: number;
+  tick: number;
+  lengthTicks: number;
+  /** Note-on velocity, 1-127. Default 100. */
+  velocity?: number;
+  /** MIDI channel, 0-15. Default 0. */
+  channel?: number;
 }
 
 /** A clip's state at one moment, as plain data: what a view draws from. */
@@ -259,11 +270,41 @@ export class Clip extends Node {
 
   /** Add a note: note-on at `tick`, note-off at `tick + lengthTicks`. */
   addNote(note: number, tick: number, lengthTicks: number, velocity = 100, channel = 0): Promise<unknown> {
-    const ch = channel & 0x0f;
-    return this.addMidi([
-      { tick, status: 0x90 | ch, data1: note, data2: velocity },
-      { tick: tick + lengthTicks, status: 0x80 | ch, data1: note, data2: 0 },
-    ]);
+    return this.addNotes([{ pitch: note, tick, lengthTicks, velocity, channel }]);
+  }
+
+  /**
+   * Add several notes to this (MIDI) clip in one `add_midi` post, so they land as one undo
+   * step. Each note is a note-on at `tick` and a note-off at `tick + lengthTicks`.
+   *
+   * @example
+   * // A C major triad on beat 1, then its arpeggio.
+   * await clip.addNotes([
+   *   ...[60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })),
+   *   ...[60, 64, 67].map((pitch, i) => ({ pitch, tick: (i + 1) * Luna.QUARTER_NOTE, lengthTicks: Luna.QUARTER_NOTE, velocity: 80 })),
+   * ]);
+   */
+  addNotes(notes: readonly ClipNote[]): Promise<unknown> {
+    if (!notes.length) return Promise.reject(new UAError('out_of_range', 'addNotes(): give at least one note', { path: this.path }));
+    let events: MidiEvent[];
+    try {
+      events = notes.flatMap((n) => {
+        const pitch = midiByte(n.pitch, 'pitch');
+        const tick = requireTick(n.tick, 'tick');
+        const length = requireTick(n.lengthTicks, 'lengthTicks');
+        if (length <= 0) throw new UAError('out_of_range', 'addNotes(): lengthTicks must be positive', { path: this.path });
+        const velocity = midiByte(n.velocity ?? 100, 'velocity', 1);
+        const ch = n.channel ?? 0;
+        if (!Number.isInteger(ch) || ch < 0 || ch > 15) throw new UAError('out_of_range', 'addNotes(): channel must be an integer 0-15', { path: this.path });
+        return [
+          { tick, status: 0x90 | ch, data1: pitch, data2: velocity },
+          { tick: tick + length, status: 0x80 | ch, data1: pitch, data2: 0 },
+        ];
+      });
+    } catch (err) {
+      return Promise.reject(err);
+    }
+    return this.addMidi(events);
   }
 
   bringToFront(): Promise<unknown> {

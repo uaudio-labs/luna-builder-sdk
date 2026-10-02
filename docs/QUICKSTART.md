@@ -154,6 +154,7 @@ for (const c of pl.clips.items) c.start.value, c.stop.value;     // ticks
 c.sourceStart.value, c.sourceStop.value;                         // nanoseconds into the file
 await session.insertClip({ trackUid, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
 await c.trim(a, b); await c.delete(); await c.addNote(60, 0, Luna.QUARTER_NOTE);
+await c.addNotes([60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })));  // one undo step
 const src = session.sources.byId(c.sourceUid.value);
 const ov = await src.overview({ index: 0, count: 1024 });   // min/max floats -1..1, one page
 await session.newPlaylists([track.id], { duplicate: true }); await session.setPlaylist(track.id, 2);

@@ -7,7 +7,7 @@
  * applies deltas in arrival order through `Store.onEvent`, the raw tap — a latest-value
  * cell would keep only the last of two deltas delivered in one frame.
  *
- * Adding events goes through {@link Clip.addNote} and {@link Clip.addMidi}. Velocity, mute
+ * Adding events goes through {@link Clip.addNote}, {@link Clip.addNotes} and {@link Clip.addMidi}. Velocity, mute
  * and deletion go through LUNA's edit context, which acts on the *selection* rather than on
  * a clip (fact 74), so {@link MidiClip.setVelocities}, {@link MidiClip.setMuted} and
  * {@link MidiClip.deleteNotes} save the user's selection, write their own, post, and put the

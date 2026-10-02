@@ -46,7 +46,7 @@ QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CL
 - Keyboard: call `Luna.bindShortcuts(luna)` after connecting; LUNA's undo, redo, play and record keys then work for any key the page does not `preventDefault()` (facts 79-80).
 - Timeline = ticks (96e9 per beat); source offsets = nanoseconds. No conversion in the SDK.
 - Effect bypass is `slot.setIn(bool)`, not the `enabled` property.
-- MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addMidi`. These are clip edits, not a live stream: live MIDI input comes from Web MIDI, not the SDK.
+- MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addNotes` (many notes, one undo step)/`addMidi`. These are clip edits, not a live stream: live MIDI input comes from Web MIDI, not the SDK.
 - Upload a browser file with `session.uploadFile({ bytes, name, onProgress })`; `session.importFile(path)` is for a path LUNA can read.
 - Sends are outputs: `channel.outputs.byId('send_0')`, with `assign`/`unassign`/`retarget`/`moveTo`. Assign appends, so use `retarget` to replace (fact 43). Read `send.destinations` (each has the assignment `uid` that `unassign` takes, `busUid`, `name`, `error`), not the raw `assignments` rows (fact 83).
 - Pan is `pan` on a mono channel and `pan_left`/`pan_right` on a stereo one (fact 84): use `output.pans` (or `panLeft`/`panRight`); `output.pan` is the left one on stereo.

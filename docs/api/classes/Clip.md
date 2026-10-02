@@ -174,6 +174,37 @@ Add a note: note-on at `tick`, note-off at `tick + lengthTicks`.
 
 ***
 
+### addNotes()
+
+```ts
+addNotes(notes): Promise<unknown>;
+```
+
+Add several notes to this (MIDI) clip in one `add_midi` post, so they land as one undo
+step. Each note is a note-on at `tick` and a note-off at `tick + lengthTicks`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `notes` | readonly [`ClipNote`](../interfaces/ClipNote.md)[] |
+
+#### Returns
+
+`Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+// A C major triad on beat 1, then its arpeggio.
+await clip.addNotes([
+  ...[60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })),
+  ...[60, 64, 67].map((pitch, i) => ({ pitch, tick: (i + 1) * Luna.QUARTER_NOTE, lengthTicks: Luna.QUARTER_NOTE, velocity: 80 })),
+]);
+```
+
+***
+
 ### bringToFront()
 
 ```ts
