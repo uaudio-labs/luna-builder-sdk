@@ -52,6 +52,38 @@ describe('WebSocketPort', () => {
     expect(FakeSocket.instances).toHaveLength(1);
   });
 
+  it('rejects with NotRunning on an error that no close follows (Node 22, fact 101)', async () => {
+    const port = makePort();
+    const statuses: string[] = [];
+    port.onStatus((s) => statuses.push(s));
+    const opening = port.open();
+    FakeSocket.latest.refuse();
+    await expect(opening).rejects.toBeInstanceOf(NotRunning);
+    expect(statuses).toEqual(['connecting', 'disconnected']);
+    expect(FakeSocket.latest.readyState).toBe(FakeSocket.CLOSED);
+  });
+
+  it('rejects with NotRunning when the handshake never answers', async () => {
+    const port = makePort();
+    const opening = port.open();
+    const assertion = expect(opening).rejects.toBeInstanceOf(NotRunning);
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+    expect(FakeSocket.latest.readyState).toBe(FakeSocket.CLOSED);
+  });
+
+  it('keeps reconnecting when retries fail with an error and no close', async () => {
+    const { port, socket } = await openPort();
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(FakeSocket.instances).toHaveLength(2);
+    FakeSocket.latest.refuse();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(FakeSocket.instances).toHaveLength(3);
+    FakeSocket.latest.open();
+    expect(port.connected).toBe(true);
+  });
+
   it('sends a correlated get and resolves with the reply data', async () => {
     const { port, socket } = await openPort();
     const p = port.get('/sessions', { properties: false, commands: false, flatvalue: true });

@@ -142,7 +142,8 @@ export class WebSocketPort implements Port {
 
   /**
    * Connect. Resolves once the socket is open. Rejects with {@link NotRunning} if the first
-   * attempt fails; later drops are handled by reconnect instead.
+   * attempt fails, or has not opened within `requestTimeoutMs`; later drops are handled by
+   * reconnect instead.
    */
   open(): Promise<void> {
     if (this.closed) return Promise.reject(new ConnectionLost());
@@ -152,22 +153,25 @@ export class WebSocketPort implements Port {
       const socket = new this.Socket(this.url);
       this.socket = socket;
       this.setStatus('connecting');
-      socket.onopen = () => {
-        settled = true;
-        this.everConnected = true;
-        this.reconnectDelay = this.reconnectMinMs;
-        this.setStatus('connected');
-        this.resubscribeAll();
-        this.startHeartbeat();
-        resolve();
-      };
-      socket.onmessage = (ev) => this.handleFrame(ev.data);
-      socket.onerror = () => {
-        /* onclose always follows; nothing to do here */
-      };
-      socket.onclose = () => {
+      const openTimer = setTimeout(() => {
+        // A host that drops the handshake silently would otherwise hold this for the OS's TCP timeout.
+        if (this.socket !== socket || settled) return;
+        this.log('warn', `no answer from ${this.url} within ${this.requestTimeoutMs} ms`, { url: this.url, timeoutMs: this.requestTimeoutMs });
+        dropped();
+      }, this.requestTimeoutMs);
+      unref(openTimer);
+      // Browsers follow `error` with `close`, but Node 22's built-in WebSocket fires only
+      // `error` on a refused connection and stays CONNECTING (fact 101). Either ends the attempt.
+      const dropped = () => {
+        clearTimeout(openTimer);
         if (this.socket !== socket) return;
         this.socket = undefined;
+        socket.onopen = socket.onerror = socket.onclose = socket.onmessage = null;
+        try {
+          if (socket.readyState !== 3) socket.close();
+        } catch {
+          /* already gone */
+        }
         this.stopHeartbeat();
         this.failPending();
         if (!settled) {
@@ -182,6 +186,19 @@ export class WebSocketPort implements Port {
         }
         this.scheduleReconnect();
       };
+      socket.onopen = () => {
+        clearTimeout(openTimer);
+        settled = true;
+        this.everConnected = true;
+        this.reconnectDelay = this.reconnectMinMs;
+        this.setStatus('connected');
+        this.resubscribeAll();
+        this.startHeartbeat();
+        resolve();
+      };
+      socket.onmessage = (ev) => this.handleFrame(ev.data);
+      socket.onerror = dropped;
+      socket.onclose = dropped;
     });
   }
 

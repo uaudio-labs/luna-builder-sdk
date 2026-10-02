@@ -56,6 +56,11 @@ export class FakeSocket implements SocketLike {
     this.onclose?.({});
   }
 
+  /** Connection refused the way Node 22's built-in WebSocket reports it: `error`, no `close`, still CONNECTING. */
+  refuse(): void {
+    this.onerror?.({});
+  }
+
   /** Deliver a JSON message from the server. */
   receive(message: unknown): void {
     this.onmessage?.({ data: typeof message === 'string' ? message : JSON.stringify(message) });

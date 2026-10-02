@@ -136,7 +136,8 @@ open(): Promise<void>;
 ```
 
 Connect. Resolves once the socket is open. Rejects with [NotRunning](NotRunning.md) if the first
-attempt fails; later drops are handled by reconnect instead.
+attempt fails, or has not opened within `requestTimeoutMs`; later drops are handled by
+reconnect instead.
 
 #### Returns
 
