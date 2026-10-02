@@ -3,7 +3,11 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
-## Unreleased
+## 0.1.0-alpha.4
+
+Measured against a LUNA 1.0.0.0 Debug build from the 3.x branch (facts 90 and 100 in
+`docs/EVIDENCE.md`). The `floating`, `show_with_session` and browser-target manifest
+behaviour needs a LUNA that reads those fields.
 
 Added
 - `Transport.setPlayStart(to, { sync })`: move the play start alone, to a tick or a
@@ -55,6 +59,8 @@ Changed
   quiet. After `await engine.settled(); await luna.settled();` a clip or track another client
   just added has its values.
 - `ua-builder probe` opens a blank tab, then navigates it, so it can install scripts first.
+- The `ua-luna-builder` plugin manifests and marketplace catalog name
+  `https://github.com/uaudio/ua-builder-sdk` as the repository.
 
 ## 0.1.0-alpha.3
 

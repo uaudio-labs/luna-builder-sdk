@@ -31,7 +31,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
     "id": "com.example.my_add_on",
     "title": "My Add On",
     "version": "0.1.0",
-    "sdk_version": "0.1.0-alpha.3",
+    "sdk_version": "0.1.0-alpha.4",
     "min_luna_version": "1.9.0",
     "engines": ["luna", "wasm"],
     "html": "index.html",

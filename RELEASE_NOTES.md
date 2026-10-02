@@ -3,6 +3,20 @@
 What changed in each release of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 0.1.0-alpha.4 — 2026-10-01
+
+- Added `Transport.setPlayStart()` to move the play start without collapsing the loop range.
+- Added `session.musical.chords` for LUNA's Chord ruler, with `addChord`, `setChords`,
+  `clearChords` and `Luna.parseChord()`.
+- Added `session.focusedTrack` for the track the user is working on.
+- Added manifest `floating` and `show_with_session` options for window Add Ons, and support
+  for `target: "browser"` Add Ons, with matching `ua-builder new` flags.
+- Added `Luna.connect({ engine: 'mock' })` and `?engine=mock` for running a page on an
+  in-memory engine, and `ua-builder probe --mock` and `--screenshot`.
+- Members added to a loaded collection now notify only once their properties are read, and
+  `luna.settled()` also waits for reads in flight.
+- Documented LUNA's per-target Add Ons submenus.
+
 ## 0.1.0-alpha.3 — 2026-09-30
 
 - `ua-builder pack` now produces a `.lunaaddon` bundle instead of a zip, matching LUNA's

@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Plugins for building LUNA Add Ons with @uaudio/ua-builder-sdk",
-    "version": "0.1.0-alpha.3"
+    "version": "0.1.0-alpha.4"
   },
   "plugins": [
     {
       "name": "ua-luna-builder",
       "source": "./plugins/ua-luna-builder",
       "description": "Build LUNA Add Ons with @uaudio/ua-builder-sdk: scaffold a page, connect to a running LUNA or the in-page WebAssembly engine, read and write transport, tracks, controls, clips and meters, test against Luna.MockEngine, then install the Add On into LUNA's Window menu",
-      "version": "0.1.0-alpha.3",
+      "version": "0.1.0-alpha.4",
       "author": {
         "name": "Universal Audio"
       },
