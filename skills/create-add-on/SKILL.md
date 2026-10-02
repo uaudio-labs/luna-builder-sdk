@@ -17,6 +17,8 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
    window that only shows while a session is open. Pass `--target browser` for a panel in
    LUNA's secondary browser beside the Timeline or Mixer, or `--target app` for a full page.
    See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`).
+   `new` refuses an `id` or `title` that an installed Add On already uses; pass a different
+   `--id` or `--title`, and do not remove the other Add On without asking.
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
    run `node <builder>/dist/cli.js new ...` after `npm run build` in the builder package.
 

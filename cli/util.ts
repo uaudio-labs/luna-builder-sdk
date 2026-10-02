@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -94,8 +94,10 @@ export function sdkVersion(): string {
   }
 }
 
-/** LUNA's Add Ons folder for this platform. */
+/** LUNA's Add Ons folder for this platform; `UA_ADDONS_FOLDER` overrides it (tests, staging). */
 export function addOnsFolder(): string {
+  const override = process.env['UA_ADDONS_FOLDER'];
+  if (override) return override;
   if (process.platform === 'darwin') return '/Library/Application Support/Universal Audio/LUNA/Add Ons';
   if (process.platform === 'win32') return join(process.env['LOCALAPPDATA'] ?? join(process.env['USERPROFILE'] ?? '', 'AppData', 'Local'), 'Universal Audio', 'LUNA', 'Add Ons');
   throw new Error('LUNA Add Ons are supported on macOS and Windows only');
@@ -133,6 +135,64 @@ export function menuFor(target: string | undefined): string {
   if (target === 'app' || target === 'page') return 'Add Ons > Apps';
   if (target === 'browser') return 'Add Ons > Browsers';
   return 'Add Ons > Windows';
+}
+
+/** An Add On LUNA lists from its Add Ons folder, and the folder entry it came from. */
+export interface InstalledAddOn {
+  id: string;
+  title: string;
+  /** The Add Ons folder entry (folder, symlink or installed `.lunaaddon` bundle). */
+  entry: string;
+}
+
+/**
+ * Every Add On in LUNA's Add Ons folder, read leniently: an entry with no readable
+ * `manifest.json` is skipped, as is a manifest entry without a string `id` and `title`. No
+ * folder (LUNA not installed, or a platform LUNA does not run on) means none.
+ */
+export function installedAddOns(folder?: string): InstalledAddOn[] {
+  let root: string;
+  try {
+    root = folder ?? addOnsFolder();
+  } catch {
+    return [];
+  }
+  if (!existsSync(root)) return [];
+  const out: InstalledAddOn[] = [];
+  for (const name of readdirSync(root)) {
+    const entry = join(root, name);
+    let manifest: Manifest;
+    try {
+      manifest = JSON.parse(readFileSync(join(entry, 'manifest.json'), 'utf8')) as Manifest;
+    } catch {
+      continue;
+    }
+    const entries = 'add_ons' in manifest ? (Array.isArray(manifest.add_ons) ? manifest.add_ons : []) : [manifest];
+    for (const e of entries) {
+      if (typeof e?.id === 'string' && typeof e.title === 'string') out.push({ id: e.id, title: e.title, entry });
+    }
+  }
+  return out;
+}
+
+/**
+ * The installed Add Ons whose `id` or `title` an Add On would collide with. LUNA needs both
+ * unique across everything installed; a duplicate title collapses into one menu item. Titles
+ * compare without case or surrounding whitespace, since they read the same in the menu.
+ * Entries in `except` (the Add On's own install, being replaced) are left out.
+ */
+export function addOnClashes(wanted: { id: string; title: string }[], installed: InstalledAddOn[], except: string[] = []): string[] {
+  const titleKey = (t: string) => t.trim().toLowerCase();
+  const skip = new Set(except.map((p) => resolve(p)));
+  const problems: string[] = [];
+  for (const w of wanted) {
+    for (const i of installed) {
+      if (skip.has(resolve(i.entry))) continue;
+      if (i.id === w.id) problems.push(`id "${w.id}" is already used by "${i.title}" in ${i.entry}`);
+      else if (titleKey(i.title) === titleKey(w.title)) problems.push(`title "${w.title}" is already used by ${i.id} in ${i.entry}`);
+    }
+  }
+  return problems;
 }
 
 /** Read and validate `manifest.json` in `dir`. Throws with a readable message on problems. */

@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { bundlePath, flagNumber, flagString, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
+import { addOnClashes, bundlePath, flagNumber, flagString, installedAddOns, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
 
 /** Manifest fields only a `"window"` uses; a browser or app scaffold leaves them out. */
 const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'width', 'height'];
@@ -73,11 +73,18 @@ export async function newAddOn(args: Args): Promise<number> {
     console.error(`template not found: ${template}`);
     return 1;
   }
+  const id = flagString(args, 'id') ?? `com.example.${slug(name)}`;
+  const title = flagString(args, 'title') ?? titleCase(name);
+  const clashes = addOnClashes([{ id, title }], installedAddOns());
+  if (clashes.length) {
+    console.error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nPick another with --id com.x.y and/or --title "Title".`);
+    return 1;
+  }
   const replacements: Record<string, string> = {
     __NAME__: name,
     __SLUG__: slug(name),
-    __ID__: flagString(args, 'id') ?? `com.example.${slug(name)}`,
-    __TITLE__: flagString(args, 'title') ?? titleCase(name),
+    __ID__: id,
+    __TITLE__: title,
     __TARGET__: target,
     __FLOATING__: String(!args.flags['no-floating']),
     __SHOW_WITH_SESSION__: String(!!args.flags['show-with-session']),

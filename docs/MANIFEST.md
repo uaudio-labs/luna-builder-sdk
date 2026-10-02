@@ -19,7 +19,7 @@ required field, an unknown `target`, a `floating` or `show_with_session` that is
 Each entry in that folder is the Add On folder or a symlink to one (`ua-builder install`
 makes the symlink on macOS and copies on Windows). Only a file named exactly `manifest.json`
 is read; other `.json` files are not. LUNA rescans the folder, so Add Ons appear and
-disappear without a restart.
+disappear without a restart. `UA_ADDONS_FOLDER` points `ua-builder` at another folder.
 
 ## Two shapes
 
@@ -220,7 +220,8 @@ goes over the engine connection, including LUNA UI actions through `luna.gui`.
 
 1. `manifest.json` at the Add On root, with `id`, `title` and exactly one of `html`/`url`,
    plus `width` and `height` for a `"window"`.
-2. Keep `id` and `title` unique across everything installed.
+2. Keep `id` and `title` unique across everything installed. `ua-builder new` and `install`
+   check both against the Add Ons folder (titles ignoring case) and refuse a clash.
 3. Relative `html`; set `local_content_offset` only if the page reaches above its folder.
 4. `target: "app"` only for a full LUNA page; `"browser"` for a panel beside the Timeline
    or Mixer, which should lay out for a narrow, user-resizable width.

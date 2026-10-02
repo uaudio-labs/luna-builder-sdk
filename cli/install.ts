@@ -1,6 +1,6 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { addOnsFolder, flagString, menuFor, readManifest, type Args } from './util';
+import { addOnClashes, addOnsFolder, flagString, installedAddOns, menuFor, readManifest, type Args } from './util';
 
 /**
  * Put an Add On folder where LUNA looks for it. macOS: a symlink, so edits are live.
@@ -14,6 +14,11 @@ export async function install(args: Args): Promise<number> {
   const folder = addOnsFolder();
   mkdirSync(folder, { recursive: true });
   const target = join(folder, name);
+  // The entry being replaced, and any other link to this same folder, are this Add On.
+  const installed = installedAddOns(folder);
+  const own = installed.filter((a) => a.entry === target || sameFolder(a.entry, dir)).map((a) => a.entry);
+  const clashes = addOnClashes(entries, installed, own);
+  if (clashes.length) throw new Error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nChange "id" or "title" in manifest.json, or remove the other Add On.`);
   if (existsSync(target) || isDanglingLink(target)) {
     const st = lstatSync(target);
     if (st.isSymbolicLink()) {
@@ -37,6 +42,14 @@ export async function install(args: Args): Promise<number> {
     console.log(`Linked ${target} -> ${dir}`);
   }
   return report(entries);
+}
+
+function sameFolder(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
 }
 
 function isDanglingLink(path: string): boolean {

@@ -14,6 +14,9 @@ Added
   marker and the tempo map, so a marker list needs no tempo or time-signature listeners.
 
 Changed
+- `ua-builder new` and `ua-builder install` refuse an Add On whose `id` or `title` (ignoring
+  case) is already used by an Add On in LUNA's Add Ons folder, since LUNA needs both unique.
+  Reinstalling the same Add On is not a clash. `UA_ADDONS_FOLDER` overrides the folder.
 - Docs and skills say the SDK does not stream audio or MIDI, and that an Add On receives live
   MIDI with Web MIDI (`navigator.requestMIDIAccess()`) and sends it however it likes.
 - `width` and `height` are required only for a `"window"` Add On. `ua-builder install` and

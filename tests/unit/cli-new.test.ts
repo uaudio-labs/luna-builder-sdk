@@ -1,12 +1,19 @@
 /** `ua-builder new` writes only the manifest fields the chosen target uses. */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newAddOn } from '../../cli/new';
 import { bundlePath, parseArgs, readManifest } from '../../cli/util';
 
 const dirs: string[] = [];
+let addOns = '';
+
+/** Put an Add On with `manifest` in the stand-in Add Ons folder. */
+function installed(name: string, manifest: object): void {
+  mkdirSync(join(addOns, name));
+  writeFileSync(join(addOns, name, 'manifest.json'), JSON.stringify(manifest));
+}
 
 async function scaffold(...argv: string[]): Promise<{ dir: string; code: number; out: string }> {
   const parent = mkdtempSync(join(tmpdir(), 'ua-new-'));
@@ -27,7 +34,14 @@ beforeAll(() => {
   if (!bundlePath()) throw new Error('run "npm run build" first: the scaffold vendors dist/luna.global.js');
 });
 
+beforeEach(() => {
+  addOns = mkdtempSync(join(tmpdir(), 'ua-addons-'));
+  dirs.push(addOns);
+  vi.stubEnv('UA_ADDONS_FOLDER', addOns);
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -56,5 +70,30 @@ describe('ua-builder new', () => {
     const { dir, code } = await scaffold('--target', 'panel');
     expect(code).toBe(2);
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it('refuses an id an installed Add On already uses, before writing anything', async () => {
+    installed('Other', { id: 'com.example.demo', title: 'Something Else', html: 'index.html' });
+    const { dir, code, out } = await scaffold();
+    expect(code).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+    expect(out).toContain('id "com.example.demo" is already used by "Something Else"');
+  });
+
+  it('refuses a title an installed Add On already uses, ignoring case', async () => {
+    installed('Bundle.lunaaddon', { add_ons: [{ id: 'com.other.a', title: 'A' }, { id: 'com.other.demo', title: 'DEMO ' }] });
+    const { dir, code, out } = await scaffold();
+    expect(code).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+    expect(out).toContain('title "Demo" is already used by com.other.demo');
+  });
+
+  it('accepts a new --id and --title, and skips unreadable manifests', async () => {
+    installed('Other', { id: 'com.example.demo', title: 'Demo', html: 'index.html' });
+    mkdirSync(join(addOns, 'Broken'));
+    writeFileSync(join(addOns, 'Broken', 'manifest.json'), '{ not json');
+    const { dir, code } = await scaffold('--id', 'com.example.demo2', '--title', 'Demo 2');
+    expect(code).toBe(0);
+    expect(readManifest(dir).entries[0]).toMatchObject({ id: 'com.example.demo2', title: 'Demo 2' });
   });
 });
