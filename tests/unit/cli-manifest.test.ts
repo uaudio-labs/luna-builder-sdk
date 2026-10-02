@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe('readManifest', () => {
   it('accepts every target LUNA shows, and rejects one it would turn into "window"', () => {
-    for (const target of ['window', 'app', 'page', 'browser']) {
+    for (const target of ['window', 'app', 'page', 'browser', 'editor']) {
       expect(readManifest(addOn({ target })).entries[0]!.target).toBe(target);
     }
     expect(() => readManifest(addOn({ target: 'panel' }))).toThrow(/unknown target "panel"/);
@@ -48,7 +48,7 @@ describe('readManifest', () => {
   });
 
   it('requires width and height only for a window, which a missing target means', () => {
-    for (const target of ['app', 'page', 'browser']) {
+    for (const target of ['app', 'page', 'browser', 'editor']) {
       expect(readManifest(addOn({ target }, ['width', 'height'])).entries[0]!.width).toBeUndefined();
     }
     expect(() => readManifest(addOn({ target: 'window' }, ['width']))).toThrow(/"width" must be a number/);

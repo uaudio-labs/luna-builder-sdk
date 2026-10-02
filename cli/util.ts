@@ -114,7 +114,7 @@ export interface ManifestEntry {
   title: string;
   html?: string;
   url?: string;
-  /** Required for a `"window"`; LUNA sizes browser and app Add Ons itself. */
+  /** Required for a `"window"`; LUNA sizes browser, app and editor Add Ons itself. */
   width?: number;
   height?: number;
   target?: string;
@@ -134,6 +134,7 @@ export function isWindow(target: string | undefined): boolean {
 export function menuFor(target: string | undefined): string {
   if (target === 'app' || target === 'page') return 'Add Ons > Apps';
   if (target === 'browser') return 'Add Ons > Browsers';
+  if (target === 'editor') return 'Add Ons > Editors';
   return 'Add Ons > Windows';
 }
 
@@ -215,7 +216,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
     }
     if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
-    if (e.target !== undefined && !['window', 'app', 'page', 'browser'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
+    if (e.target !== undefined && !['window', 'app', 'page', 'browser', 'editor'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
     for (const k of ['floating', 'show_with_session'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
   }
   if (problems.length) throw new Error(`manifest.json problems:\n  - ${problems.join('\n  - ')}`);
@@ -225,7 +226,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
 export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
-  ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser]
+  ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser|editor]
                         [--no-floating] [--show-with-session] [--width 900 --height 600] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]

@@ -6,6 +6,11 @@ engine is versioned separately.
 ## Unreleased
 
 Added
+- `"editor"` Add On target: the editor panel docked under LUNA's Timeline, in place of the
+  Clip Editor and at its height, listed under **Add Ons > Editors**. `ua-builder new --target
+  editor` scaffolds one, `install` and `pack` accept it, and `AddOnTarget` includes `'editor'`.
+  Needs a LUNA with editor Add On support; earlier builds open an `"editor"` entry as a window,
+  and drop it for lack of a size.
 - `timeline.formatBarBeat(tick)`: a tick as LUNA's bar|beat counter shows it (`5|3|240`), in
   one call.
 - `timeline.onChange(listener)`: called when a tempo event or time signature is added, removed

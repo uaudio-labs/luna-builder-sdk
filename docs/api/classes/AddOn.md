@@ -215,7 +215,8 @@ show(): Promise<unknown>;
 ```
 
 Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
- menu item), or show a `'browser'` in the secondary browser (never toggling it closed).
+ menu item), show a `'browser'` in the secondary browser, or an `'editor'` in the Timeline's
+ editor panel (never toggling either closed).
 
 #### Returns
 

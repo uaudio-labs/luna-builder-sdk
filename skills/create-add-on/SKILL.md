@@ -9,13 +9,15 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 
 1. Scaffold. From the folder that should contain the Add On:
    ```sh
-   npx ua-builder new <name> --title "<Title>" [--target window|app|browser] [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
+   npx ua-builder new <name> --title "<Title>" [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
    The default is a `"window"` Add On with `"floating": true`, which floats with LUNA's plugin
    windows. Pass `--no-floating` for an ordinary window. Pass `--show-with-session` for a
    window that only shows while a session is open. Pass `--target browser` for a panel in
-   LUNA's secondary browser beside the Timeline or Mixer, or `--target app` for a full page.
+   LUNA's secondary browser beside the Timeline or Mixer, `--target editor` for the editor
+   panel under the Timeline (in place of the Clip Editor, at its height; it does not follow
+   the selection), or `--target app` for a full page.
    See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`).
    `new` refuses an `id` or `title` that an installed Add On already uses; pass a different
    `--id` or `--title`, and do not remove the other Add On without asking.
@@ -36,7 +38,7 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
    model. For a control edit, assert `engine.touches` is one `:on` then one `:off` per edit.
 
 5. Try it in a browser with LUNA running: `npx ua-builder serve`, open
-   `http://localhost:8790/`. Then `npx ua-builder install` and open it from LUNA's Add Ons menu (Windows, Browsers or Apps, by target).
+   `http://localhost:8790/`. Then `npx ua-builder install` and open it from LUNA's Add Ons menu (Windows, Browsers, Editors or Apps, by target).
 
 ## Rules
 

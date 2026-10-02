@@ -16,7 +16,7 @@ import { Collection } from './collection';
 import { Node } from './node';
 
 export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | string;
-export type AddOnTarget = 'window' | 'app' | 'browser';
+export type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
 
 export class AddOn extends Node {
   readonly addOnId: Prop<string>;
@@ -41,7 +41,8 @@ export class AddOn extends Node {
   }
 
   /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
-   *  menu item), or show a `'browser'` in the secondary browser (never toggling it closed). */
+   *  menu item), show a `'browser'` in the secondary browser, or an `'editor'` in the Timeline's
+   *  editor panel (never toggling either closed). */
   show(): Promise<unknown> {
     return this.wire.post('/gui/show_add_on', { id: this.id });
   }

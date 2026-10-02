@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, wri
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { addOnClashes, bundlePath, flagNumber, flagString, installedAddOns, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
 
-/** Manifest fields only a `"window"` uses; a browser or app scaffold leaves them out. */
+/** Manifest fields only a `"window"` uses; a browser, app or editor scaffold leaves them out. */
 const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'width', 'height'];
 
 /** Drop the window-only lines from the template's manifest and the comma they leave dangling. */
@@ -55,7 +55,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
@@ -64,8 +64,8 @@ export async function newAddOn(args: Args): Promise<number> {
     return 1;
   }
   const target = flagString(args, 'target') ?? 'window';
-  if (!['window', 'app', 'browser'].includes(target)) {
-    console.error(`unknown --target "${target}"; use window, app or browser`);
+  if (!['window', 'app', 'browser', 'editor'].includes(target)) {
+    console.error(`unknown --target "${target}"; use window, app, browser or editor`);
     return 2;
   }
   const template = join(packageRoot(), 'templates', flagString(args, 'template') ?? 'add-on-basic');

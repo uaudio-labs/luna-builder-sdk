@@ -77,7 +77,7 @@ size; see `width`, `height` below.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `target` | string | `"window"` | Where the Add On opens. See below. |
-| `width`, `height` | int | none | Initial window size in pixels. **Required for a `"window"`**: one without them is dropped. Optional for `"browser"` and `"app"`, which LUNA sizes itself and which ignore them; `ua-builder new` leaves them out. |
+| `width`, `height` | int | none | Initial window size in pixels. **Required for a `"window"`**: one without them is dropped. Optional for `"browser"`, `"editor"` and `"app"`, which LUNA sizes itself and which ignore them; `ua-builder new` leaves them out. |
 | `floating` | boolean | `true` | `"window"` only: whether the window floats with LUNA's plugin windows or is an ordinary window. See below. |
 | `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
@@ -87,7 +87,7 @@ size; see `width`, `height` below.
 `target` values:
 
 LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Apps**,
-**Browsers** and **Windows**. A submenu with nothing in it is left out. **Windows** lists the
+**Browsers**, **Editors** and **Windows**. A submenu with nothing in it is left out. **Windows** lists the
 `show_with_session` Add Ons first, then a separator, then the rest.
 
 - **`"window"`**: its own window. Choosing the menu item opens the window, brings it to the
@@ -104,6 +104,29 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
   running, hidden); it reloads only when another browser Add On takes the panel. Which browser
   Add On is showing is saved with the session: reopening the session shows it again (if it is
   still installed), and a session that was not showing one opens without it.
+- **`"editor"`**: the editor panel docked at the bottom of the Timeline, in place of LUNA's
+  Clip Editor, with the Add On's `title` in the panel's header. Its menu item is enabled only
+  on the Timeline page, where that panel lives, and disabled everywhere else. Choosing the menu
+  item opens the panel on the Add On, replacing the Clip Editor or another editor Add On;
+  choosing it while it is showing closes the panel, and the panel shows the Clip Editor the
+  next time it opens. The item is check-marked while it is showing. The panel keeps the Clip
+  Editor's position and size: it spans the Timeline's width, and its height is the one the
+  user set for the Clip Editor, resized from its top edge and shared with it. `width` and
+  `height` are not needed and not used; lay the page out for a wide, short panel whose height
+  the user changes. Only one editor Add On shows at a time.
+  - Closing the panel any other way (its close button, or the Timeline's editor toggle)
+    keeps the Add On in it: the panel reopens on it.
+  - Opening a clip for editing (double-clicking a MIDI clip, for instance) switches the panel
+    back to the Clip Editor.
+  - The panel does not follow the Timeline's selection: selecting clips, tracks or a range
+    never changes, reloads or hides your Add On. If it should react to the selection, read
+    the selection through the SDK.
+  - Your page loads the first time the panel shows it. It stays loaded (it keeps running,
+    hidden) while the panel is closed or shows the Clip Editor, and reloads only when another
+    editor Add On takes the panel.
+  - Which editor Add On the panel holds is saved with the session: reopening the session
+    shows it again (if it is still installed, and open if the panel was open), and a new
+    session opens on the Clip Editor.
 - **`"app"`**: a full LUNA page alongside Timeline and Mixer, check-marked while it is the
   current page. `"page"` is an accepted synonym for backwards compatibility; write `"app"` in
   new manifests.
@@ -123,7 +146,7 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
   Floating Windows**.
 - A value that is not a boolean (such as the string `"false"`) is ignored, so the window
   floats. `ua-builder` rejects it.
-- It has no effect on `"app"` or `"browser"` entries.
+- It has no effect on `"app"`, `"browser"` or `"editor"` entries.
 - If you change it while LUNA is running and the window has already been opened, the change
   applies after LUNA restarts.
 - LUNA reports it as the `floating` property under `/gui/add_ons/<id>`
@@ -142,7 +165,7 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
   so its scripts keep running and should cope with there being no session.
 - `false` (the default): the window and its menu item do not depend on a session.
 - A value that is not a boolean is ignored, so the default applies. `ua-builder` rejects it.
-- It has no effect on `"app"` or `"browser"` entries.
+- It has no effect on `"app"`, `"browser"` or `"editor"` entries.
 - LUNA reports it as the `show_with_session` property under `/gui/add_ons/<id>`
   (`showWithSession` on `luna.gui.addOns` items in the SDK).
 
@@ -224,13 +247,14 @@ goes over the engine connection, including LUNA UI actions through `luna.gui`.
    check both against the Add Ons folder (titles ignoring case) and refuse a clash.
 3. Relative `html`; set `local_content_offset` only if the page reaches above its folder.
 4. `target: "app"` only for a full LUNA page; `"browser"` for a panel beside the Timeline
-   or Mixer, which should lay out for a narrow, user-resizable width.
+   or Mixer, which should lay out for a narrow, user-resizable width; `"editor"` for the
+   panel under the Timeline, which should lay out for a wide, short, user-resizable height.
    For a `"window"`, set `floating: false` if it should be an ordinary window rather than
    float with the plugin windows, and `show_with_session: true` if it only makes sense with
-   a session open. Leave `floating`, `show_with_session`, `width` and `height` out of browser
-   and app entries.
+   a session open. Leave `floating`, `show_with_session`, `width` and `height` out of browser,
+   editor and app entries.
 5. Fill `version`, `sdk_version`, `min_luna_version`, `engines`.
 6. Add `icon` with a relative path if the Add On ships one.
 7. Add `package_name` if the folder name is not what the Add Ons folder should show.
-8. `ua-builder install` and look in LUNA's **Add Ons** menu, under **Windows**, **Browsers** or
-   **Apps** by target (`install` prints which).
+8. `ua-builder install` and look in LUNA's **Add Ons** menu, under **Windows**, **Browsers**,
+   **Editors** or **Apps** by target (`install` prints which).

@@ -54,7 +54,7 @@ describe('ua-builder new', () => {
     expect(out).toContain('Add Ons > Windows');
   });
 
-  for (const [target, menu] of [['browser', 'Add Ons > Browsers'], ['app', 'Add Ons > Apps']] as const) {
+  for (const [target, menu] of [['browser', 'Add Ons > Browsers'], ['editor', 'Add Ons > Editors'], ['app', 'Add Ons > Apps']] as const) {
     it(`leaves floating, show_with_session and the size out of a ${target} Add On`, async () => {
       const { dir, code, out } = await scaffold('--target', target);
       expect(code).toBe(0);
