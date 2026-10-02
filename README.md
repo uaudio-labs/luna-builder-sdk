@@ -9,6 +9,12 @@ automation, renders and recording are implemented and tested against a live LUNA
 same Add On runs inside LUNA or, with `?engine=wasm`, on the in-page engine. See
 [CHANGELOG.md](CHANGELOG.md).
 
+Not supported: streaming audio or MIDI. The SDK controls and edits a session (clips, notes,
+parameters, transport); it does not carry live audio or MIDI to or from LUNA. An Add On that
+wants live MIDI input receives it with [Web MIDI](https://developer.mozilla.org/docs/Web/API/Web_MIDI_API)
+(`navigator.requestMIDIAccess()`); sending MIDI, through Web MIDI or otherwise, is up to the
+Add On.
+
 ## Get set up
 
 This repo holds the SDK source; the builds (`dist/`, the agent plugin) are generated.

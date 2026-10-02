@@ -1,6 +1,7 @@
 # Quickstart
 
 Build a LUNA Add On with `@uaudio/ua-builder-sdk`, all under `Luna`. Read once; then use the headings.
+No audio or MIDI streaming: live MIDI input is Web MIDI (`navigator.requestMIDIAccess()`); sending is the Add On's.
 
 ## 1. Create and run
 
@@ -23,9 +24,8 @@ const luna = await Luna.connect({ engine: 'wasm' }); // in-page wasm engine (or 
 const luna = await Luna.connect({ engine: 'mock', setup: (e) => e.addSession('s', { tracks: ['Vox'] }) }); // no engine (or ?engine=mock)
 ```
 
-Wasm needs COOP/COEP headers and same-origin engine files: `ua-builder serve --engine <dir>`.
-It boots with no session (`luna.sessions.create(...)`), audio needs a click
-(`luna.wasm.resumeAudio()`), and there is no `luna.gui`. See `skills/port-to-wasm/SKILL.md`.
+Wasm needs COOP/COEP headers and same-origin engine files (`ua-builder serve --engine <dir>`), boots with no session
+(`luna.sessions.create(...)`), needs a click for audio (`luna.wasm.resumeAudio()`) and has no `luna.gui`; see `skills/port-to-wasm/SKILL.md`.
 
 Throws `Luna.NotRunning` if nothing answers; afterwards it reconnects by itself. `luna.status`
 is a Prop (`connecting | connected | disconnected | closed`); `luna.engine` names the engine.
@@ -181,8 +181,7 @@ ctx.beginPath(); cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, la
 ```js
 await luna.plugins.load();
 const comp = luna.plugins.find('1176')[0];          // or byCategory('Compressor')
-const slot = await track.insert(comp.id);           // first empty slot; resolves once loaded,
-                                                    // rejects with plugin_error (fact 86)
+const slot = await track.insert(comp.id);           // first empty slot; resolves once loaded, rejects with plugin_error (fact 86)
 slot.loaded.value; slot.params;                     // live parameters are Controls, touched on write
 await slot.setIn(false);                            // bypass (not the `enabled` property)
 await slot.clear();
@@ -214,7 +213,7 @@ await Luna.settle(() => !pl.clips.byId(uid), 'delete clip', { refresh: () => pl.
 ## 10. MIDI edits and recording
 
 Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps
-in its own and restores yours, so they cannot run inside a `transaction()`.
+in its own and restores yours, so they cannot run inside a `transaction()`. Clip edits, not a live MIDI stream.
 
 ```js
 await clip.midi.ready();

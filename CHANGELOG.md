@@ -14,6 +14,8 @@ Added
   marker and the tempo map, so a marker list needs no tempo or time-signature listeners.
 
 Changed
+- Docs and skills say the SDK does not stream audio or MIDI, and that an Add On receives live
+  MIDI with Web MIDI (`navigator.requestMIDIAccess()`) and sends it however it likes.
 - `width` and `height` are required only for a `"window"` Add On. `ua-builder install` and
   `pack` accept a browser or app entry without them, and `ua-builder new --target browser|app`
   leaves out `width`, `height`, `floating` and `show_with_session`, none of which those targets

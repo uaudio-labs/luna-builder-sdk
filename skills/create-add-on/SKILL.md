@@ -56,6 +56,9 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 - Keep every unsubscribe function and call it when the session changes.
 - Use `luna.raw` only when no typed method exists, and then consider adding one
   (see the add-feature skill).
+- The SDK does not stream audio or MIDI. For live MIDI input use Web MIDI
+  (`navigator.requestMIDIAccess()`) in the page; sending MIDI is up to the Add On. Do not try
+  to stream through the SDK or `luna.raw`.
 - Do not use `<script type="module">` in the page; Windows loads Add Ons from `file://`.
 
 ## Verify
