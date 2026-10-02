@@ -24,8 +24,8 @@ expensive to walk back once published.
 
 The last bump is, in order of preference:
 1. the most recent `v*` git tag (`git describe --tags --abbrev=0 --match 'v*'`), or
-2. the most recent commit touching `package.json` whose subject contains "Bump to"
-   (`git log --oneline -G'"version"' -- package.json`), or
+2. the most recent commit touching `package.json` whose subject is "Version <version>"
+   (or, for older bumps, contains "Bump to") (`git log --oneline -G'"version"' -- package.json`), or
 3. if neither exists, the start of history.
 
 Collect what changed since then:
@@ -110,12 +110,12 @@ check here means the bump is incomplete, not that the checker is wrong.
 
 ## 6. Commit and tag
 
-Per tree policy the commit message needs a Jira issue ID — ask the user for one if the
-task doesn't already have one (they may opt out). Then:
+The commit message is exactly `Version <new-version>` (e.g. `Version 0.1.0-alpha.3`),
+with no Jira prefix. Then:
 
 ```bash
 git add -A
-git commit -m "<JIRA-ID>: Bump to <new-version>"
+git commit -m "Version <new-version>"
 git tag v<new-version>
 ```
 
