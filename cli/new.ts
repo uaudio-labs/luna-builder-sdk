@@ -1,6 +1,15 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { bundlePath, flagNumber, flagString, packageRoot, sdkVersion, type Args } from './util';
+import { bundlePath, flagNumber, flagString, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
+
+/** Manifest fields only a `"window"` uses; a browser or app scaffold leaves them out. */
+const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'width', 'height'];
+
+/** Drop the window-only lines from the template's manifest and the comma they leave dangling. */
+function withoutWindowFields(manifest: string): string {
+  const kept = manifest.split('\n').filter((line) => !WINDOW_ONLY_FIELDS.some((f) => line.trimStart().startsWith(`"${f}":`)));
+  return kept.join('\n').replace(/,(\s*\})\s*$/, '$1\n');
+}
 
 function slug(name: string): string {
   return name
@@ -46,13 +55,18 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
   if (existsSync(dir)) {
     console.error(`${dir} already exists`);
     return 1;
+  }
+  const target = flagString(args, 'target') ?? 'window';
+  if (!['window', 'app', 'browser'].includes(target)) {
+    console.error(`unknown --target "${target}"; use window, app or browser`);
+    return 2;
   }
   const template = join(packageRoot(), 'templates', flagString(args, 'template') ?? 'add-on-basic');
   if (!existsSync(template)) {
@@ -64,7 +78,7 @@ export async function newAddOn(args: Args): Promise<number> {
     __SLUG__: slug(name),
     __ID__: flagString(args, 'id') ?? `com.example.${slug(name)}`,
     __TITLE__: flagString(args, 'title') ?? titleCase(name),
-    __TARGET__: flagString(args, 'target') ?? 'window',
+    __TARGET__: target,
     __FLOATING__: String(!args.flags['no-floating']),
     __SHOW_WITH_SESSION__: String(!!args.flags['show-with-session']),
     __WIDTH__: String(flagNumber(args, 'width', 900)),
@@ -78,6 +92,7 @@ export async function newAddOn(args: Args): Promise<number> {
     mkdirSync(join(dest, '..'), { recursive: true });
     let text = readFileSync(file, 'utf8');
     for (const [k, v] of Object.entries(replacements)) text = text.replaceAll(k, v);
+    if (rel === 'manifest.json' && !isWindow(target)) text = withoutWindowFields(text);
     writeFileSync(dest, text);
   }
   vendorBundle(dir);
@@ -88,7 +103,7 @@ Next:
   npm install                 # vitest + the SDK for tests
   npm test                    # runs against Luna.MockEngine, no LUNA needed
   npx ua-builder serve        # http://localhost:8790/ (LUNA must be running for live data)
-  npx ua-builder install      # link into LUNA's Add Ons folder; it appears under Window
+  npx ua-builder install      # link into LUNA's Add Ons folder; it appears under ${menuFor(target)}
 
 Edit main.js for the UI and logic.js for the parts tests exercise. See docs/QUICKSTART.md.`);
   return 0;

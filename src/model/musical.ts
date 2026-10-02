@@ -19,7 +19,8 @@ import { Chord, Chords, checkChordSpecs, normalizeChordName, type ChordSpec } fr
 import { Collection } from './collection';
 import { Node } from './node';
 import { requireTick, settle } from './settle';
-import { TICKS_PER_BEAT, type BarBeat } from './ticks';
+import { TICKS_PER_BEAT, formatBarBeat, type BarBeat } from './ticks';
+import type { Unsubscribe } from '../wire/port';
 
 export class TempoEvent extends Node {
   readonly tick: Prop<number>;
@@ -83,12 +84,29 @@ export class KeySignature extends Node {
   }
 }
 
-/** Pure tick arithmetic over the current tempo map and time signatures. */
+/**
+ * Pure tick arithmetic over the current tempo map and time signatures. Every method reads the
+ * maps as they are now; {@link onChange} says when an answer may have moved.
+ */
 export class Timeline {
+  /** @internal */
   constructor(
     private readonly tempos: () => readonly TempoEvent[],
     private readonly signatures: () => readonly TimeSignature[],
+    private readonly subscribe: (listener: () => void) => Unsubscribe = () => () => {},
   ) {}
+
+  /**
+   * Called when a tempo event or time signature is added, removed or edited, so anything
+   * computed from this timeline (bar|beat, seconds) should be recomputed. `marker.barBeat`
+   * and `marker.seconds` already follow it.
+   *
+   * @example
+   * session.musical.timeline.onChange(() => redrawRuler());
+   */
+  onChange(listener: () => void): Unsubscribe {
+    return this.subscribe(listener);
+  }
 
   private sortedTempos(): { tick: number; tempo: number }[] {
     return this.tempos()
@@ -130,16 +148,6 @@ export class Timeline {
     return seconds;
   }
 
-  /** Bar, beat (1-based) and remaining engine ticks at `tick`, honouring time signature changes. */
-  /**
-   * The inverse of {@link seconds}: the tick a wall-clock offset lands on, walking the same
-   * tempo map. Use it to place a clip that must play unstretched — its span in ticks
-   * depends on the tempo where it sits.
-   *
-   * @example
-   * const start = 4 * Luna.TICKS_PER_BEAT;
-   * const stop = timeline.tickAtSeconds(timeline.seconds(start) + source.length.value / 1e9);
-   */
   /**
    * The inverse of {@link barBeat}: the tick a bar|beat|tick position lands on. `beat`
    * defaults to 1 and `tick` to 0, so `tickAt({ bar: 9 })` is the downbeat of bar 9 and
@@ -157,6 +165,15 @@ export class Timeline {
     return sig.tick + (at.bar - sig.bar) * beatTicks * sig.n + ((at.beat ?? 1) - 1) * beatTicks + (at.tick ?? 0);
   }
 
+  /**
+   * The inverse of {@link seconds}: the tick a wall-clock offset lands on, walking the same
+   * tempo map. Use it to place a clip that must play unstretched — its span in ticks
+   * depends on the tempo where it sits.
+   *
+   * @example
+   * const start = 4 * Luna.TICKS_PER_BEAT;
+   * const stop = timeline.tickAtSeconds(timeline.seconds(start) + source.length.value / 1e9);
+   */
   tickAtSeconds(seconds: number): number {
     if (!(seconds > 0)) return 0;
     const tempos = this.sortedTempos();
@@ -178,6 +195,14 @@ export class Timeline {
     return at + ((seconds - elapsed) / (60 / tempo)) * TICKS_PER_BEAT;
   }
 
+  /**
+   * Bar, beat (1-based) and the engine ticks left over within the beat at `tick`, honouring
+   * time signature changes. Same units as `location.bar_beat`, so it passes straight to
+   * {@link formatBarBeat} (or `Luna.formatBarBeat`) with no conversion.
+   *
+   * @example
+   * timeline.barBeat(Luna.TICKS_PER_BEAT * 5 + Luna.TICKS_PER_DISPLAY_TICK * 120);   // { bar: 2, beat: 2, tick: 12_000_000_000 }
+   */
   barBeat(tick: number): BarBeat {
     const sigs = this.sortedSignatures();
     let sig = sigs.find((s) => s.tick <= tick) ? sigs.filter((s) => s.tick <= tick).at(-1)! : { tick: 0, bar: 1, n: 4, d: 4 };
@@ -189,6 +214,17 @@ export class Timeline {
     const inBar = rel % barTicks;
     const beat = 1 + Math.floor(inBar / beatTicks);
     return { bar, beat, tick: inBar % beatTicks };
+  }
+
+  /**
+   * `tick` as LUNA's bar|beat counter shows it, `1|1|000` with display ticks (960 per beat):
+   * `Luna.formatBarBeat(timeline.barBeat(tick))` in one call.
+   *
+   * @example
+   * timeline.formatBarBeat(marker.location.value!);   // "5|3|240"
+   */
+  formatBarBeat(tick: number | undefined): string {
+    return formatBarBeat(tick === undefined ? undefined : this.barBeat(tick));
   }
 
   /** Tick at the start of `bar` (1-based). */
@@ -229,7 +265,33 @@ export class Musical {
     this.timeline = new Timeline(
       () => this.tempoMap.items,
       () => this.timeSignatures.items,
+      (listener) => this.onMapsChange(listener),
     );
+  }
+
+  /** Follow membership of both maps and the fields the timeline reads from each row. */
+  private onMapsChange(listener: () => void): Unsubscribe {
+    let rows: Unsubscribe[] = [];
+    const follow = () => {
+      for (const u of rows) u();
+      rows = [
+        ...this.tempoMap.items.flatMap((t) => [t.tick, t.tempo].map((p) => p.onChange(listener))),
+        ...this.timeSignatures.items.flatMap((s) => [s.tick, s.bar, s.numerator, s.denominator].map((p) => p.onChange(listener))),
+      ];
+    };
+    const membership = () => {
+      follow();
+      listener();
+    };
+    follow();
+    const offTempos = this.tempoMap.onChange(membership);
+    const offSignatures = this.timeSignatures.onChange(membership);
+    return () => {
+      offTempos();
+      offSignatures();
+      for (const u of rows) u();
+      rows = [];
+    };
   }
 
   /** Load the three maps and the Chord ruler. Idempotent. */

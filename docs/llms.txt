@@ -53,7 +53,7 @@ QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CL
 - MIDI edits: `midi.setVelocities` (one post, one undo entry), `midi.setMuted`, `midi.deleteNotes`. They move LUNA's selection and put it back, so they refuse inside a `transaction()` (fact 74).
 - Recording: `luna.audioInputs()` lists device inputs; `session.record({ track, inputUid, startTick, seconds })` runs the whole pass and resolves to the finalized take, source listed (facts 75-76).
 - `Luna.settle(predicate, what, { refresh })` is how to wait for an edit: LUNA answers `null` whether or not it happened (fact 71).
-- Timeline conversions: `tickAtBar`, `tickAt({bar,beat,tick})`, `barBeat(tick)`, `seconds(tick)`, `tickAtSeconds(s)`.
+- Timeline conversions: `tickAtBar`, `tickAt({bar,beat,tick})`, `barBeat(tick)`, `seconds(tick)`, `tickAtSeconds(s)`, `formatBarBeat(tick)`; `timeline.onChange` fires on tempo or meter edits. `barBeat().tick` is engine ticks: pass it to `Luna.formatBarBeat` unconverted. `marker.barBeat` / `marker.seconds` are derived props that follow the marker and the tempo map.
 - Folders outside a session (`/renders`, `/jobs`, `/plugins`) need `collection.watch()` before they follow pushes (fact 34).
 - Wasm: `Luna.connect({ engine: 'wasm' })` or `?engine=wasm`; no session at boot; `luna.wasm.resumeAudio()` after a click; no `luna.gui`.
 - Tests: `Luna.MockEngine`, `await engine.settled()`, `await luna.settled()`.

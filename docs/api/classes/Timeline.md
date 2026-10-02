@@ -1,25 +1,7 @@
 # Class: Timeline
 
-Pure tick arithmetic over the current tempo map and time signatures.
-
-## Constructors
-
-### Constructor
-
-```ts
-new Timeline(tempos, signatures): Timeline;
-```
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `tempos` | () => readonly [`TempoEvent`](TempoEvent.md)[] |
-| `signatures` | () => readonly [`TimeSignature`](TimeSignature.md)[] |
-
-#### Returns
-
-`Timeline`
+Pure tick arithmetic over the current tempo map and time signatures. Every method reads the
+maps as they are now; [onChange](#onchange) says when an answer may have moved.
 
 ## Methods
 
@@ -28,6 +10,10 @@ new Timeline(tempos, signatures): Timeline;
 ```ts
 barBeat(tick): BarBeat;
 ```
+
+Bar, beat (1-based) and the engine ticks left over within the beat at `tick`, honouring
+time signature changes. Same units as `location.bar_beat`, so it passes straight to
+[formatBarBeat](../functions/formatBarBeat.md) (or `Luna.formatBarBeat`) with no conversion.
 
 #### Parameters
 
@@ -38,6 +24,67 @@ barBeat(tick): BarBeat;
 #### Returns
 
 [`BarBeat`](../interfaces/BarBeat.md)
+
+#### Example
+
+```ts
+timeline.barBeat(Luna.TICKS_PER_BEAT * 5 + Luna.TICKS_PER_DISPLAY_TICK * 120);   // { bar: 2, beat: 2, tick: 12_000_000_000 }
+```
+
+***
+
+### formatBarBeat()
+
+```ts
+formatBarBeat(tick): string;
+```
+
+`tick` as LUNA's bar|beat counter shows it, `1|1|000` with display ticks (960 per beat):
+`Luna.formatBarBeat(timeline.barBeat(tick))` in one call.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tick` | `number` \| `undefined` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+timeline.formatBarBeat(marker.location.value!);   // "5|3|240"
+```
+
+***
+
+### onChange()
+
+```ts
+onChange(listener): Unsubscribe;
+```
+
+Called when a tempo event or time signature is added, removed or edited, so anything
+computed from this timeline (bar|beat, seconds) should be recomputed. `marker.barBeat`
+and `marker.seconds` already follow it.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `listener` | () => `void` |
+
+#### Returns
+
+[`Unsubscribe`](../type-aliases/Unsubscribe.md)
+
+#### Example
+
+```ts
+session.musical.timeline.onChange(() => redrawRuler());
+```
 
 ***
 
@@ -137,6 +184,10 @@ Tick at the start of `bar` (1-based).
 tickAtSeconds(seconds): number;
 ```
 
+The inverse of [seconds](#tickatseconds-1): the tick a wall-clock offset lands on, walking the same
+tempo map. Use it to place a clip that must play unstretched — its span in ticks
+depends on the tempo where it sits.
+
 #### Parameters
 
 | Parameter | Type |
@@ -146,3 +197,10 @@ tickAtSeconds(seconds): number;
 #### Returns
 
 `number`
+
+#### Example
+
+```ts
+const start = 4 * Luna.TICKS_PER_BEAT;
+const stop = timeline.tickAtSeconds(timeline.seconds(start) + source.length.value / 1e9);
+```

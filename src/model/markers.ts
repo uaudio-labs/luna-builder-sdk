@@ -7,9 +7,12 @@
  * await session.addMarker(Luna.WHOLE_NOTE * 8, 'Chorus');
  * await marker.rename('Bridge');
  * await marker.delete();
+ * marker.barBeat.onChange(() => row.textContent = Luna.formatBarBeat(marker.barBeat.value));
  */
 import type { Client } from '../client/client';
-import type { Prop } from '../store/prop';
+import { derived, type Prop } from '../store/prop';
+import type { Timeline } from './musical';
+import type { BarBeat } from './ticks';
 import { Collection } from './collection';
 import { Node } from './node';
 import { requireTick, settle } from './settle';
@@ -22,12 +25,30 @@ export class Marker extends Node {
   readonly comments: Prop<string>;
   /** ARGB packed integer. */
   readonly color: Prop<number>;
+  /**
+   * {@link location} as bar|beat, following the marker and the session's time signatures, so
+   * a marker list needs no listeners of its own. Format it with `Luna.formatBarBeat`.
+   * Assumes 4/4 until `session.musical` has loaded.
+   *
+   * @example
+   * marker.barBeat.onChange(() => cell.textContent = Luna.formatBarBeat(marker.barBeat.value));
+   */
+  readonly barBeat: Prop<BarBeat>;
+  /**
+   * {@link location} in seconds from the session start, following the marker and the tempo
+   * map. Assumes 120 BPM until `session.musical` has loaded.
+   *
+   * @example
+   * marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));
+   */
+  readonly seconds: Prop<number>;
 
   /** @internal */
   constructor(
     client: Client,
     path: string,
     private readonly sessionUid: string,
+    timeline: () => Timeline,
   ) {
     super(client, path);
     this.rowid = this.prop<number>('rowid');
@@ -35,6 +56,13 @@ export class Marker extends Node {
     this.name = this.prop<string>('name');
     this.comments = this.prop<string>('comments');
     this.color = this.prop<number>('color');
+    const maps: Prop<unknown> = { value: undefined, onChange: (l) => timeline().onChange(l) };
+    const at = <T>(f: (t: Timeline, tick: number) => T) => () => {
+      const tick = this.location.value;
+      return tick === undefined ? undefined : f(timeline(), tick);
+    };
+    this.barBeat = derived([this.location, maps], at((t, tick) => t.barBeat(tick)), { distinct: true });
+    this.seconds = derived([this.location, maps], at((t, tick) => t.seconds(tick)), { distinct: true });
   }
 
   private get row(): number {
@@ -93,8 +121,8 @@ export class Marker extends Node {
 
 export class Markers extends Collection<Marker> {
   /** @internal */
-  constructor(client: Client, sessionPath: string, sessionUid: string) {
-    super(client, `${sessionPath}/markers`, (p) => new Marker(client, p, sessionUid), { levels: 2, commands: false, flatvalue: true });
+  constructor(client: Client, sessionPath: string, sessionUid: string, timeline: () => Timeline) {
+    super(client, `${sessionPath}/markers`, (p) => new Marker(client, p, sessionUid, timeline), { levels: 2, commands: false, flatvalue: true });
   }
 
   /** Markers in timeline order. */

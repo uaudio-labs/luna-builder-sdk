@@ -114,7 +114,7 @@ LUNA from a second client, and for an add-on handing you a folder to symlink int
 Ons directory (the first install may need one `sudo` command, which the agent will give you
 rather than run).
 
-Two things to know before you ask: an agent cannot open LUNA's Window menu, so it will ask
+Two things to know before you ask: an agent cannot open LUNA's Add Ons menu, so it will ask
 you to confirm the add-on appears there; and prompt 2 leaves its session open and saved.
 
 ## What each one leans on

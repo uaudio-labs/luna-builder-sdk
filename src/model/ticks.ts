@@ -18,10 +18,16 @@ export const QUARTER_NOTE = TICKS_PER_BEAT;
 export const EIGHTH_NOTE = TICKS_PER_BEAT / 2;
 export const SIXTEENTH_NOTE = TICKS_PER_BEAT / 4;
 
-/** Bar, beat and display tick as the engine reports them in `location.bar_beat`. */
+/**
+ * A bar|beat position as the engine reports it in `location.bar_beat`, and as
+ * `timeline.barBeat()` returns it. `tick` is in **engine** ticks (the remainder within the
+ * beat), not display ticks; {@link formatBarBeat} does the conversion.
+ */
 export interface BarBeat {
   bar: number;
+  /** 1-based beat within the bar. */
   beat: number;
+  /** Engine ticks into the beat, `0 <= tick < TICKS_PER_BEAT` (for a quarter-note beat). */
   tick: number;
 }
 
@@ -51,7 +57,16 @@ export function secondsToTicks(seconds: number, bpm: number): number {
   return Math.round((seconds / 60) * bpm * TICKS_PER_BEAT);
 }
 
-/** Format a `bar_beat` as `1|1|000` with the display tick zero-padded. */
+/**
+ * Format a {@link BarBeat} as LUNA's counter shows it, `1|1|000`: it converts the engine-tick
+ * remainder to display ticks (960 per beat) and zero-pads them. Pass `location.bar_beat` or
+ * `timeline.barBeat(tick)` as they are; do not convert `tick` first. For a bare tick,
+ * `timeline.formatBarBeat(tick)` does both steps.
+ *
+ * @example
+ * Luna.formatBarBeat(t.location.value?.bar_beat);                 // "2|2|120"
+ * Luna.formatBarBeat(session.musical.timeline.barBeat(tick));     // same as timeline.formatBarBeat(tick)
+ */
 export function formatBarBeat(bb: BarBeat | undefined): string {
   if (!bb) return '-|-|---';
   return `${bb.bar}|${bb.beat}|${String(Math.floor(bb.tick / TICKS_PER_DISPLAY_TICK)).padStart(3, '0')}`;

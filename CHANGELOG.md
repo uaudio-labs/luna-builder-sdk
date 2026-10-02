@@ -3,6 +3,30 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
+## Unreleased
+
+Added
+- `timeline.formatBarBeat(tick)`: a tick as LUNA's bar|beat counter shows it (`5|3|240`), in
+  one call.
+- `timeline.onChange(listener)`: called when a tempo event or time signature is added, removed
+  or edited.
+- `marker.barBeat` and `marker.seconds`: derived props for a marker's position that follow the
+  marker and the tempo map, so a marker list needs no tempo or time-signature listeners.
+
+Changed
+- `width` and `height` are required only for a `"window"` Add On. `ua-builder install` and
+  `pack` accept a browser or app entry without them, and `ua-builder new --target browser|app`
+  leaves out `width`, `height`, `floating` and `show_with_session`, none of which those targets
+  use. Needs a LUNA that keeps a browser or app entry with no size; earlier builds drop it.
+- `ua-builder install` and `new` name the menu LUNA lists the Add On in: **Add Ons >
+  Windows**, **Browsers** or **Apps**, not the Window or View menu.
+- `ua-builder new` rejects an unknown `--target`.
+
+Fixed
+- Docs: `BarBeat.tick` (from `timeline.barBeat()` and `location.bar_beat`) is engine ticks,
+  and `Luna.formatBarBeat` converts it to display ticks. The docs said "display tick", which
+  led to converting twice.
+
 ## 0.1.0-alpha.4
 
 Measured against a LUNA 1.0.0.0 Debug build from the 3.x branch (facts 90 and 100 in

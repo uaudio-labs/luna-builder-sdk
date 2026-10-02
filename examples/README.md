@@ -59,7 +59,7 @@ split out from the DOM, tests against `Luna.MockEngine` — use `npx ua-builder 
 ## Run inside LUNA
 
 Symlink this folder into LUNA's Add Ons directory and the entries in `manifest.json` appear
-under the Window menu. LUNA rescans the folder, so no restart is needed.
+under LUNA's Add Ons menu. LUNA rescans the folder, so no restart is needed.
 
 ```sh
 ln -s "$(pwd)" "/Library/Application Support/Universal Audio/LUNA/Add Ons/Builder SDK Examples"

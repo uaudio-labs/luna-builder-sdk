@@ -8,6 +8,7 @@
 
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
+| <a id="barbeat"></a> `barBeat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`BarBeat`](../interfaces/BarBeat.md)\> | [location](#location) as bar|beat, following the marker and the session's time signatures, so a marker list needs no listeners of its own. Format it with `Luna.formatBarBeat`. Assumes 4/4 until `session.musical` has loaded. **Example** `marker.barBeat.onChange(() => cell.textContent = Luna.formatBarBeat(marker.barBeat.value));` | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="color"></a> `color` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | ARGB packed integer. | - |
 | <a id="comments"></a> `comments` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
@@ -15,6 +16,7 @@
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="rowid"></a> `rowid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
+| <a id="seconds"></a> `seconds` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | [location](#location) in seconds from the session start, following the marker and the tempo map. Assumes 120 BPM until `session.musical` has loaded. **Example** `marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));` | - |
 
 ## Accessors
 

@@ -59,7 +59,7 @@
 | [Shortcuts](classes/Shortcuts.md) | The standard shortcuts as an object: which command a key means, and running it. Most Add Ons only need [bindShortcuts](functions/bindShortcuts.md); use this directly to route keys from a listener the page already has, or to run a command from a menu. |
 | [Store](classes/Store.md) | - |
 | [TempoEvent](classes/TempoEvent.md) | - |
-| [Timeline](classes/Timeline.md) | Pure tick arithmetic over the current tempo map and time signatures. |
+| [Timeline](classes/Timeline.md) | Pure tick arithmetic over the current tempo map and time signatures. Every method reads the maps as they are now; [onChange](classes/Timeline.md#onchange) says when an answer may have moved. |
 | [TimeSignature](classes/TimeSignature.md) | - |
 | [Track](classes/Track.md) | - |
 | [Transport](classes/Transport.md) | - |
@@ -77,7 +77,7 @@
 | [AudioDeviceInfo](interfaces/AudioDeviceInfo.md) | - |
 | [AudioHealth](interfaces/AudioHealth.md) | Audio-path health as the engine reports it. |
 | [AudioInput](interfaces/AudioInput.md) | A device input a track can record from, as [Client.audioInputs](classes/Client.md#audioinputs) lists it. |
-| [BarBeat](interfaces/BarBeat.md) | Bar, beat and display tick as the engine reports them in `location.bar_beat`. |
+| [BarBeat](interfaces/BarBeat.md) | A bar|beat position as the engine reports it in `location.bar_beat`, and as `timeline.barBeat()` returns it. `tick` is in **engine** ticks (the remainder within the beat), not display ticks; [formatBarBeat](functions/formatBarBeat.md) does the conversion. |
 | [BootOptions](interfaces/BootOptions.md) | - |
 | [BounceOptions](interfaces/BounceOptions.md) | - |
 | [Breakpoint](interfaces/Breakpoint.md) | - |
@@ -243,7 +243,7 @@
 | [eventMatches](functions/eventMatches.md) | True when an event at `eventPath` belongs to a subscription on `subPath`. Prefix matching: the engine only pushes what was subscribed, so a wider subscription on the same connection is the only way a handler sees something deeper than it asked for. |
 | [expandMulti](functions/expandMulti.md) | Expand a message into the individual updates it carries. A non-multi message expands to itself. Entries that cannot be decoded are dropped. |
 | [float](functions/float.md) | Wrap `value` so it is sent as a float literal. See [FloatLiteral](classes/FloatLiteral.md). |
-| [formatBarBeat](functions/formatBarBeat.md) | Format a `bar_beat` as `1|1|000` with the display tick zero-padded. |
+| [formatBarBeat](functions/formatBarBeat.md) | Format a [BarBeat](interfaces/BarBeat.md) as LUNA's counter shows it, `1|1|000`: it converts the engine-tick remainder to display ticks (960 per beat) and zero-pads them. Pass `location.bar_beat` or `timeline.barBeat(tick)` as they are; do not convert `tick` first. For a bare tick, `timeline.formatBarBeat(tick)` does both steps. |
 | [formatMinSec](functions/formatMinSec.md) | Format seconds as a zero-padded `MM:SS` clock, flooring rather than rounding so a counting display never shows a time the playhead has not reached. Negative values clamp to `00:00`; `undefined` (an unloaded prop) gives a placeholder, like [formatBarBeat](functions/formatBarBeat.md). |
 | [formatTimeSignature](functions/formatTimeSignature.md) | Format a time signature as `4/4`; `undefined` (an unloaded prop) gives a placeholder, like [formatBarBeat](functions/formatBarBeat.md). Pairs with `transport.timeSignature`. |
 | [getOptionsToParams](functions/getOptionsToParams.md) | Convert [GetOptions](interfaces/GetOptions.md) to wire query parameters. |

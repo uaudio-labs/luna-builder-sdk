@@ -174,7 +174,7 @@ export class Session extends Node {
     this.buses = new Collection<Bus>(client, `${this.path}/buses`, (p) => new Bus(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.playlists = new Collection<Playlist>(client, `${this.path}/playlists`, (p) => new Playlist(client, p, uid, () => this.batching), { levels: 2, commands: false, flatvalue: true });
     this.musical = new Musical(client, this.path, uid, (name, fn) => this.transaction(name, fn));
-    this.markers = new Markers(client, this.path, uid);
+    this.markers = new Markers(client, this.path, uid, () => this.musical.timeline);
     this.contexts = new Collection<Context>(client, `${this.path}/contexts`, (p) => new Context(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.context = new Context(client, `${this.path}/contexts/main`, uid);
     const focusedId = derived([this.context.lastSelectedTrack, this.context.selectionTracks, this.tracks], () => this.focusedTrackId(), { distinct: true });

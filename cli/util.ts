@@ -112,14 +112,27 @@ export interface ManifestEntry {
   title: string;
   html?: string;
   url?: string;
-  width: number;
-  height: number;
+  /** Required for a `"window"`; LUNA sizes browser and app Add Ons itself. */
+  width?: number;
+  height?: number;
   target?: string;
   floating?: boolean;
   show_with_session?: boolean;
   version?: string;
   engines?: string[];
   [k: string]: unknown;
+}
+
+/** True for a `"window"` Add On, which is also what a missing `target` means. */
+export function isWindow(target: string | undefined): boolean {
+  return target === undefined || target === 'window';
+}
+
+/** Where LUNA lists an Add On of `target`: a submenu of its Add Ons menu, one per target. */
+export function menuFor(target: string | undefined): string {
+  if (target === 'app' || target === 'page') return 'Add Ons > Apps';
+  if (target === 'browser') return 'Add Ons > Browsers';
+  return 'Add Ons > Windows';
 }
 
 /** Read and validate `manifest.json` in `dir`. Throws with a readable message on problems. */
@@ -137,7 +150,9 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
   for (const [i, e] of entries.entries()) {
     const where = `entry ${i} (${e.id ?? 'no id'})`;
     for (const k of ['id', 'title'] as const) if (typeof e[k] !== 'string' || !e[k]) problems.push(`${where}: "${k}" must be a non-empty string`);
-    for (const k of ['width', 'height'] as const) if (typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number`);
+    for (const k of ['width', 'height'] as const) {
+      if (e[k] === undefined ? isWindow(e.target) : typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number${isWindow(e.target) ? '' : ' when present'}`);
+    }
     if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
     if (e.target !== undefined && !['window', 'app', 'page', 'browser'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);

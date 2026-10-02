@@ -9,7 +9,7 @@ npx ua-builder new my-add-on --title "My Add On"
 cd my-add-on && npm install
 npm test                  # mock engine, no LUNA
 npx ua-builder serve      # http://localhost:8790/  (with LUNA running: live data)
-npx ua-builder install    # symlink into LUNA's Add Ons folder -> Window menu
+npx ua-builder install    # symlink into LUNA's Add Ons folder -> Add Ons menu
 ```
 
 The scaffold has `index.html`, `logic.js` (engine logic, tested), `main.js` (DOM) and
@@ -90,7 +90,7 @@ the loop. Both resolve once LUNA shows it; playing, they jump unless `{ sync: 'n
 `Luna.bindClock(el, t, { render })` anchors on each push and interpolates per frame while playing.
 
 Ticks: `Luna.TICKS_PER_BEAT` (96e9), `Luna.WHOLE_NOTE`, `Luna.QUARTER_NOTE`, ...
-`session.musical.timeline.barBeat(tick)` and `.seconds(tick)` honour tempo and meter changes.
+`session.musical.timeline.barBeat(tick)` and `.seconds(tick)` honour tempo and meter changes; `timeline.formatBarBeat(tick)` gives LUNA's `5|3|240` (barBeat's `tick` is engine ticks, which `Luna.formatBarBeat` converts).
 
 ## 6. Tracks, buses, controls
 
@@ -192,7 +192,7 @@ await slot.clear();
 
 ```js
 await session.addMarker(Luna.WHOLE_NOTE * 8, 'Chorus'); session.markers.sorted; await marker.delete();
-await marker.rename('Verse'); await marker.moveTo(Luna.WHOLE_NOTE * 12);
+await marker.rename('Verse'); await marker.moveTo(Luna.WHOLE_NOTE * 12); Luna.formatBarBeat(marker.barBeat.value); marker.seconds.value; // both follow the tempo map
 await session.musical.setChords([{ tick: 0, name: 'C' }, { tick: Luna.WHOLE_NOTE, name: 'Am7/G' }]); // Chord ruler, one undo entry; session.musical.chords.sorted[1].parsed → { root: 'A', type: 'm7', bass: 'G' }
 await session.musical.setTempo(96); await session.musical.setTimeSignature(3, 4, 5);
 session.focusedTrack.value;  // last selected track, else first selected, else first visible

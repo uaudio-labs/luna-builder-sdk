@@ -7,11 +7,12 @@ import { readManifest } from '../../cli/util';
 
 const dirs: string[] = [];
 
-function addOn(entry: Record<string, unknown>): string {
+function addOn(entry: Record<string, unknown>, omit: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), 'ua-manifest-'));
   dirs.push(dir);
   writeFileSync(join(dir, 'index.html'), '<!doctype html>');
-  const manifest = { id: 'com.example.a', title: 'A', html: 'index.html', width: 400, height: 300, ...entry };
+  const manifest: Record<string, unknown> = { id: 'com.example.a', title: 'A', html: 'index.html', width: 400, height: 300, ...entry };
+  for (const k of omit) delete manifest[k];
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
   return dir;
 }
@@ -44,5 +45,17 @@ describe('readManifest', () => {
     expect(readManifest(addOn({ show_with_session: false })).entries[0]!.show_with_session).toBe(false);
     expect(readManifest(addOn({})).entries[0]!.show_with_session).toBeUndefined();
     expect(() => readManifest(addOn({ show_with_session: 'true' }))).toThrow(/"show_with_session" must be true or false/);
+  });
+
+  it('requires width and height only for a window, which a missing target means', () => {
+    for (const target of ['app', 'page', 'browser']) {
+      expect(readManifest(addOn({ target }, ['width', 'height'])).entries[0]!.width).toBeUndefined();
+    }
+    expect(() => readManifest(addOn({ target: 'window' }, ['width']))).toThrow(/"width" must be a number/);
+    expect(() => readManifest(addOn({}, ['height']))).toThrow(/"height" must be a number/);
+  });
+
+  it('still rejects a width or height that is present but not a number', () => {
+    expect(() => readManifest(addOn({ target: 'browser', width: '300' }))).toThrow(/"width" must be a number when present/);
   });
 });

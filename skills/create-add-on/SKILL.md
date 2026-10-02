@@ -9,7 +9,7 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
 
 1. Scaffold. From the folder that should contain the Add On:
    ```sh
-   npx ua-builder new <name> --title "<Title>" [--target window|app|browser] [--no-floating] [--show-with-session] [--width 900 --height 600]
+   npx ua-builder new <name> --title "<Title>" [--target window|app|browser] [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
    The default is a `"window"` Add On with `"floating": true`, which floats with LUNA's plugin
@@ -34,7 +34,7 @@ description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it 
    model. For a control edit, assert `engine.touches` is one `:on` then one `:off` per edit.
 
 5. Try it in a browser with LUNA running: `npx ua-builder serve`, open
-   `http://localhost:8790/`. Then `npx ua-builder install` and open it from LUNA's Window menu.
+   `http://localhost:8790/`. Then `npx ua-builder install` and open it from LUNA's Add Ons menu (Windows, Browsers or Apps, by target).
 
 ## Rules
 
