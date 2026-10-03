@@ -3,7 +3,7 @@
 Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
-## Unreleased
+## 0.1.0-alpha.5
 
 Added
 - `"editor"` Add On target: the editor panel docked under LUNA's Timeline, in place of the
@@ -20,6 +20,10 @@ Added
   or edited.
 - `marker.barBeat` and `marker.seconds`: derived props for a marker's position that follow the
   marker and the tempo map, so a marker list needs no tempo or time-signature listeners.
+- `clip.addNotes(notes)`: adds several notes to a MIDI clip as one undo step. Each
+  `Luna.ClipNote` gives `pitch`, a clip-relative `tick`, `lengthTicks` and optional `velocity`
+  (default 100) and `channel` (default 0); all are checked before anything is sent.
+  `clip.addNote` now goes through it.
 
 Changed
 - `ua-builder new` and `ua-builder install` refuse an Add On whose `id` or `title` (ignoring
@@ -36,6 +40,10 @@ Changed
 - `ua-builder new` rejects an unknown `--target`.
 
 Fixed
+- `Luna.connect()` no longer hangs under Node 22 when nothing is listening. Node's built-in
+  `WebSocket` reports a refused connection with an `error` and no `close`, which the SDK
+  waited for; an attempt now ends on either, and the handshake is bounded by
+  `requestTimeoutMs`, rejecting with `NotRunning`. Fact 101.
 - `ua-builder pack` leaves dotfiles (`.DS_Store`, `._*`, `.git`, `.gitignore`, `.env`, editor
   folders) and Windows metadata files (`Thumbs.db`, `desktop.ini`) out of the `.lunaaddon`
   bundle at every depth, and says how many it left out. It copied them all before.

@@ -3,6 +3,18 @@
 What changed in each release of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 0.1.0-alpha.5 — 2026-10-02
+
+- Added the `"editor"` Add On target, docked under LUNA's Timeline in place of the Clip Editor, with `ua-builder new --target editor`.
+- Added `session.newBus()` to create an aux bus in one undo step.
+- Added `clip.addNotes()` to add several MIDI notes in one undo step.
+- Added `timeline.formatBarBeat()`, `timeline.onChange()`, and `marker.barBeat` and `marker.seconds` props that follow the tempo map.
+- Browser and app Add Ons no longer need `width` and `height` in their manifest.
+- `ua-builder new` and `install` refuse an Add On whose `id` or `title` is already installed.
+- `ua-builder pack` leaves dotfiles and OS metadata files out of the bundle.
+- Fixed `Luna.connect()` hanging under Node 22 when LUNA is not running.
+- Documented that the SDK does not stream audio or MIDI, and that Add Ons use Web MIDI for live MIDI.
+
 ## 0.1.0-alpha.4 — 2026-10-01
 
 - Added `Transport.setPlayStart()` to move the play start without collapsing the loop range.
