@@ -115,7 +115,7 @@ await track.mute.toggle(); track.mute.on;   // switches
 await track.pan.resetToDefault();       // LUNA's default (centre); for double-click-to-reset
 track.solo;                             // track-level control; mute/gain/pan live on the main output
 track.main.pans;                        // [pan] on mono, [pan_left, pan_right] on stereo (fact 84)
-const bus = session.buses.items.find((b) => b.busType.value === 'aux') ?? session.master;
+const bus = session.buses.items.find((b) => b.busType.value === 'aux') ?? await session.newBus({ name: 'FX' });
 await track.outputs.load(); const send = track.outputs.byId('send_0');
 await send.retarget(bus.id);            // assign appends; retarget replaces (fact 43)
 send.destinations.value;                // [{ uid, busUid, name, error }]; send.unassign(dest.uid)

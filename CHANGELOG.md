@@ -11,6 +11,9 @@ Added
   editor` scaffolds one, `install` and `pack` accept it, and `AddOnTarget` includes `'editor'`.
   Needs a LUNA with editor Add On support; earlier builds open an `"editor"` entry as a window,
   and drop it for lack of a size.
+- `session.newBus({ name, stemFormat })`: creates an aux bus (stereo unless told otherwise) in
+  one undo step and resolves to the `Luna.Bus` once it is listed. `session.newTrack` makes
+  tracks only.
 - `timeline.formatBarBeat(tick)`: a tick as LUNA's bar|beat counter shows it (`5|3|240`), in
   one call.
 - `timeline.onChange(listener)`: called when a tempo event or time signature is added, removed

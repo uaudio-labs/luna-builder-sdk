@@ -102,6 +102,13 @@ export interface NewTrackOptions {
   folderUid?: string;
 }
 
+export interface NewBusOptions {
+  /** Default `'Bus'`. */
+  name?: string;
+  /** Default `'stereo'`. */
+  stemFormat?: 'mono' | 'stereo' | string;
+}
+
 export interface TransactionOptions {
   /** Only the last command is recorded in the undo queue; notifications still fire per command. */
   continuous?: boolean;
@@ -261,6 +268,26 @@ export class Session extends Node {
     if (options.makeNameUnique !== undefined) payload['make_name_unique'] = options.makeNameUnique;
     if (options.folderUid !== undefined) payload['folder_uid'] = options.folderUid;
     return this.post('new_track', payload);
+  }
+
+  /**
+   * Create an aux bus (`new_track` with `track_type: "bus"`, fact 83) in one undo step, and
+   * resolve to the {@link Bus} once it is listed in {@link buses}.
+   *
+   * @example
+   * const reverb = await session.newBus({ name: 'Reverb' });
+   * await track.outputs.byId('send_0').assign(reverb);
+   */
+  async newBus(options: NewBusOptions = {}): Promise<Bus> {
+    const reply = (await this.post('new_track', { uid: this.uid, name: options.name ?? 'Bus', track_type: 'bus', stem_format: options.stemFormat ?? 'stereo' })) as { uid?: string } | null;
+    const uid = reply?.uid;
+    if (typeof uid !== 'string' || !uid) throw new UAError('invalid_response', 'new_track answered without a bus uid', { path: `${this.path}/new_track` });
+    await settle(() => this.buses.byId(uid) !== undefined, 'new bus', {
+      path: `${this.path}/buses`,
+      refresh: () => this.buses.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+    return this.buses.byId(uid)!;
   }
 
   undo(count = 1): Promise<unknown> {

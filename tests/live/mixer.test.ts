@@ -46,10 +46,9 @@ describe.skipIf(!live)('live: mixer', () => {
     if (!mono || !stereo) throw new Error('the open session needs a mono and a stereo track');
     let found = session.buses.items.find((b) => b.busType.value === 'aux');
     if (!found) {
-      const reply = (await luna.raw.post(`${session.path}/new_track`, { uid: session.uid, name: 'SDK live FX', track_type: 'bus', stem_format: 'stereo' })) as { uid: string };
-      createdBus = reply.uid;
-      await Luna.settle(() => session.buses.byId(reply.uid) !== undefined, 'new aux bus', { refresh: () => session.buses.reload() });
-      found = session.buses.byId(reply.uid)!;
+      found = await session.newBus({ name: 'SDK live FX' });
+      createdBus = found.id;
+      expect([found.busType.value, found.stemFormat.value]).toEqual(['aux', 'stereo']);
     }
     aux = found;
     await Promise.all([mono.outputs.load(), stereo.outputs.load()]);

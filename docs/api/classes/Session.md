@@ -444,6 +444,34 @@ start at `toTick`.
 
 ***
 
+### newBus()
+
+```ts
+newBus(options): Promise<Bus>;
+```
+
+Create an aux bus (`new_track` with `track_type: "bus"`, fact 83) in one undo step, and
+resolve to the [Bus](Bus.md) once it is listed in [buses](#buses).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`NewBusOptions`](../interfaces/NewBusOptions.md) |
+
+#### Returns
+
+`Promise`\<[`Bus`](Bus.md)\>
+
+#### Example
+
+```ts
+const reverb = await session.newBus({ name: 'Reverb' });
+await track.outputs.byId('send_0').assign(reverb);
+```
+
+***
+
 ### newPlaylists()
 
 ```ts

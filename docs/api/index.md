@@ -106,6 +106,7 @@
 | [MidiRowData](interfaces/MidiRowData.md) | The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). |
 | [MockMidiRow](interfaces/MockMidiRow.md) | A row for [MockEngine.midiEdit](classes/MockEngine.md#midiedit). |
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
+| [NewBusOptions](interfaces/NewBusOptions.md) | - |
 | [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute, as LUNA's verb takes them. |
 | [NewTrackOptions](interfaces/NewTrackOptions.md) | - |
 | [Note](interfaces/Note.md) | A note-on row paired with the note-off that ends it. |

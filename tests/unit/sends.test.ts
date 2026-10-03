@@ -174,6 +174,33 @@ describe('Luna.Output routing', () => {
   });
 });
 
+describe('Session.newBus', () => {
+  it('creates a stereo aux bus and resolves to it once listed (fact 83)', async () => {
+    const { engine, session, drums } = await connected();
+    const bus = await session.newBus({ name: 'Reverb' });
+    expect(bus).toBeInstanceOf(Luna.Bus);
+    expect(session.buses.byId(bus.id)).toBe(bus);
+    expect([bus.name.value, bus.busType.value, bus.stemFormat.value]).toEqual(['Reverb', 'aux', 'stereo']);
+    const post = engine.requests.find((r) => r.path.endsWith('/new_track'))!;
+    expect(post.data).toEqual({ uid: 'abc', name: 'Reverb', track_type: 'bus', stem_format: 'stereo' });
+    const send = drums.outputs.byId('send_0')!;
+    await send.assign(bus);
+    expect(send.busUid.value).toBe(bus.id);
+  });
+
+  it('defaults the name to Bus and takes a mono stem format', async () => {
+    const { session } = await connected();
+    const bus = await session.newBus({ stemFormat: 'mono' });
+    expect([bus.name.value, bus.stemFormat.value]).toEqual(['Bus', 'mono']);
+  });
+
+  it('rejects a reply without a bus uid', async () => {
+    const { engine, session } = await connected();
+    engine.overrideCommand('/sessions/abc/new_track', () => null);
+    await expect(session.newBus({ name: 'X' })).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+});
+
 describe('Luna.Output pan', () => {
   it('is one `pan` on a mono channel and `pan_left`/`pan_right` on a stereo one (fact 84)', async () => {
     const { engine, session, drums, master } = await connected();
