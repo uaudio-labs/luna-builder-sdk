@@ -121,6 +121,8 @@ export interface ManifestEntry {
   floating?: boolean;
   show_with_session?: boolean;
   version?: string;
+  /** Who makes the Add On; LUNA shows it in Settings > Add Ons. */
+  manufacturer?: string;
   engines?: string[];
   [k: string]: unknown;
 }
@@ -218,6 +220,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
     if (e.target !== undefined && !['window', 'app', 'page', 'browser', 'editor'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
     for (const k of ['floating', 'show_with_session'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
+    if (e.manufacturer !== undefined && typeof e.manufacturer !== 'string') problems.push(`${where}: "manufacturer" must be a string`);
   }
   if (problems.length) throw new Error(`manifest.json problems:\n  - ${problems.join('\n  - ')}`);
   return { manifest, entries };
@@ -226,7 +229,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
 export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
-  ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser|editor]
+  ua-builder new <name> [--id com.x.y] [--title "Title"] [--manufacturer "Name"] [--target window|app|browser|editor]
                         [--no-floating] [--show-with-session] [--width 900 --height 600] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]

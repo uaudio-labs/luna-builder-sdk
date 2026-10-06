@@ -6,8 +6,8 @@ folder, their identity, their page and how they open. `ua-builder new` writes on
 
 This page describes what LUNA does with the manifest. `ua-builder` is stricter: it refuses
 to install or pack a manifest that LUNA would partly drop or silently correct (a missing
-required field, an unknown `target`, a `floating` or `show_with_session` that is not a boolean, an
-`html` file that does not exist), so you see the problem before LUNA does.
+required field, an unknown `target`, a `floating` or `show_with_session` that is not a boolean, a
+`manufacturer` that is not a string, an `html` file that does not exist), so you see the problem before LUNA does.
 
 ## Where it lives
 
@@ -31,6 +31,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
     "id": "com.example.my_add_on",
     "title": "My Add On",
     "version": "0.1.0",
+    "manufacturer": "Example Audio",
     "sdk_version": "0.1.0-alpha.6",
     "min_luna_version": "1.9.0",
     "engines": ["luna", "wasm"],
@@ -81,6 +82,7 @@ size; see `width`, `height` below.
 | `floating` | boolean | `true` | `"window"` only: whether the window floats with LUNA's plugin windows or is an ordinary window. See below. |
 | `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
+| `manufacturer` | string | none | Who makes the Add On: your company or your own name. LUNA shows it in the **MANUFACTURER** column of **Settings > Add Ons**, where it also sorts and is matched by the search field; the column is blank without it. LUNA reports it as the `manufacturer` property under `/gui/add_ons/<id>` (`manufacturer` on `luna.gui.addOns` items in the SDK), `""` when there is none. A non-string value is ignored and never drops the entry. `ua-builder` rejects it. Set it per entry; in the `add_ons` shape a top-level `manufacturer` is not applied to the entries. |
 | `icon` | string | none | Image path, resolved like `html`. Works for `url` entries too. See below. |
 | `local_content_offset` | string | none | `html` only. Relative path from the manifest folder to the folder your page loads resources from. See below. |
 
@@ -174,7 +176,7 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 - LUNA does not check that the file exists or read it when the manifest loads; a bad path is
   not an error, and an empty string is the same as leaving it out.
 - LUNA reports the resolved absolute path as the `icon` property under `/gui/add_ons/<id>`
-  (next to `id`, `title`, `target`, `floating` and `show_with_session`), or an empty string when there is none. It is not yet
+  (next to `id`, `title`, `target`, `floating`, `show_with_session` and `manufacturer`), or an empty string when there is none. It is not yet
   drawn in LUNA's menus.
 
 `local_content_offset`:
@@ -253,7 +255,7 @@ goes over the engine connection, including LUNA UI actions through `luna.gui`.
    float with the plugin windows, and `show_with_session: true` if it only makes sense with
    a session open. Leave `floating`, `show_with_session`, `width` and `height` out of browser,
    editor and app entries.
-5. Fill `version`, `sdk_version`, `min_luna_version`, `engines`.
+5. Fill `version`, `manufacturer`, `sdk_version`, `min_luna_version`, `engines`.
 6. Add `icon` with a relative path if the Add On ships one.
 7. Add `package_name` if the folder name is not what the Add Ons folder should show.
 8. `ua-builder install` and look in LUNA's **Add Ons** menu, under **Windows**, **Browsers**,

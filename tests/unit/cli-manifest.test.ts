@@ -40,6 +40,12 @@ describe('readManifest', () => {
     expect(() => readManifest(addOn({ floating: 0 }))).toThrow(/"floating" must be true or false/);
   });
 
+  it('accepts a string manufacturer or none, and rejects a non-string, which LUNA would ignore', () => {
+    expect(readManifest(addOn({ manufacturer: 'Example Co' })).entries[0]!.manufacturer).toBe('Example Co');
+    expect(readManifest(addOn({})).entries[0]!.manufacturer).toBeUndefined();
+    expect(() => readManifest(addOn({ manufacturer: 42 }))).toThrow(/"manufacturer" must be a string/);
+  });
+
   it('accepts show_with_session true, false, or absent, and rejects a non-boolean', () => {
     expect(readManifest(addOn({ show_with_session: true })).entries[0]!.show_with_session).toBe(true);
     expect(readManifest(addOn({ show_with_session: false })).entries[0]!.show_with_session).toBe(false);

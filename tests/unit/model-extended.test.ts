@@ -427,6 +427,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(luna.gui.addOns.items.map((a) => a.title.value)).toEqual(['Demo']);
     expect(luna.gui.addOns.items[0]!.floating.value).toBe(true);
     expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
+    expect(luna.gui.addOns.items[0]!.manufacturer.value).toBe('Example Co');
     expect(luna.gui.main.page.value).toBe('timeline');
     const w = luna.gui.main.watch(); // outside a session: subscribe explicitly to follow pushes
     await w.ready;

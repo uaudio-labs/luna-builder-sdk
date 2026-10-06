@@ -28,6 +28,8 @@ export class AddOn extends Node {
   readonly floating: Prop<boolean>;
   /** The manifest's `show_with_session`: `false` unless it says `true`. Meaningful for `'window'` only. */
   readonly showWithSession: Prop<boolean>;
+  /** The manifest's `manufacturer`, or `''` when it has none. */
+  readonly manufacturer: Prop<string>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -38,6 +40,7 @@ export class AddOn extends Node {
     this.icon = this.prop<string>('icon');
     this.floating = this.prop<boolean>('floating');
     this.showWithSession = this.prop<boolean>('show_with_session');
+    this.manufacturer = this.prop<string>('manufacturer');
   }
 
   /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its

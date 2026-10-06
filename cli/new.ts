@@ -5,9 +5,9 @@ import { addOnClashes, bundlePath, flagNumber, flagString, installedAddOns, isWi
 /** Manifest fields only a `"window"` uses; a browser, app or editor scaffold leaves them out. */
 const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'width', 'height'];
 
-/** Drop the window-only lines from the template's manifest and the comma they leave dangling. */
-function withoutWindowFields(manifest: string): string {
-  const kept = manifest.split('\n').filter((line) => !WINDOW_ONLY_FIELDS.some((f) => line.trimStart().startsWith(`"${f}":`)));
+/** Drop the named lines from the template's manifest and the comma they leave dangling. */
+function withoutFields(manifest: string, fields: string[]): string {
+  const kept = manifest.split('\n').filter((line) => !fields.some((f) => line.trimStart().startsWith(`"${f}":`)));
   return kept.join('\n').replace(/,(\s*\})\s*$/, '$1\n');
 }
 
@@ -55,7 +55,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--title "Title"] [--manufacturer "Name"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
@@ -75,6 +75,7 @@ export async function newAddOn(args: Args): Promise<number> {
   }
   const id = flagString(args, 'id') ?? `com.example.${slug(name)}`;
   const title = flagString(args, 'title') ?? titleCase(name);
+  const manufacturer = flagString(args, 'manufacturer');
   const clashes = addOnClashes([{ id, title }], installedAddOns());
   if (clashes.length) {
     console.error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nPick another with --id com.x.y and/or --title "Title".`);
@@ -85,6 +86,7 @@ export async function newAddOn(args: Args): Promise<number> {
     __SLUG__: slug(name),
     __ID__: id,
     __TITLE__: title,
+    __MANUFACTURER__: JSON.stringify(manufacturer ?? '').slice(1, -1),
     __TARGET__: target,
     __FLOATING__: String(!args.flags['no-floating']),
     __SHOW_WITH_SESSION__: String(!!args.flags['show-with-session']),
@@ -99,7 +101,10 @@ export async function newAddOn(args: Args): Promise<number> {
     mkdirSync(join(dest, '..'), { recursive: true });
     let text = readFileSync(file, 'utf8');
     for (const [k, v] of Object.entries(replacements)) text = text.replaceAll(k, v);
-    if (rel === 'manifest.json' && !isWindow(target)) text = withoutWindowFields(text);
+    if (rel === 'manifest.json') {
+      const omit = [...(isWindow(target) ? [] : WINDOW_ONLY_FIELDS), ...(manufacturer ? [] : ['manufacturer'])];
+      if (omit.length) text = withoutFields(text, omit);
+    }
     writeFileSync(dest, text);
   }
   vendorBundle(dir);

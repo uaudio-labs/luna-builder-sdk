@@ -5,6 +5,13 @@ engine is versioned separately.
 
 ## Unreleased
 
+Added
+- Optional `manufacturer` manifest field: who makes the Add On, shown by LUNA in the
+  MANUFACTURER column of Settings > Add Ons. `ua-builder new --manufacturer "Name"` writes it,
+  and `ua-builder install` / `pack` reject a non-string value. The examples set it. LUNA reports
+  it as the `manufacturer` property under `/gui/add_ons/<id>`, read as `manufacturer` on
+  `luna.gui.addOns` items (`''` when the manifest has none).
+
 Changed
 - The agent skills, the scaffold README and `docs/llms.txt` now ask agents to end with
   `LUNA BUILDER SDK FEEDBACK:` instead of `UA BUILDER SDK FEEDBACK:` when the SDK could

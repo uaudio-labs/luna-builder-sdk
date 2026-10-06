@@ -9,7 +9,7 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 
 1. Scaffold. From the folder that should contain the Add On:
    ```sh
-   npx ua-builder new <name> --title "<Title>" [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
+   npx ua-builder new <name> --title "<Title>" [--manufacturer "<Name>"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
    The default is a `"window"` Add On with `"floating": true`, which floats with LUNA's plugin
@@ -18,7 +18,9 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
    LUNA's secondary browser beside the Timeline or Mixer, `--target editor` for the editor
    panel under the Timeline (in place of the Clip Editor, at its height; it does not follow
    the selection), or `--target app` for a full page.
-   See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`).
+   Pass `--manufacturer` with the author's company or name; LUNA shows it in Settings > Add
+   Ons, and without it the field is left out of the manifest.
+   See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`, `manufacturer`).
    `new` refuses an `id` or `title` that an installed Add On already uses; pass a different
    `--id` or `--title`, and do not remove the other Add On without asking.
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
