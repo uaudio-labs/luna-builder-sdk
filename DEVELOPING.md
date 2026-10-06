@@ -1,6 +1,6 @@
-# Developing ua-builder-sdk
+# Developing luna-builder-sdk
 
-For work on the SDK itself, in this repo (`uaudio/ua-builder-sdk` on GitHub). None of this
+For work on the SDK itself, in this repo (`uaudio/luna-builder-sdk` on GitHub). None of this
 ships: package.json "files" lists what does, and `README.md` is the consumer-facing page.
 Architecture and recorded decisions are in `design/DESIGN.md`, phases and status in
 `design/PLAN.md`, and `design/PLATFORM.md` maps every piece of the platform.
@@ -20,7 +20,7 @@ npm run test:engine         # against a wasm engine build in headless Chrome (UA
 
 ### Work in this checkout with Codex
 
-Open `ua-builder-sdk` as the Codex project, or launch `codex` from this directory.
+Open `luna-builder-sdk` as the Codex project, or launch `codex` from this directory.
 `AGENTS.md` points to the shared guidance in `CLAUDE.md`; `.agents/skills/` contains
 relative symlinks to the six original skill folders. No plugin installation is
 needed for checkout work. Start a new task after changing project instructions.
@@ -54,7 +54,7 @@ of `npm run check`.
 ## Publish to GitHub
 
 This repo is the SDK source; there is no pac target and no mirror step. In an HB tree the
-checkout lives at `<tree>/github-repos/ua-builder-sdk`. Commit and push by hand after
+checkout lives at `<tree>/github-repos/luna-builder-sdk`. Commit and push by hand after
 `npm run check` passes:
 
 ```sh
@@ -65,7 +65,7 @@ git push
 
 `dist/` and `plugins/` are git-ignored; `npm ci` regenerates them in any checkout through
 the `prepare` script. Two tree targets consume this checkout, so rebuild it (`npm ci`) after
-a pull before building them: `sdk/luna/ua-builder-installer` (`npm pack` of it, zipped with
+a pull before building them: `sdk/luna/builder-installer` (`npm pack` of it, zipped with
 setup scripts) and `sdk/luna/builder-examples/studiolo` (npm-installs it).
 
 ## Source layout

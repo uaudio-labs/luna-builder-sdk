@@ -1,6 +1,6 @@
 ---
 name: test-add-on
-description: Write and run tests for a LUNA Add On or for @uaudio/ua-builder-sdk itself, using Luna.MockEngine for fast tests and the UA_LIVE lane against a running LUNA. Use when asked to test, add coverage, or reproduce an engine interaction.
+description: Write and run tests for a LUNA Add On or for @uaudio/luna-builder-sdk itself, using Luna.MockEngine for fast tests and the UA_LIVE lane against a running LUNA. Use when asked to test, add coverage, or reproduce an engine interaction.
 ---
 
 # Test an Add On
@@ -8,7 +8,7 @@ description: Write and run tests for a LUNA Add On or for @uaudio/ua-builder-sdk
 ## Fast lane: Luna.MockEngine (default)
 
 ```js
-import { Luna } from '@uaudio/ua-builder-sdk';
+import { Luna } from '@uaudio/luna-builder-sdk';
 const engine = new Luna.MockEngine();
 engine.addSession('abc', { name: 'Demo', tracks: ['Vocal', 'Bass'] });   // LUNA-shaped session
 engine.addPlugin('com.uaudio.uadx.1176', { name: 'UA 1176', categories: ['Compressor'] });

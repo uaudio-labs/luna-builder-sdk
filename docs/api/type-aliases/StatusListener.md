@@ -4,7 +4,7 @@
 type StatusListener = (status, detail?) => void;
 ```
 
-The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/ua-builder-sdk'`
+The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'`
 or, from a script tag, `globalThis.Luna`.
 
 ## Parameters

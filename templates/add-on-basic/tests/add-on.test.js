@@ -1,6 +1,6 @@
 // Runs against Luna.MockEngine: no LUNA needed. `npm test`.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Luna } from '@uaudio/ua-builder-sdk';
+import { Luna } from '@uaudio/luna-builder-sdk';
 
 globalThis.Luna = Luna; // logic.js is a classic script that reads the Luna global
 await import('../logic.js');

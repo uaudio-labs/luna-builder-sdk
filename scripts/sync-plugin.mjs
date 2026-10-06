@@ -35,7 +35,7 @@ async function write(relative, contents) {
 }
 
 export const CLI_NOTE = `> **Running the CLI from this plugin.** In a project that already depends on
-> \`@uaudio/ua-builder-sdk\`, run \`npx ua-builder <command>\`. Installed as a plugin there is
+> \`@uaudio/luna-builder-sdk\`, run \`npx ua-builder <command>\`. Installed as a plugin there is
 > no npm project yet: resolve the plugin root as two directories above this skill's
 > directory and run \`node <plugin-root>/sdk/cli.js <command>\` instead — the arguments are
 > identical. The plugin also carries the script-tag bundle (\`sdk/luna.global.js\`, copied into

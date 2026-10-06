@@ -1,7 +1,7 @@
 # LUNA Add On Builder — Claude Code and Codex plugin
 
 Build, test and install LUNA Add Ons. Everything needed is in this folder: the
-`@uaudio/ua-builder-sdk` builds, its CLI, six skills, the scaffold template, four worked
+`@uaudio/luna-builder-sdk` builds, its CLI, six skills, the scaffold template, four worked
 examples and the consumer docs. No npm install, no network, no MCP server. LUNA must be
 running on the same machine — or not at all, if the Add On runs on the in-page WebAssembly
 engine.
@@ -41,7 +41,7 @@ node <plugin-root>/sdk/cli.js doctor
 
 Resolve `<plugin-root>` relative to the file you are reading — two directories above a
 `SKILL.md`, one above this README. Nothing here depends on a provider's cache layout. In a
-project that already depends on `@uaudio/ua-builder-sdk`, `npx ua-builder <command>` is the
+project that already depends on `@uaudio/luna-builder-sdk`, `npx ua-builder <command>` is the
 same CLI with the same arguments.
 
 To make a hand-written page self-contained before installing it:
@@ -62,7 +62,7 @@ from `examples/manifest.json`; see [examples/README.md](examples/README.md).
 
 Both host manifests and the SDK build here track the package version. Claude reads
 `.claude-plugin/plugin.json`; Codex reads `.codex-plugin/plugin.json` and the `skills/`
-path it names. This folder is generated from the `ua-builder-sdk` package by its build;
+path it names. This folder is generated from the `luna-builder-sdk` package by its build;
 `npm run check:plugin` fails if anything in it is stale. Edit the originals, never this
 folder.
 

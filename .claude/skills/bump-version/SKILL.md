@@ -1,9 +1,9 @@
 ---
 name: bump-version
-description: Bump the ua-builder-sdk version and write release notes. Use whenever the user asks to "bump ua-builder-sdk version", "bump the SDK version", "cut a release", "bump to alpha.N", "release a new version", or otherwise wants the @uaudio/ua-builder-sdk package version incremented — this touches many files and two notes files, so never bump by hand-editing package.json alone.
+description: Bump the luna-builder-sdk version and write release notes. Use whenever the user asks to "bump luna-builder-sdk version", "bump the SDK version", "cut a release", "bump to alpha.N", "release a new version", or otherwise wants the @uaudio/luna-builder-sdk package version incremented — this touches many files and two notes files, so never bump by hand-editing package.json alone.
 ---
 
-# Bump ua-builder-sdk version
+# Bump luna-builder-sdk version
 
 Bump the SDK/plugin version, consolidate the changes since the last bump into
 `RELEASE_NOTES.md` and `CHANGELOG.md`, verify, then commit and tag.

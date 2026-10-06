@@ -1,6 +1,6 @@
 # Release Notes
 
-What changed in each release of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin
+What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
 ## 0.1.0-alpha.5 — 2026-10-02

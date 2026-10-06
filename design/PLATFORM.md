@@ -7,7 +7,7 @@ platform, where it lives, and how the pieces connect. Architecture and decisions
 ## The whole picture
 
 ```
- AUTHORING                         SDK  (@uaudio/ua-builder-sdk)                 ENGINES
+ AUTHORING                         SDK  (@uaudio/luna-builder-sdk)                 ENGINES
  ─────────                         ─────────────────────────────                 ───────
  coding agent ── skills/ ──┐
  (Claude Code, Codex)      │       Add On page (index.html + main.js)
@@ -85,7 +85,7 @@ DOM helpers sit on top of the model: `bindRange`, `bindDrag`, `bindGesture` (tou
 
 | Output | Consumer |
 |---|---|
-| `dist/index.{js,cjs,d.ts}`, `dist/wire/` | Module import: `import { Luna } from '@uaudio/ua-builder-sdk'` |
+| `dist/index.{js,cjs,d.ts}`, `dist/wire/` | Module import: `import { Luna } from '@uaudio/luna-builder-sdk'` |
 | `dist/luna.global.js` | Script tag (`globalThis.Luna`); vendored into Add Ons as `vendor/luna.global.js` |
 | `dist/cli.js` | `npx ua-builder` (package `bin`) |
 | `plugins/ua-luna-builder/` | Agent plugin: shell from `plugin/` plus copies of builds, skills, template, examples, docs. Generated, git-ignored; `npm run check:plugin` gates it |
@@ -98,7 +98,7 @@ Distribution channels:
 
 | Channel | What it carries | Who uses it |
 |---|---|---|
-| GitHub `uaudio/ua-builder-sdk` (private) | Full SDK source; `npm ci` builds it via `prepare` | Developers, npm installs from git |
+| GitHub `uaudio/luna-builder-sdk` (private) | Full SDK source; `npm ci` builds it via `prepare` | Developers, npm installs from git |
 | Agent plugin marketplace | `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` → `plugins/ua-luna-builder` | Claude Code and Codex users |
 | LUNA Add On Builder installer zip | `npm pack` of the SDK + double-click setup scripts that install the plugin | Non-programmers |
 | `.lunaaddon` bundle | One Add On, made by `ua-builder pack` | Add On end users |
@@ -156,8 +156,8 @@ through the scaffold and the `test-add-on` / `verify-add-on` skills.
 
 | Piece | Location | Relationship |
 |---|---|---|
-| SDK source (source of truth) | `<tree>/github-repos/ua-builder-sdk`, GitHub `uaudio/ua-builder-sdk` | Edited by hand; commits reviewed by hand. No pac target since 2026-09-28 |
-| Installer | `packages/sdk/luna/ua-builder-installer` (repo `sdk-luna`, pac target) | `npm ci` + `npm pack` of the clone, zipped with setup scripts |
+| SDK source (source of truth) | `<tree>/github-repos/luna-builder-sdk`, GitHub `uaudio/luna-builder-sdk` | Edited by hand; commits reviewed by hand. No pac target since 2026-09-28 |
+| Installer | `packages/sdk/luna/builder-installer` (repo `sdk-luna`, pac target) | `npm ci` + `npm pack` of the clone, zipped with setup scripts |
 | Example Add On: StudioLo | `packages/sdk/luna/builder-examples/studiolo` (pac target) | npm-installs the SDK from the clone; vitest, then `ua-builder pack` |
 | Legacy LUNA SDK | `packages/sdk/luna/LUNA SDK` (`UANet` global) | Ideas only (reconnect, manifest spec); not a dependency |
 | LUNA GUI client lib | `packages/hbgui/next_gen/shared/uanet-clients` | Source of the ported domain objects; kept, no forced migration |

@@ -1,6 +1,6 @@
 ---
 name: create-add-on
-description: Scaffold a new LUNA Add On with @uaudio/ua-builder-sdk, connect it to the engine, add its first feature, and get its tests passing. Use when asked to create, start, or bootstrap a LUNA Add On or LUNA web page.
+description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect it to the engine, add its first feature, and get its tests passing. Use when asked to create, start, or bootstrap a LUNA Add On or LUNA web page.
 ---
 
 # Create a LUNA Add On

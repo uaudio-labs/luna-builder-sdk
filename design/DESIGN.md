@@ -5,7 +5,7 @@ open items are listed at the end.
 
 ## Purpose
 
-`@uaudio/ua-builder-sdk` is a TypeScript SDK for building LUNA Add Ons that run in
+`@uaudio/luna-builder-sdk` is a TypeScript SDK for building LUNA Add Ons that run in
 two places with no code change:
 
 1. Inside LUNA, as a web page in LUNA's webview, talking to the native engine
@@ -41,7 +41,7 @@ Goals, in priority order:
 | 2 | Port scope | LUNA's engine (`deviced`) only. `uaconnect` and `uaassistant` are out of scope for v1. |
 | 3 | ua-client-sdk | Reference only; wire layer written fresh. |
 | 4 | uanet-clients | Kept indefinitely. builder is a separate SDK. |
-| 5 | Naming | Wire layer is `Luna.Port` (`Luna.WebSocketPort`, `Luna.WasmPort`, `Luna.MockPort`). `Luna.Transport` is the DAW transport. Package `@uaudio/ua-builder-sdk`, script-tag global `Luna`. |
+| 5 | Naming | Wire layer is `Luna.Port` (`Luna.WebSocketPort`, `Luna.WasmPort`, `Luna.MockPort`). `Luna.Transport` is the DAW transport. Package `@uaudio/luna-builder-sdk`, script-tag global `Luna`. |
 | 6 | Tests | Standalone npm package using vitest. Not a pac/Amber target. vitest (and Playwright for the engine lane) are new packages and must be raised in `hb-platform` before they land. |
 | 7 | Wasm delivery | The engine is not part of the SDK package: it is built and versioned separately. `Luna.connect({ engine: 'wasm' })` loads it from `engineUrl`, default `/__engine/` (the `ua-builder serve --engine` mount), and accepts an override. A UA-hosted copy with COOP/COEP is still planned, but it has to be served same-origin with the page (fact 38), so it cannot be the default. (Revised from "defaults to a hosted URL".) |
 | 8 | Jira | No issue yet; commits are unprefixed until one exists. |
@@ -59,7 +59,7 @@ The package root re-exports one namespace:
 export * as Luna from './luna';
 ```
 
-`import { Luna } from '@uaudio/ua-builder-sdk'` gives both values and types, so
+`import { Luna } from '@uaudio/luna-builder-sdk'` gives both values and types, so
 `Luna.Session` is usable as a type without a TypeScript `namespace` block. A tsup
 IIFE build exposes `globalThis.Luna` for script-tag Add Ons; this is required
 because Windows loads Add Ons from `file://`, where module scripts are blocked.
@@ -215,7 +215,7 @@ Conventions applied during the port (from `uanet-clients/docs/api-codeability-re
 | Field | Meaning |
 |---|---|
 | `version` | The Add On's own semver. |
-| `sdk_version` | The `@uaudio/ua-builder-sdk` version it was built against. |
+| `sdk_version` | The `@uaudio/luna-builder-sdk` version it was built against. |
 | `min_luna_version` | Lowest LUNA that hosts it. |
 | `engines` | `["luna"]`, `["wasm"]`, or both. Declares what the page supports. |
 
@@ -294,7 +294,7 @@ What lowers tokens, in order of impact:
 4. Generated, terse API markdown in `docs/api/` from the `.d.ts` (TypeDoc
    markdown), one file per domain, plus `docs/llms.txt` as an index.
 5. `docs/EVIDENCE.md` so agents stop rediscovering daemon traps.
-6. Subpath exports (`@uaudio/ua-builder-sdk/sessions`, `/editing`, ...) to keep
+6. Subpath exports (`@uaudio/luna-builder-sdk/sessions`, `/editing`, ...) to keep
    autocomplete and import surfaces small.
 
 `skills/` (Claude Code skill folders, each with `SKILL.md`):
@@ -310,13 +310,13 @@ What lowers tokens, in order of impact:
 
 ## Repository layout
 
-The SDK is its own repo, `uaudio/ua-builder-sdk` on GitHub (in an HB tree,
-`<tree>/github-repos/ua-builder-sdk`). It is not a pac target. `design/PLATFORM.md` maps it
+The SDK is its own repo, `uaudio/luna-builder-sdk` on GitHub (in an HB tree,
+`<tree>/github-repos/luna-builder-sdk`). It is not a pac target. `design/PLATFORM.md` maps it
 against the rest of the platform.
 
 ```
-ua-builder-sdk/
-  package.json            @uaudio/ua-builder-sdk, type: module; prepare builds, so npm ci yields dist/ and plugins/
+luna-builder-sdk/
+  package.json            @uaudio/luna-builder-sdk, type: module; prepare builds, so npm ci yields dist/ and plugins/
   src/
     index.ts              export * as Luna from './luna'
     luna.ts               namespace barrel
@@ -342,7 +342,7 @@ ua-builder-sdk/
 ```
 
 The `sdk-luna` Stash repo keeps `LUNA SDK` and the two tree targets that consume this
-checkout: `sdk/luna/ua-builder-installer` and `sdk/luna/builder-examples/studiolo`.
+checkout: `sdk/luna/builder-installer` and `sdk/luna/builder-examples/studiolo`.
 
 ## Risks and dependencies
 

@@ -1,6 +1,6 @@
 # __TITLE__
 
-A LUNA Add On built with `@uaudio/ua-builder-sdk`.
+A LUNA Add On built with `@uaudio/luna-builder-sdk`.
 
 | File | Purpose |
 |---|---|

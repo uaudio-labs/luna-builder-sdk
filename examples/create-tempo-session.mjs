@@ -68,7 +68,7 @@ console.log('markers');
 for (const m of session.markers.items) console.log(`  ${m.id}: tick=${m.location.value} name="${m.name.value}"`);
 
 if (flag('--save')) {
-  await session.save({ label: 'ua-builder-sdk tempo fixture' });
+  await session.save({ label: 'luna-builder-sdk tempo fixture' });
   console.log('saved');
 } else {
   console.log('\nUnsaved. Save it with: await session.save()');

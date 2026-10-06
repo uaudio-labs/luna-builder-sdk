@@ -133,7 +133,7 @@
 | [ShortcutsBinding](interfaces/ShortcutsBinding.md) | The listeners [bindShortcuts](functions/bindShortcuts.md) installed. |
 | [ShortcutsOptions](interfaces/ShortcutsOptions.md) | - |
 | [SocketLike](interfaces/SocketLike.md) | The subset of the WebSocket API this port uses; lets tests inject a fake. |
-| [SubscribeOptions](interfaces/SubscribeOptions.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/ua-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [SubscribeOptions](interfaces/SubscribeOptions.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [TraceWaveformOptions](interfaces/TraceWaveformOptions.md) | - |
 | [TransactionOptions](interfaces/TransactionOptions.md) | - |
 | [TransportLocation](interfaces/TransportLocation.md) | The `location` property of a session. |
@@ -164,7 +164,7 @@
 | [ContextType](type-aliases/ContextType.md) | - |
 | [ControlType](type-aliases/ControlType.md) | - |
 | [Engine](type-aliases/Engine.md) | - |
-| [EventHandler](type-aliases/EventHandler.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/ua-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [EventHandler](type-aliases/EventHandler.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [FolderMode](type-aliases/FolderMode.md) | - |
 | [GuiPage](type-aliases/GuiPage.md) | - |
 | [InsertSlot](type-aliases/InsertSlot.md) | - |
@@ -185,10 +185,10 @@
 | [SocketConstructor](type-aliases/SocketConstructor.md) | - |
 | [SoloMode](type-aliases/SoloMode.md) | - |
 | [SourceLookup](type-aliases/SourceLookup.md) | Anything that can resolve a source uid: `session.sources`, or a plain array. |
-| [StatusListener](type-aliases/StatusListener.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/ua-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [StatusListener](type-aliases/StatusListener.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [StemFormat](type-aliases/StemFormat.md) | - |
 | [TrackType](type-aliases/TrackType.md) | - |
-| [Unsubscribe](type-aliases/Unsubscribe.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/ua-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [Unsubscribe](type-aliases/Unsubscribe.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [Verb](type-aliases/Verb.md) | UANet verbs. |
 | [WasmState](type-aliases/WasmState.md) | Lifecycle states reported by the engine. |
 

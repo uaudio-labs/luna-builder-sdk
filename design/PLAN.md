@@ -60,7 +60,7 @@ Status 2026-09-16: done. `ua-builder new|serve|test|install|pack|doctor` built t
 - [x] `docs/QUICKSTART.md` (15 sections, under 300 lines), `docs/PROTOCOL.md`, `docs/MANIFEST.md`.
 - [x] TypeDoc markdown into `docs/api/` (one file per member), `docs/llms.txt`.
 - [x] Skills: `create-add-on`, `add-feature`, `test-add-on`, `debug-connection`.
-- [x] Root `README.md` and `CLAUDE.md` for the `ua-builder-sdk` folder (done in Phase 1; expand in Phase 3).
+- [x] Root `README.md` and `CLAUDE.md` for the `luna-builder-sdk` folder (done in Phase 1; expand in Phase 3).
 
 ## Phase 4: wasm engine
 
@@ -93,6 +93,6 @@ touched `normalized_value` write is undoable anyway).
 
 ## Phase 5: adoption (future, no timeline)
 
-- [ ] Publish `@uaudio/ua-builder-sdk` to the internal registry and as a tarball for third parties.
+- [ ] Publish `@uaudio/luna-builder-sdk` to the internal registry and as a tarball for third parties.
 - [ ] Third-party onboarding doc replacing `uanet-clients-example/onboard.sh` for the Add On audience.
 - [ ] Evaluate moving `hbgui/next_gen/luna/gui` and `shared/src` (LUNA Play) onto builder so LUNA Play can run on the wasm engine. Not committed; uanet-clients remains in place.

@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 // Three outputs:
-//   dist/index.{js,cjs} + dist/wire/index.{js,cjs}  — module consumers, `import { Luna } from '@uaudio/ua-builder-sdk'`
+//   dist/index.{js,cjs} + dist/wire/index.{js,cjs}  — module consumers, `import { Luna } from '@uaudio/luna-builder-sdk'`
 //   dist/luna.global.js                                — script-tag consumers, `globalThis.Luna`
 // The IIFE has its own entry because `export * as Luna` would otherwise put everything under Luna.Luna.
 // Windows loads Add Ons from file://, where module scripts are blocked, so the IIFE is not optional.

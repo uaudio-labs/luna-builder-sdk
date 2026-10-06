@@ -63,7 +63,7 @@ export function flagNumber(args: Args, key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** The @uaudio/ua-builder-sdk package root (this file lives in dist/ once built). */
+/** The @uaudio/luna-builder-sdk package root (this file lives in dist/ once built). */
 export function packageRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 4; i++) {
@@ -236,5 +236,5 @@ export function usage(): string {
   ua-builder doctor
   ua-builder tree [path] [--levels 1] [--out tree.json]   the shape of LUNA's tree (read-only)
 
-Docs: docs/QUICKSTART.md, docs/MANIFEST.md in the @uaudio/ua-builder-sdk package.`;
+Docs: docs/QUICKSTART.md, docs/MANIFEST.md in the @uaudio/luna-builder-sdk package.`;
 }

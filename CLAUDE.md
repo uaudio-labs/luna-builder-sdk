@@ -1,4 +1,4 @@
-# ua-builder-sdk — guidance for coding agents
+# luna-builder-sdk — guidance for coding agents
 
 Read `design/DESIGN.md` first for the architecture and the recorded decisions. Do
 not re-open decided questions (reactive idiom, naming, test runner, scope).
@@ -87,9 +87,9 @@ npm run check       # all of the above
 
 ## Repo and consumers
 
-This repo is the SDK source (`uaudio/ua-builder-sdk`); it is not a pac target. `npm ci`
+This repo is the SDK source (`uaudio/luna-builder-sdk`); it is not a pac target. `npm ci`
 builds `dist/` and `plugins/` through `prepare`. Two tree targets consume the checkout at
-`<tree>/github-repos/ua-builder-sdk`: `sdk/luna/ua-builder-installer` (`npm pack` of it) and
+`<tree>/github-repos/luna-builder-sdk`: `sdk/luna/builder-installer` (`npm pack` of it) and
 `sdk/luna/builder-examples/studiolo` (npm-installs it), so package.json `files` is the one
 list of what ships. `design/PLATFORM.md` maps every piece of the platform.
 

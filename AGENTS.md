@@ -1,4 +1,4 @@
-# ua-builder-sdk — Codex entry point
+# luna-builder-sdk — Codex entry point
 
 Read and follow [CLAUDE.md](CLAUDE.md) before working on this SDK. It is the shared
 development guidance for both Claude Code and Codex, including architecture,

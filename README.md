@@ -1,4 +1,4 @@
-# @uaudio/ua-builder-sdk
+# @uaudio/luna-builder-sdk
 
 SDK for building LUNA Add Ons that run inside LUNA or, unchanged, in a browser
 page driving the WebAssembly LUNA engine. TypeScript, zero runtime dependencies,
@@ -22,8 +22,8 @@ With Node.js 24 or newer (Node 22 works for the SDK itself, but its npm 10 fails
 `npm install` a scaffolded Add On — npm 11 is needed for that):
 
 ```sh
-git clone git@github.com:uaudio/ua-builder-sdk.git
-cd ua-builder-sdk
+git clone git@github.com:uaudio-labs/luna-builder-sdk.git
+cd luna-builder-sdk
 npm ci        # the prepare script builds dist/ (the SDK and its CLI) and the agent plugin
 ```
 
@@ -58,7 +58,7 @@ no checkout, no npm install and no network.
 
 ```bash
 claude plugin marketplace add <path to this folder>
-claude plugin install ua-luna-builder@ua-builder-sdk
+claude plugin install ua-luna-builder@luna-builder-sdk
 ```
 
 `.claude-plugin/marketplace.json` points at `./plugins/ua-luna-builder` in this repo, so a
@@ -75,7 +75,7 @@ From this SDK folder, register the marketplace and install the plugin:
 
 ```bash
 codex plugin marketplace add .
-codex plugin add ua-luna-builder@ua-builder-sdk
+codex plugin add ua-luna-builder@luna-builder-sdk
 ```
 
 Alternatively, after registering the marketplace, open the Plugins Directory, choose
@@ -95,7 +95,7 @@ here is listed in either host's public directory.
 ## Use
 
 ```ts
-import { Luna } from '@uaudio/ua-builder-sdk';
+import { Luna } from '@uaudio/luna-builder-sdk';
 
 const luna = await Luna.connect();               // inside LUNA (?port= on the URL) or LUNA on localhost
 const session = await luna.session();          // focused session, subscribed and loaded

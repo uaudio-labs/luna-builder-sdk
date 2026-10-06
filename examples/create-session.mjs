@@ -23,7 +23,7 @@ const opt = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 
-const name = opt('--name', `ua-builder-sdk example ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`);
+const name = opt('--name', `luna-builder-sdk example ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`);
 // "Name[:mono|stereo|instrument][,…]"
 const tracks = opt('--tracks', 'Vocal:mono,Guitar,Bass:mono,Keys:instrument')
   .split(',')

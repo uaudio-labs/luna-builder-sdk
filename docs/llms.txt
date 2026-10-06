@@ -1,4 +1,4 @@
-# @uaudio/ua-builder-sdk
+# @uaudio/luna-builder-sdk
 
 > TypeScript/JavaScript SDK for LUNA Add Ons. One `Luna` namespace. Props (`.value`, `.onChange`, `.set`), Collections (`.items`, `.byId`, `.onChange`). Runs inside LUNA (WebSocket, `?port=` on the page URL) or on the wasm engine.
 

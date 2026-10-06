@@ -1,6 +1,6 @@
 ---
 name: port-to-wasm
-description: Run a LUNA Add On in a plain browser page on the in-page WebAssembly LUNA engine instead of a native LUNA, using @uaudio/ua-builder-sdk. Use when asked to make an Add On work without LUNA installed, on the wasm engine, or as a standalone web page.
+description: Run a LUNA Add On in a plain browser page on the in-page WebAssembly LUNA engine instead of a native LUNA, using @uaudio/luna-builder-sdk. Use when asked to make an Add On work without LUNA installed, on the wasm engine, or as a standalone web page.
 ---
 
 # Port an Add On to the wasm engine

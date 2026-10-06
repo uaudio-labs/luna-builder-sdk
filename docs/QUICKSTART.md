@@ -1,6 +1,6 @@
 # Quickstart
 
-Build a LUNA Add On with `@uaudio/ua-builder-sdk`, all under `Luna`. Read once; then use the headings.
+Build a LUNA Add On with `@uaudio/luna-builder-sdk`, all under `Luna`. Read once; then use the headings.
 No audio or MIDI streaming: live MIDI input is Web MIDI (`navigator.requestMIDIAccess()`); sending is the Add On's.
 
 ## 1. Create and run

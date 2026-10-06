@@ -1,6 +1,6 @@
 # Changelog
 
-Versions of `@uaudio/ua-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
+Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
 ## 0.1.0-alpha.5
@@ -108,7 +108,7 @@ Changed
   just added has its values.
 - `ua-builder probe` opens a blank tab, then navigates it, so it can install scripts first.
 - The `ua-luna-builder` plugin manifests and marketplace catalog name
-  `https://github.com/uaudio/ua-builder-sdk` as the repository.
+  `https://github.com/uaudio-labs/luna-builder-sdk` as the repository.
 
 ## 0.1.0-alpha.3
 
@@ -215,7 +215,7 @@ Fixed
 Measured against LUNA 3.0.0.15776 (facts 82-92 in `docs/EVIDENCE.md`).
 
 Changed (breaking)
-- The namespace is `Luna`, not `UA`: `import { Luna } from '@uaudio/ua-builder-sdk'`, `Luna.connect()`,
+- The namespace is `Luna`, not `UA`: `import { Luna } from '@uaudio/luna-builder-sdk'`, `Luna.connect()`,
   and `globalThis.Luna` from a script tag. The script-tag bundle is `luna.global.js` (was
   `ua.global.js`). To move an existing Add On: rename `UA` to `Luna` in its scripts, point its
   `<script src>` at `vendor/luna.global.js`, and rename the vendored file (`ua-builder pack`

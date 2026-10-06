@@ -25,7 +25,7 @@ Write a short Node script next to the Add On. It is an independent client, so wh
 page shows afterwards proves the page is live rather than drawing what it wrote itself.
 
 ```js
-import { Luna } from '@uaudio/ua-builder-sdk';
+import { Luna } from '@uaudio/luna-builder-sdk';
 const luna = await Luna.connect();
 const session = await luna.session();
 await session.ready();

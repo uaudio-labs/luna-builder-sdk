@@ -1,6 +1,6 @@
 ---
 name: add-feature
-description: Wrap an engine path, property or command that @uaudio/ua-builder-sdk does not type yet, either in an Add On or in the SDK's model layer. Use when a needed value or action is missing from the Luna namespace.
+description: Wrap an engine path, property or command that @uaudio/luna-builder-sdk does not type yet, either in an Add On or in the SDK's model layer. Use when a needed value or action is missing from the Luna namespace.
 ---
 
 # Add a feature the SDK does not cover

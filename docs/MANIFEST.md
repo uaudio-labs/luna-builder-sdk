@@ -198,7 +198,7 @@ compatibility.
 
 | Field | Type | Notes |
 |---|---|---|
-| `sdk_version` | string | The `@uaudio/ua-builder-sdk` version it was built against. Top-level or per entry. |
+| `sdk_version` | string | The `@uaudio/luna-builder-sdk` version it was built against. Top-level or per entry. |
 | `min_luna_version` | string | Lowest LUNA the Add On supports. |
 | `engines` | string[] | `["luna"]`, `["wasm"]` or both. Declares which engines the page handles. |
 
