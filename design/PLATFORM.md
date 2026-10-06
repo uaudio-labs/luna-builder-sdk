@@ -24,7 +24,7 @@ platform, where it lives, and how the pieces connect. Architecture and decisions
  DELIVERY                        │
  ────────                        ▼
    install ─► LUNA Add Ons folder (symlink on macOS, copy on Windows) ─► Add Ons menu
-   pack ────► <name>.lunaaddon bundle ─► opened in LUNA (macOS) / dropped in folder (Windows)
+   pack ────► <name>.lunaaddon (a zip) ─► opened in LUNA ─► plain folder in the Add Ons folder
    serve ───► plain browser page with COOP/COEP + /__engine/ mount ─► wasm engine
 ```
 
@@ -101,7 +101,7 @@ Distribution channels:
 | GitHub `uaudio/luna-builder-sdk` (private) | Full SDK source; `npm ci` builds it via `prepare` | Developers, npm installs from git |
 | Agent plugin marketplace | `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` → `plugins/ua-luna-builder` | Claude Code and Codex users |
 | LUNA Add On Builder installer zip | `npm pack` of the SDK + double-click setup scripts that install the plugin | Non-programmers |
-| `.lunaaddon` bundle | One Add On, made by `ua-builder pack` | Add On end users |
+| `.lunaaddon` file | One Add On zipped (its folder at the top), made by `ua-builder pack` or LUNA's Share... | Add On end users |
 
 The wasm engine is **not** in any of these. It is built separately and versioned separately;
 the hosted URL does not exist yet, so `engineUrl` defaults to `/__engine/`, which
@@ -120,7 +120,7 @@ the hosted URL does not exist yet, so `engineUrl` defaults to `/__engine/`, whic
 | `tree [path]` | Shape of LUNA's tree (properties, children, commands); `--out` snapshots a build, as in `docs/tree/` |
 | `doctor` | Node/npm versions, whether LUNA is reachable, creates the Add Ons folder |
 | `install [dir]` | Validates the manifest, links (macOS) or copies (Windows) into the Add Ons folder; LUNA rescans |
-| `pack [dir]` | Validates, refreshes the vendored bundle, copies into `<name>.lunaaddon` |
+| `pack [dir]` | Validates, refreshes the vendored bundle, zips the folder into `<name>.lunaaddon` |
 
 Add Ons folder: macOS `/Library/Application Support/Universal Audio/LUNA/Add Ons`, Windows
 `%LOCALAPPDATA%\Universal Audio\LUNA\Add Ons`. Manifest rules are in `docs/MANIFEST.md`.
@@ -164,7 +164,7 @@ through the scaffold and the `test-add-on` / `verify-add-on` skills.
 | Native engine | `deviced` in `hbsystem`, inside LUNA.app | The thing `WebSocketPort` talks to |
 | Wasm engine | `packages/hbsystem/wasm_engine` | Builds `devicedwasm.{js,wasm}` (about 32 MB stripped); bridge is `WasmD_Bridge` |
 | Protocol reference | `packages/hbsystem/networking/docs/` | UANet JSON dialect the wire layer implements |
-| Host side of Add Ons | LUNA app | Reads the Add Ons folder, builds the Add Ons menu, appends `?port=`, installs `.lunaaddon` |
+| Host side of Add Ons | LUNA app | Reads the Add Ons folder, builds the Add Ons menu, appends `?port=`, installs a `.lunaaddon` (unzips it into the Add Ons folder) |
 | External reference | `ua-client-sdk` (Apache-2.0) | Ideas only; no code copied |
 
 ## 8. Gaps and stale spots

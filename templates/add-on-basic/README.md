@@ -16,7 +16,7 @@ npm install
 npm test                  # against the mock engine
 npx ua-builder serve      # http://localhost:8790/ ; LUNA must be running to see live data
 npx ua-builder install    # link into LUNA's Add Ons folder; appears in the Add Ons menu
-npx ua-builder pack       # .lunaaddon bundle for distribution
+npx ua-builder pack       # .lunaaddon file (a zip) for distribution
 ```
 
 If `npx ua-builder` fails with "Permission denied", the SDK's `cli.js` lost its executable

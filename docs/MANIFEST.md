@@ -205,14 +205,14 @@ compatibility.
 ### Tooling only
 
 Read only by whatever installs the Add On: `ua-builder install`, or LUNA when it opens a
-`.lunaaddon` bundle. It has no effect once the Add On is loaded.
+`.lunaaddon` file. It has no effect once the Add On is loaded.
 
 | Field | Notes |
 |---|---|
-| `package_name` | Name of the Add Ons folder entry: the symlink (or copy) `ua-builder install` creates, or the `<name>.lunaaddon` folder LUNA installs a `.lunaaddon` bundle into. Without it the entry is named after the Add On folder (or the bundle). Surrounding whitespace is trimmed. Does not affect menu names, which come from `title`. |
+| `package_name` | Name of the Add Ons folder entry: the symlink (or copy) `ua-builder install` creates, or the folder LUNA unzips a `.lunaaddon` file into. Without it the entry is named after the Add On folder (for a `.lunaaddon`, the folder at the top of the zip, else the file's name). Surrounding whitespace is trimmed. Does not affect menu names, which come from `title`. |
 
-`package_name` has to be a bare name, not a path. When LUNA installs a `.lunaaddon` bundle it
-falls back to the bundle's name, with a warning, if the value is not a string, is blank, is
+`package_name` has to be a bare name, not a path. When LUNA installs a `.lunaaddon` file it
+falls back to that default name, with a warning, if the value is not a string, is blank, is
 `.` or `..`, or contains a path separator, or if the manifest cannot be read. `ua-builder
 install` uses the folder name when `package_name` is missing or blank and refuses a value
 that is `.`, `..` or contains a path separator; `--name` overrides it.

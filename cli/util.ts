@@ -142,7 +142,7 @@ export function menuFor(target: string | undefined): string {
 export interface InstalledAddOn {
   id: string;
   title: string;
-  /** The Add Ons folder entry (folder, symlink or installed `.lunaaddon` bundle). */
+  /** The Add Ons folder entry (folder or symlink). */
   entry: string;
 }
 

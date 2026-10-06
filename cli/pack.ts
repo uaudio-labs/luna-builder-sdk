@@ -1,9 +1,10 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { vendorBundle } from './new';
 import { flagString, readManifest, type Args } from './util';
+import { createZip, type ZipEntry } from './zip';
 
-/** Top-level entries of the Add On folder that never ship in a bundle. */
+/** Top-level entries of the Add On folder that never ship in a `.lunaaddon`. */
 function isExcluded(name: string): boolean {
   return (
     name === 'node_modules' ||
@@ -29,36 +30,64 @@ export function isJunk(name: string): boolean {
 }
 
 /**
- * Validate the manifest, refresh the vendored SDK bundle if the Add On carries one, and copy
- * the folder into a `.lunaaddon` bundle for distribution: a folder with the `.lunaaddon`
- * extension holding the Add On (manifest.json at its root). On macOS the Finder treats it as
- * a single file and LUNA installs it on open; on Windows it is a plain folder to drop into
- * LUNA's Add Ons folder. Dotfiles and OS metadata files are left out at every depth
- * (see {@link isJunk}).
+ * The zip entries for the Add On folder `dir`, all under `<top>/`. Symlinks are followed, but
+ * each folder is added once, so a link back up the tree cannot loop. Returns how many junk
+ * entries were left out.
+ */
+function collect(dir: string, top: string): { entries: ZipEntry[]; skipped: number } {
+  const entries: ZipEntry[] = [];
+  const visited = new Set<string>();
+  let skipped = 0;
+  const walk = (folder: string, prefix: string, isRoot: boolean): void => {
+    const real = realpathSync(folder);
+    if (visited.has(real)) return;
+    visited.add(real);
+    const stat = statSync(folder);
+    entries.push({ name: `${prefix}/`, mtime: stat.mtime, mode: 0o40755 });
+    for (const name of readdirSync(folder).sort()) {
+      if (isRoot && isExcluded(name)) continue;
+      if (isJunk(name)) {
+        skipped++;
+        continue;
+      }
+      const path = join(folder, name);
+      let entryStat;
+      try {
+        entryStat = statSync(path);
+      } catch {
+        continue; // a broken symlink
+      }
+      if (entryStat.isDirectory()) walk(path, `${prefix}/${name}`, false);
+      else if (entryStat.isFile()) {
+        entries.push({ name: `${prefix}/${name}`, data: readFileSync(path), mtime: entryStat.mtime, mode: 0o100000 | (entryStat.mode & 0o777) });
+      }
+    }
+  };
+  walk(dir, top, true);
+  return { entries, skipped };
+}
+
+/**
+ * Validate the manifest, refresh the vendored SDK bundle if the Add On carries one, and zip
+ * the folder into a `.lunaaddon` file for distribution: a zip holding the Add On folder
+ * (`<folder>/manifest.json`), the same as zipping it in the Finder or Explorer and renaming
+ * the `.zip`. Opening it in LUNA installs the Add On as a plain folder in LUNA's Add Ons
+ * folder. Dotfiles and OS metadata files are left out at every depth (see {@link isJunk}).
  */
 export async function pack(args: Args): Promise<number> {
   const dir = resolve(args.positional[0] ?? process.cwd());
-  const { entries } = readManifest(dir);
+  const { entries: addOns } = readManifest(dir);
   if (existsSync(join(dir, 'vendor', 'luna.global.js')) && !args.flags['no-vendor']) {
     vendorBundle(dir);
     console.log('Refreshed vendor/luna.global.js');
   }
   let out = resolve(flagString(args, 'out') ?? `${basename(dir)}.lunaaddon`);
   if (!out.endsWith('.lunaaddon')) out += '.lunaaddon';
+  const { entries, skipped } = collect(dir, basename(dir));
   rmSync(out, { recursive: true, force: true });
-  mkdirSync(out, { recursive: true });
-  let skipped = 0;
-  const filter = (src: string): boolean => {
-    if (!isJunk(basename(src))) return true;
-    skipped++;
-    return false;
-  };
-  for (const entry of readdirSync(dir)) {
-    if (isExcluded(entry) || !filter(join(dir, entry))) continue;
-    cpSync(join(dir, entry), join(out, entry), { recursive: true, dereference: true, filter });
-  }
-  console.log(`Packed ${entries.length} Add On(s) -> ${out}`);
+  writeFileSync(out, createZip(entries));
+  console.log(`Packed ${addOns.length} Add On(s) -> ${out}`);
   if (skipped) console.log(`Left out ${skipped} dotfile(s) and OS metadata file(s)`);
-  console.log(`Install by opening it in LUNA (double-click on macOS) or copying it into LUNA's Add Ons folder, or run: ua-builder install ${basename(dir)}`);
+  console.log(`Install by opening it in LUNA (double-click it), or run: ua-builder install ${basename(dir)}`);
   return 0;
 }

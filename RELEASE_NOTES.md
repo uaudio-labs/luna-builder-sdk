@@ -3,6 +3,12 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## Unreleased
+
+- `ua-builder pack` makes a `.lunaaddon` zip file again. Double-click it to install the Add On
+  in LUNA, where it lands as a plain folder. Sharing by hand is just zipping the Add On folder
+  and renaming the `.zip` to `.lunaaddon`.
+
 ## 0.1.0-alpha.5 — 2026-10-02
 
 - Added the `"editor"` Add On target, docked under LUNA's Timeline in place of the Clip Editor, with `ua-builder new --target editor`.

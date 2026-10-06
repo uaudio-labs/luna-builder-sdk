@@ -266,7 +266,7 @@ boot chatter (about 6 000 single updates per new session).
 | `new <name>` | Scaffolds an Add On from `templates/`: `manifest.json`, `index.html`, `main.ts`, a vitest test against `Luna.MockPort`, and a `CLAUDE.md` pointing at the skills. |
 | `serve` | Static server with COOP/COEP, serves the Add On and the SDK package, optional `--luna` proxy to `ws://localhost:4718`, optional `--engine-url`. |
 | `test` | Runs vitest. `--live` adds the LUNA lane, `--engine` adds the wasm lane. |
-| `pack` | Builds the IIFE and module bundles and copies the Add On folder into a `.lunaaddon` bundle (a folder with the extension) for distribution. |
+| `pack` | Builds the IIFE and module bundles and zips the Add On folder into a `.lunaaddon` file (a zip with the folder at its top) for distribution. |
 
 ## Testing
 

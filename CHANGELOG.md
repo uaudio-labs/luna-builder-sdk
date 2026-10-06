@@ -3,6 +3,18 @@
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
+## Unreleased
+
+Changed
+- `ua-builder pack` writes a `.lunaaddon` **zip file** again, holding the Add On folder
+  (`<folder>/manifest.json`), instead of a `.lunaaddon` bundle folder. Opening one in LUNA
+  (double-click on macOS or Windows) installs the Add On as a plain folder in LUNA's Add Ons
+  folder, with no `.lunaaddon` extension. To share an Add On by hand, zip its folder and rename
+  the `.zip` to `.lunaaddon`. The zip is written in Node, so it needs neither `zip` nor
+  PowerShell, and keeps dotfiles and OS metadata files out as before. A `.lunaaddon` bundle
+  folder from an earlier pack must be repacked; Add Ons already installed from one keep
+  working.
+
 ## 0.1.0-alpha.5
 
 Added
