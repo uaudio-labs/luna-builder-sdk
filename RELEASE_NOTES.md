@@ -3,7 +3,7 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
-## Unreleased
+## 0.1.0-alpha.6 — 2026-10-06
 
 - `ua-builder pack` makes a `.lunaaddon` zip file again. Double-click it to install the Add On
   in LUNA, where it lands as a plain folder. Sharing by hand is just zipping the Add On folder

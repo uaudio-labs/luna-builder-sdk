@@ -1,6 +1,6 @@
 {
     "package_name": "Builder SDK Examples",
-    "sdk_version": "0.1.0-alpha.5",
+    "sdk_version": "0.1.0-alpha.6",
     "min_luna_version": "1.9.0",
     "add_ons": [
         {

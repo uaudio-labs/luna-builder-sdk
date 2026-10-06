@@ -1,7 +1,7 @@
 # Variable: VERSION
 
 ```ts
-const VERSION: "0.1.0-alpha.5" = '0.1.0-alpha.5';
+const VERSION: "0.1.0-alpha.6" = '0.1.0-alpha.6';
 ```
 
 SDK version, kept in sync with package.json by the build.

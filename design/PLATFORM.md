@@ -1,6 +1,6 @@
 # LUNA Builder platform map
 
-Status: 2026-10-02, SDK 0.1.0-alpha.5. Internal, not shipped. Every piece of the builder
+Status: 2026-10-06, SDK 0.1.0-alpha.6. Internal, not shipped. Every piece of the builder
 platform, where it lives, and how the pieces connect. Architecture and decisions are in
 `DESIGN.md`; this page is the map, not the rationale.
 

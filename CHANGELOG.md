@@ -3,7 +3,7 @@
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
-## Unreleased
+## 0.1.0-alpha.6
 
 Changed
 - `ua-builder pack` writes a `.lunaaddon` **zip file** again, holding the Add On folder

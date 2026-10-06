@@ -49,4 +49,4 @@ export { isEmbeddedInLuna, locationOptions, hasNativeBridge, isLunaEnginePort } 
 export type { LocationOptions } from './client/detect';
 
 /** SDK version, kept in sync with package.json by the build. */
-export const VERSION = '0.1.0-alpha.5';
+export const VERSION = '0.1.0-alpha.6';
