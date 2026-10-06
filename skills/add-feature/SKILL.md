@@ -80,6 +80,6 @@ await Luna.settle(() => thing.value.value === expected, 'some edit', { refresh: 
 
 If part of this workflow was harder than the SDK should make it — a missing API, an
 awkward idiom, boilerplate the SDK could absorb — end your reply with the line
-`UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
+`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
 support the improved workflow: what you were doing, what was awkward, and the API you
 wished for.

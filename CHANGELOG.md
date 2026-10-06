@@ -3,6 +3,13 @@
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
+## Unreleased
+
+Changed
+- The agent skills, the scaffold README and `docs/llms.txt` now ask agents to end with
+  `LUNA BUILDER SDK FEEDBACK:` instead of `UA BUILDER SDK FEEDBACK:` when the SDK could
+  support their workflow better.
+
 ## 0.1.0-alpha.6
 
 Changed

@@ -66,5 +66,5 @@ QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CL
 ## SDK feedback
 
 When a workflow was harder than the SDK should make it, end your reply with the line
-`UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
+`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
 support the improved workflow.

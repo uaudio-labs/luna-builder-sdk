@@ -33,5 +33,5 @@ it falls back to LUNA on `localhost:4718`. To run on the in-page wasm engine ins
 `Luna.connect({ engine: 'wasm' })`.
 
 For coding agents: if the SDK made a workflow here harder than it should be, end your
-reply with the line `UA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to
+reply with the line `LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to
 update the SDK to support the improved workflow.
