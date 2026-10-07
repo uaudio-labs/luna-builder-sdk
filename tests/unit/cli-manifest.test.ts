@@ -46,6 +46,17 @@ describe('readManifest', () => {
     expect(() => readManifest(addOn({ manufacturer: 42 }))).toThrow(/"manufacturer" must be a string/);
   });
 
+  it('accepts a top-level string manufacturer in the add_ons shape, and rejects a non-string', () => {
+    const shape = (manufacturer: unknown): string => {
+      const dir = addOn({});
+      const entry = { id: 'com.example.a', title: 'A', html: 'index.html', width: 400, height: 300 };
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ manufacturer, add_ons: [entry] }));
+      return dir;
+    };
+    expect(readManifest(shape('Example Co')).manifest.manufacturer).toBe('Example Co');
+    expect(() => readManifest(shape(7))).toThrow(/top level: "manufacturer" must be a string/);
+  });
+
   it('accepts show_with_session true, false, or absent, and rejects a non-boolean', () => {
     expect(readManifest(addOn({ show_with_session: true })).entries[0]!.show_with_session).toBe(true);
     expect(readManifest(addOn({ show_with_session: false })).entries[0]!.show_with_session).toBe(false);

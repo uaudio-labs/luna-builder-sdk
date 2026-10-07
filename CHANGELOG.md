@@ -8,7 +8,8 @@ engine is versioned separately.
 Added
 - Optional `manufacturer` manifest field: who makes the Add On, shown by LUNA in the
   MANUFACTURER column of Settings > Add Ons. `ua-builder new --manufacturer "Name"` writes it,
-  and `ua-builder install` / `pack` reject a non-string value. The examples set it. LUNA reports
+  and `ua-builder install` / `pack` reject a non-string value. The examples set it. In the `add_ons` shape a top-level
+  `manufacturer` is the default for every entry without its own. LUNA reports
   it as the `manufacturer` property under `/gui/add_ons/<id>`, read as `manufacturer` on
   `luna.gui.addOns` items (`''` when the manifest has none).
 

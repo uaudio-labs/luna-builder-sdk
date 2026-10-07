@@ -105,6 +105,8 @@ export function addOnsFolder(): string {
 
 export interface Manifest {
   package_name?: string;
+  /** In the `add_ons` shape, the default for every entry without its own `manufacturer`. */
+  manufacturer?: string;
   add_ons?: ManifestEntry[];
   [k: string]: unknown;
 }
@@ -121,7 +123,7 @@ export interface ManifestEntry {
   floating?: boolean;
   show_with_session?: boolean;
   version?: string;
-  /** Who makes the Add On; LUNA shows it in Settings > Add Ons. */
+  /** Who makes the Add On; LUNA shows it in Settings > Add Ons. Overrides a top-level one. */
   manufacturer?: string;
   engines?: string[];
   [k: string]: unknown;
@@ -210,6 +212,9 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
   }
   const entries = Array.isArray(manifest.add_ons) ? manifest.add_ons : [manifest as unknown as ManifestEntry];
   const problems: string[] = [];
+  if (Array.isArray(manifest.add_ons) && manifest.manufacturer !== undefined && typeof manifest.manufacturer !== 'string') {
+    problems.push('top level: "manufacturer" must be a string');
+  }
   for (const [i, e] of entries.entries()) {
     const where = `entry ${i} (${e.id ?? 'no id'})`;
     for (const k of ['id', 'title'] as const) if (typeof e[k] !== 'string' || !e[k]) problems.push(`${where}: "${k}" must be a non-empty string`);

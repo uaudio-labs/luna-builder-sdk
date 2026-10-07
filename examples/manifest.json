@@ -2,12 +2,12 @@
     "package_name": "Builder SDK Examples",
     "sdk_version": "0.1.0-alpha.6",
     "min_luna_version": "1.9.0",
+    "manufacturer": "Universal Audio",
     "add_ons": [
         {
             "id": "com.uaudio.builder.arrangement",
             "title": "Clips and waveforms (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -20,7 +20,6 @@
             "id": "com.uaudio.builder.automation",
             "title": "Automation (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -33,7 +32,6 @@
             "id": "com.uaudio.builder.editor",
             "title": "Edit clips and notes (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -46,7 +44,6 @@
             "id": "com.uaudio.builder.import",
             "title": "Import and record (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -59,7 +56,6 @@
             "id": "com.uaudio.builder.inserts",
             "title": "Inserts (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -72,7 +68,6 @@
             "id": "com.uaudio.builder.jobs",
             "title": "Bounce and export (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -85,7 +80,6 @@
             "id": "com.uaudio.builder.mixer",
             "title": "Mixer (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna",
                 "wasm"
@@ -99,7 +93,6 @@
             "id": "com.uaudio.builder.pianoroll",
             "title": "Piano roll (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna",
                 "wasm"
@@ -113,7 +106,6 @@
             "id": "com.uaudio.builder.ruler",
             "title": "Ruler (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna",
                 "wasm"
@@ -127,7 +119,6 @@
             "id": "com.uaudio.builder.sends",
             "title": "Sends (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna"
             ],
@@ -140,7 +131,6 @@
             "id": "com.uaudio.builder.tracks",
             "title": "Tracks, raw wire (Builder)",
             "version": "0.1.0",
-            "manufacturer": "Universal Audio",
             "engines": [
                 "luna",
                 "wasm"

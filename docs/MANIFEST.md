@@ -47,6 +47,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 ```json
 {
     "package_name": "My Add Ons",
+    "manufacturer": "Example Audio",
     "add_ons": [
         { "id": "com.example.a", "title": "A", "html": "a/index.html", "local_content_offset": "..", "width": 800, "height": 500 },
         { "id": "com.example.b", "title": "B", "html": "b/index.html", "local_content_offset": "..", "target": "browser" }
@@ -56,7 +57,8 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 
 The presence of `add_ons` picks the shape. If it is there and is an array, its elements are
 the Add Ons and the top level is not one. If it is missing, the top-level object is the Add
-On. An `add_ons` that is present but not an array yields no Add Ons at all.
+On. An `add_ons` that is present but not an array yields no Add Ons at all. In this shape the
+only top-level field LUNA applies to the entries is `manufacturer`, as their default.
 
 One bad entry in an array is dropped without affecting the others.
 
@@ -82,7 +84,7 @@ size; see `width`, `height` below.
 | `floating` | boolean | `true` | `"window"` only: whether the window floats with LUNA's plugin windows or is an ordinary window. See below. |
 | `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
-| `manufacturer` | string | none | Who makes the Add On: your company or your own name. LUNA shows it in the **MANUFACTURER** column of **Settings > Add Ons**, where it also sorts and is matched by the search field; the column is blank without it. LUNA reports it as the `manufacturer` property under `/gui/add_ons/<id>` (`manufacturer` on `luna.gui.addOns` items in the SDK), `""` when there is none. A non-string value is ignored and never drops the entry. `ua-builder` rejects it. Set it per entry; in the `add_ons` shape a top-level `manufacturer` is not applied to the entries. |
+| `manufacturer` | string | none | Who makes the Add On: your company or your own name. LUNA shows it in the **MANUFACTURER** column of **Settings > Add Ons**, where it also sorts and is matched by the search field; the column is blank without it. LUNA reports it as the `manufacturer` property under `/gui/add_ons/<id>` (`manufacturer` on `luna.gui.addOns` items in the SDK), `""` when there is none. A non-string value is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value that is not a string is ignored. |
 | `icon` | string | none | Image path, resolved like `html`. Works for `url` entries too. See below. |
 | `local_content_offset` | string | none | `html` only. Relative path from the manifest folder to the folder your page loads resources from. See below. |
 
