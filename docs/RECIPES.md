@@ -129,7 +129,7 @@ Pointers for an agent that wants the shortest path. The API reference is `docs/a
 | 3 Arrangement | `session.playlists`, `Luna.clipAudio`, `Luna.Waveforms`, `Luna.audioNsAtTick`, `Luna.kindForScale`, `Luna.waveformColumns`, `Luna.waveformLanes`, `session.musical.timeline`; `examples/arrangement.html` |
 | 4 Markers and clips | `session.markers`, `clip.trim`, `session.moveClips`, `session.transaction`, `context.snapshot`/`restore`; `examples/editor.html` |
 | 5 Piano roll | `clip.midi.notes`, `midi.setVelocities`, `midi.setMuted`, `midi.deleteNotes`; `examples/pianoroll.html`, `examples/editor.html` |
-| 6 Tracking | `luna.audioInputs`, `session.record`, `track.recordEnabled`, `session.uploadFile`, `session.importFile`; `examples/import.html` |
+| 6 Tracking | `luna.audioInputs`, `session.record`, `track.recordEnabled`, `session.uploadFile` (a `File`), `session.importPath` (a path; see FILES.md); `examples/import.html` |
 | 7 Auto-pan | `control.automation` (`insert`/`clear`/`move`/`setValue`), `track.setAutomationMode`; `examples/automation.html` |
 | 8 Sends | `channel.outputs` (`assign`/`unassign`/`retarget`/`moveTo`), `output.controls`, `output.meter`; `examples/sends.html` |
 | 9 Scenes | `channel.controls`, `effect.controls`, `session.transaction`, browser `localStorage` |

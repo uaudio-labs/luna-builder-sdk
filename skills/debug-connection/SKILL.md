@@ -1,6 +1,6 @@
 ---
 name: debug-connection
-description: Diagnose a LUNA Add On that cannot connect, sees no updates, gets timeouts, or behaves differently inside LUNA than in a browser. Use when Luna.connect fails, props stay undefined, or pushes never arrive.
+description: Diagnose a LUNA Add On that cannot connect, sees no updates, gets timeouts, or behaves differently inside LUNA than in a browser. Use when Luna.connect fails, props stay undefined, pushes never arrive, or a file picker or drop does nothing inside LUNA.
 ---
 
 # Debug a connection
@@ -60,6 +60,20 @@ luna.raw.subscribe('/sessions/<uid>', (e) => console.log(e.path, e.operation ?? 
 `luna.raw` sends any verb and `luna.raw.subscribe` shows every push, so a few lines in
 the page's console answer most questions about what the engine is actually sending.
 `docs/PROTOCOL.md` has the message shapes; `docs/EVIDENCE.md` has the measured quirks.
+
+## 7. Files do not arrive inside LUNA
+
+Works in a browser, nothing inside LUNA? See docs/FILES.md, "Inside LUNA today".
+
+- File picker opens nothing, and its `cancel` fires at once: LUNA 3.1.0.4589 and earlier
+  (fact 104). Offer an HTML drop zone, or `luna.gui.chooseFiles()` + `session.importPath()`.
+- HTML `drop` carries no files: a `Luna.onPathDrop` handler is registered, so LUNA delivers
+  paths instead (fact 102). Unsubscribe it, or handle the paths.
+- `onPathDrop` worked, then stopped after the window was reopened: fact 105. Drops arrive
+  as HTML drops then; handle both.
+- `fetch` of a `chooseFiles` path fails: by design. Pass it to `session.importPath()`.
+- `uploadFile` resolved to an older source: the bytes were already in the session (fact 42).
+- `chooseFiles` or `importFile` rejects `unsupported`: no `/gui` (headless or wasm engine).
 
 ## SDK feedback
 

@@ -1,7 +1,8 @@
 /** `ua-builder probe`: argument handling and the default expressions. Driving Chrome is not
  * unit-testable; the CDP plumbing mirrors tests/engine/run.mjs, which the engine lane runs. */
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_EXPR, DEFAULT_WAIT, LOADED_GATE, PAINTED, mockUrl, probe } from '../../cli/probe';
+import { DEFAULT_EXPR, DEFAULT_WAIT, FAKE_LUNA_BRIDGE, FILE_HELPERS, LOADED_GATE, PAINTED, mockUrl, probe } from '../../cli/probe';
+import { Luna } from '../../src/index';
 import { parseArgs } from '../../cli/util';
 
 describe('ua-builder probe', () => {
@@ -34,5 +35,30 @@ describe('ua-builder probe', () => {
 
   it('waits two animation frames before a screenshot, so a canvas has painted', () => {
     expect(PAINTED.match(/requestAnimationFrame/g)).toHaveLength(2);
+  });
+
+  it('installs file helpers that parse as a script', () => {
+    expect(() => new Function(FILE_HELPERS)).not.toThrow();
+    expect(FILE_HELPERS).toContain("new DragEvent(type, { dataTransfer, bubbles: true, cancelable: true })");
+  });
+
+  it('fakes LUNA’s bridge: path drops reach Luna.onPathDrop only after the page opts in', () => {
+    const g = globalThis as { lunaAPI?: unknown; lunaHost?: unknown; LunaProbe?: { dropPaths(p: string[], x?: number, y?: number): boolean; acceptsPathDrops: boolean } };
+    try {
+      new Function(FAKE_LUNA_BRIDGE)();
+      expect(Luna.canDropPaths()).toBe(true);
+      expect(g.LunaProbe!.dropPaths(['/a.wav'])).toBe(false); // not opted in: LUNA leaves it to HTML
+      const drops: unknown[] = [];
+      const stop = Luna.onPathDrop((d) => drops.push(d));
+      expect(g.LunaProbe!.acceptsPathDrops).toBe(true);
+      expect(g.LunaProbe!.dropPaths(['/a.wav'], 3.6, 4.2)).toBe(true);
+      expect(drops).toEqual([{ paths: ['/a.wav'], x: 4, y: 4 }]);
+      stop();
+      expect(g.LunaProbe!.acceptsPathDrops).toBe(false);
+    } finally {
+      delete g.lunaAPI;
+      delete g.lunaHost;
+      delete g.LunaProbe;
+    }
   });
 });

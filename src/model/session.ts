@@ -13,7 +13,7 @@
  */
 import type { Client } from '../client/client';
 import { derived, type Prop, type WritableProp } from '../store/prop';
-import { UAError } from '../wire/errors';
+import { UAError, Unsupported } from '../wire/errors';
 import type { Unsubscribe } from '../wire/port';
 import { AudioSource } from './audio-source';
 import { Bus } from './bus';
@@ -68,6 +68,13 @@ export interface UploadOptions {
   /** Called after each chunk with the bytes sent so far and the total. */
   onProgress?: (sent: number, total: number) => void;
   /** How long to wait for the workspace to list the finished source. Default 30 000 ms. */
+  timeoutMs?: number;
+}
+
+export interface ImportPathOptions {
+  /** Name to store the source under. Default: the file name from `path`. */
+  name?: string;
+  /** How long to wait for the workspace to list the new source. Default 30 000 ms. */
   timeoutMs?: number;
 }
 
@@ -431,11 +438,24 @@ export class Session extends Node {
    * this session's package as a new audio source, and resolve to it once the workspace
    * lists it (fact 42).
    *
+   * This is the **File route**, and the one that works everywhere: in LUNA, in a browser and
+   * on the wasm engine, with no `/gui`. Get the `File` from `<input type="file">` or an HTML
+   * `drop` event; the page can decode and audition the same `File` too. When the page only
+   * needs the file in the session and has an engine-readable path (from
+   * `luna.gui.chooseFiles()` or `Luna.onPathDrop()`), {@link importPath} is the faster path
+   * route: nothing is copied through the page.
+   *
    * The bytes go up base64-encoded in `chunkBytes` pieces through the engine's
    * `begin`/`transfer`/`end` phases, with `onProgress` after each chunk. A failed transfer
    * is cancelled, so a half-written file is not left behind. No clip is made: pass the
-   * returned source's `id` to {@link insertClip} for that. Use {@link importFile} instead
+   * returned source's `id` to {@link insertClip} for that. LUNA files identical bytes only
+   * once: uploading a file already in the session resolves to that source (fact 42). Use
+   * {@link importFile} instead
    * when LUNA can already read the path itself.
+   *
+   * In LUNA 3.1.0.4589 and earlier `<input type="file">` opens nothing (fact 104), so offer an
+   * HTML drop zone as well: `zone.ondrop = (e) => { e.preventDefault(); load(e.dataTransfer.files[0]); }`
+   * with `zone.ondragover = (e) => e.preventDefault()`.
    *
    * @example
    * const source = await session.uploadFile({
@@ -461,28 +481,31 @@ export class Session extends Node {
     const begun = (await post({ phase: 'begin', name })) as { uid?: string } | null;
     const uid = begun?.uid;
     if (typeof uid !== 'string') throw new UAError('invalid_response', 'uploadFile(): import_file begin answered without a uid', { path: '/workspace/import_file' });
+    let ended: { uid?: unknown } | null;
     try {
       for (let offset = 0; offset < data.length; offset += chunk) {
         await post({ phase: 'transfer', uid, file_data: base64(data.subarray(offset, offset + chunk)) });
         options.onProgress?.(Math.min(data.length, offset + chunk), data.length);
       }
-      await post({ phase: 'end', uid, name });
+      ended = (await post({ phase: 'end', uid, name })) as { uid?: unknown } | null;
     } catch (err) {
       await post({ phase: 'cancel', uid, name }).catch(() => undefined);
       throw err;
     }
-    return this.listedSource(uid, options.timeoutMs ?? 30_000);
+    // Bytes already in the session are not filed again: `end` names the existing source.
+    const filed = typeof ended?.uid === 'string' && ended.uid ? ended.uid : uid;
+    return this.listedSource(filed, options.timeoutMs ?? 30_000);
   }
 
   /** Wait for `uid` to appear in the workspace audio folder, re-reading it while waiting. */
   private async listedSource(uid: string, timeoutMs: number): Promise<AudioSource> {
     const sources = this.sources;
-    if (!sources) throw new UAError('unavailable', 'uploadFile(): the session package uid went away', { path: this.path });
+    if (!sources) throw new UAError('unavailable', 'the session package uid went away during an import', { path: this.path });
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const found = sources.byId(uid);
       if (found) return found;
-      if (Date.now() > deadline) throw new UAError('no_effect', `uploadFile(): the workspace did not list source ${uid} within ${timeoutMs} ms`, { path: sources.path });
+      if (Date.now() > deadline) throw new UAError('no_effect', `the workspace did not list source ${uid} within ${timeoutMs} ms`, { path: sources.path });
       // Collection.load() is once-only, so re-read the folder itself and resync the members.
       await this.client.store.load(sources.path, { levels: 2, commands: false, flatvalue: true });
       if (sources.refresh().some((s) => s.id === uid)) continue;
@@ -490,8 +513,57 @@ export class Session extends Node {
     }
   }
 
-  /** Import an audio, MIDI or video file at the selection start, onto `trackUid` or a new track. */
-  importFile(path: string, trackUid?: string): Promise<unknown> {
+  /**
+   * Copy a file the engine can read from disk into this session's package as a new audio
+   * source, and resolve to it once the workspace lists it (fact 42, `local_copy`). No clip
+   * is made: pass the source's `id` to {@link insertClip}.
+   *
+   * This is the **path route**, an optimization: the engine reads `path` itself, so the bytes
+   * never pass through the page. Take the path from `luna.gui.chooseFiles()` or
+   * `Luna.onPathDrop()`. It needs no `/gui`, but the engine must see the file: a native
+   * engine on the same machine, not the wasm engine. A path the engine cannot open rejects
+   * with LUNA's `device.database_error`. For a browser `File`, use {@link uploadFile}.
+   *
+   * @example
+   * const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
+   * if (path) {
+   *   const source = await session.importPath(path);
+   *   await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
+   * }
+   */
+  async importPath(path: string, options: ImportPathOptions = {}): Promise<AudioSource> {
+    await this.ready();
+    const sources = this.sources;
+    if (!sources) throw new UAError('unavailable', 'importPath(): the session package uid is not known yet', { path: this.path });
+    const name = options.name ?? path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+    if (!name) throw new UAError('out_of_range', `importPath(): no file name in ${JSON.stringify(path)}`, { path: this.path });
+    const reply = (await this.wire.post('/workspace/import_file', {
+      session_package_uid: this.sessionPackageUid.value,
+      type: 'audio',
+      import_id: Math.floor(Math.random() * 0x7fffffff),
+      phase: 'local_copy',
+      path,
+      name,
+    })) as { uid?: unknown } | null;
+    const uid = reply?.uid;
+    if (typeof uid !== 'string') throw new UAError('invalid_response', 'importPath(): import_file local_copy answered without a uid', { path: '/workspace/import_file' });
+    return this.listedSource(uid, options.timeoutMs ?? 30_000);
+  }
+
+  /**
+   * LUNA's own import: the File > Import action. Imports an audio, MIDI or video file at
+   * the selection start, onto `trackUid` or a new track, making a clip as LUNA does.
+   *
+   * A **path route** command run by LUNA's UI, so it needs `/gui`: without it (a headless or
+   * wasm engine) it rejects with `Luna.Unsupported` (fact 103). To add a source without a
+   * clip, or without `/gui`, use {@link importPath}; for a browser `File`, {@link uploadFile}.
+   *
+   * @example
+   * const [path] = await luna.gui.chooseFiles({ filters: ['*.wav', '*.mid'] });
+   * if (path) await session.importFile(path, track.id);
+   */
+  async importFile(path: string, trackUid?: string): Promise<unknown> {
+    if (!(await this.client.gui.available())) throw new Unsupported('importFile(): LUNA imports through its UI, and this engine has no /gui. Use session.importPath(), or session.uploadFile() for a File.');
     const payload: Record<string, unknown> = { path };
     if (trackUid !== undefined) payload['track_uid'] = trackUid;
     return this.post('import_files', payload);
@@ -747,13 +819,14 @@ async function toBytes(input: Blob | ArrayBuffer | Uint8Array): Promise<Uint8Arr
   return new Uint8Array(await input.arrayBuffer());
 }
 
-/** A browser `File` carries its own name; a bare Blob or buffer does not. */
+/**
+ * A browser `File` carries its own name; a bare Blob or buffer does not. Read by shape, not
+ * `instanceof`, so a `File` from another realm (an iframe, a test DOM) keeps its name.
+ */
 function fileName(input: Blob | ArrayBuffer | Uint8Array): string | undefined {
-  if (typeof Blob !== 'undefined' && input instanceof Blob && 'name' in input) {
-    const name = (input as { name: unknown }).name;
-    return typeof name === 'string' && name ? name : undefined;
-  }
-  return undefined;
+  if (input instanceof ArrayBuffer || ArrayBuffer.isView(input)) return undefined;
+  const name = (input as { name?: unknown }).name;
+  return typeof name === 'string' && name ? name : undefined;
 }
 
 function base64(bytes: Uint8Array): string {

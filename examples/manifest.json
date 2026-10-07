@@ -41,6 +41,19 @@
             "height": 820
         },
         {
+            "id": "com.uaudio.builder.files",
+            "title": "File routes (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna",
+                "wasm"
+            ],
+            "html": "files.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 900
+        },
+        {
             "id": "com.uaudio.builder.import",
             "title": "Import and record (Builder)",
             "version": "0.1.0",

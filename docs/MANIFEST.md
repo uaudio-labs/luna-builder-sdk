@@ -239,9 +239,10 @@ source folder has a working name you would not want shown there (`add-ons` → `
   script-tag bundle (`vendor/luna.global.js`).
 - A `url` page is loaded from your server, so normal web rules apply (CORS, mixed content).
 
-The native bridge is minimal: `window.lunaAPI.setAcceptsFileDrops(bool)` and the
-`window.lunaHost.fileDrag*`/`filesDropped` callbacks for file drag and drop. Everything else
-goes over the engine connection, including LUNA UI actions through `luna.gui`.
+The native bridge is minimal: native file drops, which deliver absolute **paths** rather
+than `File`s. Use it through `Luna.onPathDrop()`, not directly; without it, file drops reach the
+page as ordinary HTML `drop` events with `File`s. See [FILES.md](FILES.md) for which to use.
+Everything else goes over the engine connection, including LUNA UI actions through `luna.gui`.
 
 ## Checklist
 

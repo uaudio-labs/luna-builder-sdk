@@ -33,7 +33,9 @@ Distributed SDK packages arrive already built and skip this step.
 ## Build an Add On
 
 Read `docs/QUICKSTART.md` first, then `docs/RECIPES.md` for eleven Add Ons worth asking an
-agent for. `docs/api/` is the generated reference, `docs/llms.txt`
+agent for. An Add On that loads the user's files should read `docs/FILES.md`: a `File` for the
+page and a path for LUNA are two separate routes, and LUNA 3.1.0.4589 has no working file
+picker. `docs/api/` is the generated reference, `docs/llms.txt`
 the index for coding agents, and `skills/` holds shared Claude Code and Codex skills for creating, extending,
 testing and debugging Add Ons. From this folder:
 
@@ -153,7 +155,7 @@ const luna = await Luna.connect({ port_: engine.port() });
 src/          the SDK source; everything public is exported from src/luna.ts as Luna.<Name>
 cli/          ua-builder new/serve/install/pack/doctor, built to dist/cli.js
 tests/        vitest: unit (Luna.MockEngine), live (a running LUNA), engine (wasm in Chrome)
-docs/         QUICKSTART.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
+docs/         QUICKSTART.md, FILES.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
 skills/       create-add-on, add-feature, test-add-on, debug-connection, port-to-wasm, verify-add-on
 templates/    add-on-basic scaffold
 examples/     addon (master mute), mixer, inserts, ruler, sends, tracks (raw wire), plus

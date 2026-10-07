@@ -97,6 +97,7 @@
 | [Gesture](interfaces/Gesture.md) | - |
 | [GestureOptions](interfaces/GestureOptions.md) | - |
 | [GetOptions](interfaces/GetOptions.md) | Query parameters accepted by `get`, in camelCase. Booleans become `1`/`0` on the wire. See `hbsystem/networking/docs/operations.md`. |
+| [ImportPathOptions](interfaces/ImportPathOptions.md) | - |
 | [List](interfaces/List.md) | An observable ordered collection with id lookup. |
 | [Location](interfaces/Location.md) | The `location` property of a session. |
 | [LocationOptions](interfaces/LocationOptions.md) | - |
@@ -104,6 +105,7 @@
 | [MidiHost](interfaces/MidiHost.md) | What a MIDI edit needs to reach LUNA's edit context: the session it lives in, the playlist that holds the clip, and the clip's own start tick (the selection is in absolute ticks). |
 | [MidiRow](interfaces/MidiRow.md) | One row of a clip's MIDI table: a single MIDI message at a clip-relative tick. |
 | [MidiRowData](interfaces/MidiRowData.md) | The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). |
+| [MockEngineOptions](interfaces/MockEngineOptions.md) | - |
 | [MockMidiRow](interfaces/MockMidiRow.md) | A row for [MockEngine.midiEdit](classes/MockEngine.md#midiedit). |
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
 | [NewBusOptions](interfaces/NewBusOptions.md) | - |
@@ -116,6 +118,8 @@
 | [OverviewOptions](interfaces/OverviewOptions.md) | - |
 | [PairRange](interfaces/PairRange.md) | - |
 | [ParsedChord](interfaces/ParsedChord.md) | A chord name split the way LUNA spells chords: root, type suffix, slash bass. |
+| [PathDrop](interfaces/PathDrop.md) | Where a native drag is, in page pixels, and the absolute paths it carries. |
+| [PathDropHandlers](interfaces/PathDropHandlers.md) | - |
 | [PluginManifest](interfaces/PluginManifest.md) | - |
 | [Port](interfaces/Port.md) | A connection to one engine. |
 | [PresetQueryOptions](interfaces/PresetQueryOptions.md) | - |
@@ -232,6 +236,7 @@
 | [bindRange](functions/bindRange.md) | Bind a native `<input type="range">` to `control`: touch on press, write on `input`, follow LUNA outside a drag, settle on LUNA's value on release, double-click to reset. Keyboard changes the browser makes are one-shot writes, which the control brackets itself. |
 | [bindShortcuts](functions/bindShortcuts.md) | Give an Add On LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind its own key handling. |
 | [bootWasmEngine](functions/bootWasmEngine.md) | Load and boot the engine once per page. Resolves when the services report `running`. Rejects with `Luna.Error` code `engine_boot` on failure or timeout. |
+| [canDropPaths](functions/canDropPaths.md) | True when native path drops can be used: the page is in LUNA's webview, which publishes `window.lunaAPI.setAcceptsFileDrops`. False in a browser, on the wasm engine and in tests. |
 | [clients](functions/clients.md) | Every [Client](classes/Client.md) this page has made and not closed, in creation order. A tooling hook: `ua-builder probe` waits on `Luna.clients().some((c) => c.connected)` to know an Add On's page has finished connecting before it reads the DOM. |
 | [clipAudio](functions/clipAudio.md) | Which audio a clip plays, or `undefined` when there is nothing safe to draw: no source, or a render LUNA has named but not yet announced. In that second case draw the clip's outline rather than the unstretched original at the wrong scale. |
 | [clipTypeFrom](functions/clipTypeFrom.md) | The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. |
@@ -258,6 +263,7 @@
 | [locationOptions](functions/locationOptions.md) | `host` and `port` from the page URL, if present. |
 | [midiByte](functions/midiByte.md) | A 7-bit MIDI value, or `out_of_range`. `min` is 1 for a velocity that must sound. |
 | [normalizeChordName](functions/normalizeChordName.md) | LUNA stores `♭` and `♯` as ASCII `b` and `#` (fact 100); the SDK compares names the same way. |
+| [onPathDrop](functions/onPathDrop.md) | Receive files dropped on the page as **absolute paths** (LUNA only). Resolves nothing and reads nothing: pass the paths to `session.importPath()`, which has the engine read them from disk. Returns an unsubscribe; once the last handler is gone, LUNA hands file drags back to the page's HTML `drop` events. |
 | [pairNotes](functions/pairNotes.md) | Pair note-on rows with the next note-off of the same channel and pitch, in tick order. Pure, and exported because a page that draws its own lanes often wants it directly. |
 | [pairNs](functions/pairNs.md) | Nanoseconds one pair of this analysis covers. |
 | [pairRange](functions/pairRange.md) | The overview pairs covering `[startNs, stopNs)` of a source. Both are file offsets, never timeline ticks. |

@@ -66,6 +66,12 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
   (`navigator.requestMIDIAccess()`) in the page; sending MIDI is up to the Add On. Do not try
   to stream through the SDK or `luna.raw`.
 - Do not use `<script type="module">` in the page; Windows loads Add Ons from `file://`.
+- Loading a user's file (docs/FILES.md): if the page needs the audio, use
+  `<input type="file">` or an HTML `drop` and `session.uploadFile()`. Never take a path from
+  `luna.gui.chooseFiles()` and try to read it; those paths are only for `session.importPath()`.
+  Always include an HTML drop zone: in LUNA 3.1.0.4589 and earlier a file picker opens
+  nothing (docs/FILES.md, "Inside LUNA today").
+- Guard every `luna.gui` call with `await luna.gui.available()`; `/gui` is absent off LUNA.
 
 ## Verify
 

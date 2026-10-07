@@ -26,7 +26,7 @@ skills/         the six skills above
 templates/      add-on-basic — what `ua-builder new` copies
 examples/       addon (master mute), mixer, inserts, ruler, sends, automation, jobs,
                 import, pianoroll, arrangement, editor, tracks, and the check-*.mjs probes
-docs/           QUICKSTART, RECIPES, MANIFEST, PROTOCOL, EVIDENCE, tree/ (a LUNA tree shape snapshot)
+docs/           QUICKSTART, FILES, RECIPES, MANIFEST, PROTOCOL, EVIDENCE, tree/ (a LUNA tree shape snapshot)
 scripts/        vendor-sdk.mjs — copy the script-tag bundle into an Add On folder
 ```
 

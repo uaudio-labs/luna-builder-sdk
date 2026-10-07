@@ -28,7 +28,7 @@ export { WasmPort, wasmUpdateToEvent } from './wire/wasm-port';
 export type { WasmPortOptions } from './wire/wasm-port';
 export { WasmEngine, bootWasmEngine } from './engine/loader';
 export type { WasmState, BootOptions, AudioHealth, WasmModule, WasmHooks, ModuleFactory } from './engine/loader';
-export type { MockNodeSpec, CommandHandler, MockMidiRow } from './wire/mock-port';
+export type { MockNodeSpec, CommandHandler, MockMidiRow, MockEngineOptions } from './wire/mock-port';
 export { expandMulti } from './wire/multi';
 export { encodeRequest, decodeMessage, encodePayload, float, FloatLiteral } from './wire/codec';
 
@@ -47,6 +47,8 @@ export { Client, clients } from './client/client';
 export type { Engine } from './client/client';
 export { isEmbeddedInLuna, locationOptions, hasNativeBridge, isLunaEnginePort } from './client/detect';
 export type { LocationOptions } from './client/detect';
+export { onPathDrop, canDropPaths } from './client/path-drop';
+export type { PathDrop, PathDropHandlers } from './client/path-drop';
 
 /** SDK version, kept in sync with package.json by the build. */
 export const VERSION = '0.1.0-alpha.6';

@@ -3,6 +3,21 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## Unreleased
+
+- New `docs/FILES.md`: the two ways a user's file reaches an Add On. A `File` the page can
+  decode comes from `<input type="file">` or an HTML drop and goes into the session with
+  `session.uploadFile()`; a path from `luna.gui.chooseFiles()` or the new `Luna.onPathDrop()`
+  is for the new `session.importPath()`, which has LUNA copy the file without it passing
+  through the page.
+- In LUNA 3.1.0.4589 on macOS a file picker opens nothing and path drops stop after an Add On
+  window is reopened; `docs/FILES.md` says what to offer instead.
+- Added `luna.gui.available()`; without LUNA's UI (headless or wasm) `luna.gui` commands now
+  fail at once with `Luna.Unsupported`.
+- Fixed `session.uploadFile()` timing out when the same audio was already in the session.
+- New example `files.html` tries every file route inside LUNA; `ua-builder probe` can drop and
+  pick files (`LunaProbe`) and fake LUNA's path drops (`--luna-bridge`).
+
 ## 0.1.0-alpha.6 — 2026-10-06
 
 - `ua-builder pack` makes a `.lunaaddon` zip file again. Double-click it to install the Add On

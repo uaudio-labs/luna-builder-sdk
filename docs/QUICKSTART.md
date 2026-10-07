@@ -237,12 +237,12 @@ Luna.clipAudio(take, session.sources);                     // drawable straight 
 ```js
 const recent = await luna.workspace.recent(10);    // [{ uid, name, path, online, lastOpened, ... }]
 await luna.sessions.open(recent[0].uid);
-const files = await luna.gui.chooseFiles({ filters: ['*.wav'], allowMultiple: true });
+const paths = (await luna.gui.available()) ? await luna.gui.chooseFiles() : []; // paths, not Files
 await luna.gui.setPage('mixer'); await luna.gui.openUrl(url); await luna.gui.revealPath(path);
 const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
 ```
 
-`luna.gui` exists only inside LUNA; `luna.drivers`, `.preferences`, `.jobs`, `.renders` cover the rest.
+`/gui` is absent on headless and wasm engines. Getting a user's file in: [FILES.md](FILES.md).
 
 ## 12. Escape hatch
 
@@ -291,8 +291,8 @@ page on `?engine=mock` with no LUNA: a demo session, or `--mock fixture.js` sett
 ## 15. Inside LUNA vs a browser vs wasm
 
 LUNA adds `?port=` (`Luna.isEmbeddedInLuna()`); a browser reaches LUNA on localhost, or
-`?engine=wasm` / `?engine=mock`. Windows loads Add Ons from `file://`, so use the script-tag
-bundle, not `<script type="module">`. The WebSocket has no auth; any webview page controls LUNA.
+`?engine=wasm`/`?engine=mock`. Windows loads Add Ons from `file://`: use the script-tag bundle.
+The WebSocket has no auth. Files differ most: [FILES.md](FILES.md), "Inside LUNA today".
 
 ## 16. Units, in one line
 

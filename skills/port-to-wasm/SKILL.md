@@ -45,7 +45,9 @@ page (or reverse-proxy them) and set `engineUrl`.
   `contextState` (1 = running), `callbacks`, `underruns`, `peak`.
 - **Microphone** is `luna.wasm.requestAudioInput()`; needs https or localhost.
 - **Absent services**: licensing/auth, ARA, analysis providers, assistant, video, and the
-  whole `luna.gui` host surface (no LUNA). Guard with `luna.engine === 'wasm'`.
+  whole `/gui` host surface (no LUNA): `luna.gui.available()` is false and its commands reject
+  with `Luna.Unsupported`. So is the path route for files (`chooseFiles`, `onPathDrop`,
+  `importPath`): load files as `File`s and `session.uploadFile()` them (docs/FILES.md).
 - **Boot once per page**: shutdown is terminal; reload to boot again.
 - **Engine differences** (see EVIDENCE facts 6, 10, 13, 35-38): a missing path is an error
   (`uasrv.invalid_object`) rather than `{}`; the writer's own `set` is echoed; adds carry the

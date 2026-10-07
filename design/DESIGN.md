@@ -220,8 +220,18 @@ Conventions applied during the port (from `uanet-clients/docs/api-codeability-re
 | `engines` | `["luna"]`, `["wasm"]`, or both. Declares what the page supports. |
 
 Host detection stays as today: `?port=` on the URL means inside LUNA;
-`window.lunaAPI` / `window.lunaHost` are the only native bridge and are wrapped
-by `Luna.Host` (drag and drop, `isEmbedded`).
+`window.lunaAPI` / `window.lunaHost` are the only native bridge (native file drops, fact 102),
+wrapped by `Luna.onPathDrop` / `Luna.canDropPaths`.
+
+Files reach an Add On by two routes that are never mixed (docs/FILES.md, decided for
+NEXT-2346). The **File route** is the web's: `<input type="file">` and HTML drops give `File`s,
+and `session.uploadFile` copies the bytes into the session; it works on every engine. The
+**path route** is a LUNA optimization: `luna.gui.chooseFiles` and `Luna.onPathDrop` give
+engine-readable paths that the page cannot read, and only feed `session.importPath`
+(`local_copy`) or `session.importFile` (LUNA's import). There is deliberately no way to read a
+picked path from the page (no `chooseFiles({ read })`, no picked-file URL scheme). `/gui` is
+absent off LUNA (fact 103): `luna.gui.available()` says so, and `luna.gui` commands and
+`importFile` reject with `Unsupported` instead of timing out.
 
 Security note for third-party docs: the LUNA WebSocket has no authentication and
 a manifest `url` entry receives the port. Any page loaded in the Add On webview

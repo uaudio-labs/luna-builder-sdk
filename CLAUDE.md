@@ -70,8 +70,9 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 - Skills must resolve the plugin root relatively (two directories above the `SKILL.md`) and
   work both ways: `npx ua-builder` in a project, `node <plugin-root>/sdk/cli.js` in the
   plugin. `sync-plugin.mjs` inserts that note; do not write it into the originals.
-- A new skill, example, template file or consumer doc is picked up automatically by the
-  sync; a new *build artefact* needs adding to `BUILDS` in `scripts/sync-plugin.mjs`.
+- A new skill, example or template file is picked up automatically by the sync; a new
+  consumer doc needs adding to `DOCS`, and a new *build artefact* to `BUILDS`, in
+  `scripts/sync-plugin.mjs`.
 
 ## Commands
 

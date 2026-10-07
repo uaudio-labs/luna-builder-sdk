@@ -13,6 +13,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 ## Docs
 
 - [Quickstart](QUICKSTART.md): connect, session, props, tracks, controls, clips, effects, markers, chords, workspace, gui, errors, testing.
+- [Files](FILES.md): getting a user's file into an Add On. File route (`<input type="file">`, HTML drop, `uploadFile`) vs path route (`chooseFiles`, `onPathDrop`, `importPath`); never mix them.
 - [Recipes](RECIPES.md): eleven Add Ons to ask an agent for, and the SDK each one leans on.
 - [Manifest](MANIFEST.md): `manifest.json` fields (`target`, `floating`, `show_with_session`, ...), Add Ons folder, how LUNA loads a page.
 - [Protocol](PROTOCOL.md): verbs, paths, correlation, pushes, error codes, where things live.
@@ -34,7 +35,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 
 These six ship as the `ua-luna-builder` plugin (`plugins/ua-luna-builder/`), which also
 carries the SDK builds, the `ua-builder` CLI, the add-on-basic template, the examples and
-QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CLI as
+QUICKSTART/FILES/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CLI as
 `node <plugin-root>/sdk/cli.js <command>` instead of `npx ua-builder <command>`.
 
 ## Rules of thumb
@@ -47,7 +48,8 @@ QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CL
 - Timeline = ticks (96e9 per beat); source offsets = nanoseconds. No conversion in the SDK.
 - Effect bypass is `slot.setIn(bool)`, not the `enabled` property.
 - MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addNotes` (many notes, one undo step)/`addMidi`. These are clip edits, not a live stream: live MIDI input comes from Web MIDI, not the SDK.
-- Upload a browser file with `session.uploadFile({ bytes, name, onProgress })`; `session.importFile(path)` is for a path LUNA can read.
+- Files (FILES.md): if the page needs the audio, use `<input type="file">` or an HTML `drop`, which give `File`s in LUNA and a browser alike, then `session.uploadFile({ bytes: file })`. `luna.gui.chooseFiles()` and `Luna.onPathDrop()` give **paths the page cannot read**; they only feed `session.importPath(path)` (a source) or `session.importFile(path)` (LUNA's import, with a clip), an optimization that skips copying through the page. Never `chooseFiles` and then try to `fetch` the path. In LUNA 3.1.0.4589 and earlier (macOS) `<input type="file">` opens nothing (its `cancel` fires at once) and path drops stop after the Add On window is reopened (facts 104-105): always offer an HTML drop zone, and `chooseFiles` + `importPath` for paths.
+- `/gui` is absent on headless and wasm engines: check `luna.gui.available()`; without it every `luna.gui` command and `importFile` reject with `Luna.Unsupported`.
 - Sends are outputs: `channel.outputs.byId('send_0')`, with `assign`/`unassign`/`retarget`/`moveTo`. Assign appends, so use `retarget` to replace (fact 43). Read `send.destinations` (each has the assignment `uid` that `unassign` takes, `busUid`, `name`, `error`), not the raw `assignments` rows (fact 83).
 - Pan is `pan` on a mono channel and `pan_left`/`pan_right` on a stereo one (fact 84): use `output.pans` (or `panLeft`/`panRight`); `output.pan` is the left one on stereo.
 - Automation values go on the wire as float literals (`Luna.float`), because LUNA stores a bare whole number as 0 (fact 82). `lane.insert`/`setValue`/`move`/`clear` resolve once the lane shows the edit.
@@ -60,7 +62,7 @@ QUICKSTART/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CL
 - `Luna.settle(predicate, what, { refresh })` is how to wait for an edit: LUNA answers `null` whether or not it happened (fact 71).
 - Timeline conversions: `tickAtBar`, `tickAt({bar,beat,tick})`, `barBeat(tick)`, `seconds(tick)`, `tickAtSeconds(s)`, `formatBarBeat(tick)`; `timeline.onChange` fires on tempo or meter edits. `barBeat().tick` is engine ticks: pass it to `Luna.formatBarBeat` unconverted. `marker.barBeat` / `marker.seconds` are derived props that follow the marker and the tempo map.
 - Folders outside a session (`/renders`, `/jobs`, `/plugins`) need `collection.watch()` before they follow pushes (fact 34).
-- Wasm: `Luna.connect({ engine: 'wasm' })` or `?engine=wasm`; no session at boot; `luna.wasm.resumeAudio()` after a click; no `luna.gui`.
+- Wasm: `Luna.connect({ engine: 'wasm' })` or `?engine=wasm`; no session at boot; `luna.wasm.resumeAudio()` after a click; no `/gui` (`luna.gui.available()` is false) and no path route: use `File`s and `uploadFile`.
 - Tests: `Luna.MockEngine`, `await engine.settled()`, `await luna.settled()`.
 
 ## SDK feedback

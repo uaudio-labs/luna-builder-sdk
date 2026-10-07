@@ -12,7 +12,8 @@
  * - a write to one view of a control (`value`, `real_value`, `normalized_value`,
  *   `string_value`) re-derives the other three and pushes them to every port, the writer
  *   included (fact 97); the mappings are the mock's documented stand-ins, not LUNA's;
- * - pushes are delivered on a later macrotask, never synchronously; `await engine.settled()`.
+ * - pushes are delivered on a later macrotask, never synchronously; `await engine.settled()`;
+ * - `new MockEngine({ gui: false })` has no `/gui`, like a headless or wasm engine (fact 103).
  *
  * @example
  * const engine = new Luna.MockEngine();
@@ -160,6 +161,14 @@ function parsePan(text: string): number {
 /** The four coupled views of a control's value (fact 97). */
 const CONTROL_VIEWS = new Set(['value', 'real_value', 'normalized_value', 'string_value']);
 
+export interface MockEngineOptions {
+  /**
+   * Include LUNA's `/gui` (dialogs, pages, Add Ons). Default `true`, as inside LUNA; `false`
+   * models a headless or wasm engine, where `luna.gui.available()` is false (fact 103).
+   */
+  gui?: boolean;
+}
+
 export class MockEngine {
   private readonly nodes = new Map<string, MockNode>();
   private readonly ports = new Set<MockPort>();
@@ -173,7 +182,7 @@ export class MockEngine {
   /** Transaction commands seen: `begin`, `commit`, `abort`. */
   readonly transactions: string[] = [];
 
-  constructor() {
+  constructor(options: MockEngineOptions = {}) {
     this.nodes.set('/', { properties: new Map(), readOnly: new Set(), commands: new Map(), children: [] });
     this.addNode('/status', { properties: { timeout_ms: 0, version: 'mock', name: 'LUNA' } });
     this.addNode('/sessions', {
@@ -248,7 +257,8 @@ export class MockEngine {
         /**
          * The chunked import protocol (fact 42): `begin` answers a uid, each `transfer`
          * appends base64 bytes, `end` files the finished source under the package's audio
-         * folder, and `cancel` throws the partial away.
+         * folder, and `cancel` throws the partial away. Bytes identical to an uploaded source
+         * already in the package are not filed again: `end` answers that source's uid.
          */
         import_file: (data, engine) => {
           const body = (data ?? {}) as { session_package_uid?: string; phase?: string; name?: string; uid?: string; path?: string; file_data?: string; type?: string };
@@ -256,7 +266,7 @@ export class MockEngine {
           switch (body.phase) {
             case 'begin': {
               const uid = `src${engine.imports.size + engine.children(`/workspace/sessions/${pkg}/audio`).length + 1}`;
-              engine.imports.set(uid, { pkg, name: body.name ?? uid, bytes: 0 });
+              engine.imports.set(uid, { pkg, name: body.name ?? uid, bytes: 0, content: '' });
               return { uid };
             }
             case 'transfer': {
@@ -266,6 +276,7 @@ export class MockEngine {
               const encoded = body.file_data ?? '';
               const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
               pending.bytes += Math.max(0, (encoded.length / 4) * 3 - padding);
+              pending.content += encoded;
               return null;
             }
             case 'end': {
@@ -273,6 +284,9 @@ export class MockEngine {
               const pending = engine.imports.get(uid);
               if (!pending) throw new UAError('uasrv.invalid_object', 'import_file: no import in progress for that uid', { cmd: 'post', path: '/workspace/import_file' });
               engine.imports.delete(uid);
+              const same = engine.uploaded.get(`${pending.pkg}:${pending.content}`);
+              if (same && engine.has(`/workspace/sessions/${pending.pkg}/audio/${same}`)) return { uid: same };
+              engine.uploaded.set(`${pending.pkg}:${pending.content}`, uid);
               engine.addNode(`/workspace/sessions/${pending.pkg}/audio/${uid}`, {
                 properties: { uid, name: body.name ?? pending.name, stem_format: 'stereo', length: 0, sample_rate: 48000, created: 0, size: pending.bytes },
               });
@@ -416,6 +430,7 @@ export class MockEngine {
     this.addNode('/gui/transport', { properties: { arm_mode: false } });
     this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', title: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, manufacturer: 'Example Co' } });
     this.addNode('/gui/file_chooser');
+    if (options.gui === false) this.removeNode('/gui');
   }
 
   /** What the next mock file dialog "selects"; empty means the user cancelled. */
@@ -738,7 +753,9 @@ export class MockEngine {
   }
 
   /** @internal Uploads between `begin` and `end` (fact 42). */
-  readonly imports = new Map<string, { pkg: string; name: string; bytes: number }>();
+  readonly imports = new Map<string, { pkg: string; name: string; bytes: number; content: string }>();
+  /** @internal Uploaded content (package and base64) to the source it was filed as, for fact 42's de-duplication. */
+  readonly uploaded = new Map<string, string>();
 
   /**
    * Replace the handler of the command at `path` (for example
@@ -1523,8 +1540,8 @@ export class MockEngine {
    * const engine = Luna.MockEngine.demo();
    * const luna = await Luna.connect({ port_: engine.port() });
    */
-  static demo(): MockEngine {
-    const engine = new MockEngine();
+  static demo(options: MockEngineOptions = {}): MockEngine {
+    const engine = new MockEngine(options);
     engine.addSession('demo', { name: 'Demo', tracks: ['Vocal', 'Guitar', 'Bass', 'Drums'] });
     return engine;
   }

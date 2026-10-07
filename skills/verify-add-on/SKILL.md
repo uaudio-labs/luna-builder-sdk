@@ -53,6 +53,10 @@ npx ua-builder probe http://localhost:8790/ --screenshot page.png   # also save 
 `--mock [fixture.js]` probes the page on `?engine=mock` instead of LUNA, which is useful for
 checking layout offline. It is not proof that the page works with LUNA.
 
+An Add On that loads files: drive it with `LunaProbe.dropFiles` / `LunaProbe.chooseFiles`
+(and `--luna-bridge` with `LunaProbe.dropPaths` for path drops), then confirm the new source
+from the second client. Inside LUNA, also pick and drop a real file by hand once.
+
 Probe before and after each change from the second client; the two readouts are the proof.
 A page still in its `Luna.connect()` retry loop counts as not ready — the probe keeps waiting
 within `--timeout` (default 20 s) and on timeout prints `timed out ... waiting for:` with what

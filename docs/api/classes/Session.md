@@ -347,7 +347,12 @@ const { render, file } = await session.exportMain({ name: 'Rough mix' });
 importFile(path, trackUid?): Promise<unknown>;
 ```
 
-Import an audio, MIDI or video file at the selection start, onto `trackUid` or a new track.
+LUNA's own import: the File > Import action. Imports an audio, MIDI or video file at
+the selection start, onto `trackUid` or a new track, making a clip as LUNA does.
+
+A **path route** command run by LUNA's UI, so it needs `/gui`: without it (a headless or
+wasm engine) it rejects with `Luna.Unsupported` (fact 103). To add a source without a
+clip, or without `/gui`, use [importPath](#importpath); for a browser `File`, [uploadFile](#uploadfile).
 
 #### Parameters
 
@@ -359,6 +364,52 @@ Import an audio, MIDI or video file at the selection start, onto `trackUid` or a
 #### Returns
 
 `Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+const [path] = await luna.gui.chooseFiles({ filters: ['*.wav', '*.mid'] });
+if (path) await session.importFile(path, track.id);
+```
+
+***
+
+### importPath()
+
+```ts
+importPath(path, options): Promise<AudioSource>;
+```
+
+Copy a file the engine can read from disk into this session's package as a new audio
+source, and resolve to it once the workspace lists it (fact 42, `local_copy`). No clip
+is made: pass the source's `id` to [insertClip](#insertclip).
+
+This is the **path route**, an optimization: the engine reads `path` itself, so the bytes
+never pass through the page. Take the path from `luna.gui.chooseFiles()` or
+`Luna.onPathDrop()`. It needs no `/gui`, but the engine must see the file: a native
+engine on the same machine, not the wasm engine. A path the engine cannot open rejects
+with LUNA's `device.database_error`. For a browser `File`, use [uploadFile](#uploadfile).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+| `options` | [`ImportPathOptions`](../interfaces/ImportPathOptions.md) |
+
+#### Returns
+
+`Promise`\<[`AudioSource`](AudioSource.md)\>
+
+#### Example
+
+```ts
+const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
+if (path) {
+  const source = await session.importPath(path);
+  await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
+}
+```
 
 ***
 
@@ -814,11 +865,24 @@ Upload a file the engine cannot read from disk - a browser `File`, or any bytes 
 this session's package as a new audio source, and resolve to it once the workspace
 lists it (fact 42).
 
+This is the **File route**, and the one that works everywhere: in LUNA, in a browser and
+on the wasm engine, with no `/gui`. Get the `File` from `<input type="file">` or an HTML
+`drop` event; the page can decode and audition the same `File` too. When the page only
+needs the file in the session and has an engine-readable path (from
+`luna.gui.chooseFiles()` or `Luna.onPathDrop()`), [importPath](#importpath) is the faster path
+route: nothing is copied through the page.
+
 The bytes go up base64-encoded in `chunkBytes` pieces through the engine's
 `begin`/`transfer`/`end` phases, with `onProgress` after each chunk. A failed transfer
 is cancelled, so a half-written file is not left behind. No clip is made: pass the
-returned source's `id` to [insertClip](#insertclip) for that. Use [importFile](#importfile) instead
+returned source's `id` to [insertClip](#insertclip) for that. LUNA files identical bytes only
+once: uploading a file already in the session resolves to that source (fact 42). Use
+[importFile](#importfile) instead
 when LUNA can already read the path itself.
+
+In LUNA 3.1.0.4589 and earlier `<input type="file">` opens nothing (fact 104), so offer an
+HTML drop zone as well: `zone.ondrop = (e) => { e.preventDefault(); load(e.dataTransfer.files[0]); }`
+with `zone.ondragover = (e) => e.preventDefault()`.
 
 #### Parameters
 

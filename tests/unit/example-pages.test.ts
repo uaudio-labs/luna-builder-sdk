@@ -331,6 +331,93 @@ describe('examples/jobs.html', () => {
   });
 });
 
+describe('examples/files.html', () => {
+  const logText = (page: Awaited<ReturnType<typeof loadExamplePage>>) => (page.window as unknown as { filesLog: string[] }).filesLog.join('\n');
+  const connected = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.waitFor(() => page.text('#status').startsWith('Session'), 'the page to connect');
+
+  it('reports the environment: /gui present, no native bridge outside LUNA', async () => {
+    const page = await loadExamplePage('files.html', engineWithSession(['Vocal']));
+    await connected(page);
+    expect(page.text('#env')).toContain('luna.gui.available() true');
+    expect(page.text('#env')).toContain('Luna.canDropPaths() false');
+    expect((page.document.querySelector('#choose') as HTMLButtonElement).disabled).toBe(false);
+    expect((page.document.querySelector('#paths') as HTMLInputElement).disabled).toBe(true);
+    page.close();
+  });
+
+  it('File route: an HTML drop with a File is uploaded as a source', async () => {
+    const engine = engineWithSession(['Vocal']);
+    const page = await loadExamplePage('files.html', engine);
+    await connected(page);
+    const file = new page.window.File([new Uint8Array(2048).fill(5)], 'drop.wav', { type: 'audio/wav' });
+    const drop = new page.window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    page.document.querySelector('#zone')!.dispatchEvent(drop);
+    await page.waitFor(() => logText(page).includes('uploadFile →'), 'the upload');
+    expect(logText(page)).toContain('zone: drop: 1 File(s): drop.wav (2048 bytes, type "audio/wav")');
+    expect(engine.children('/workspace/sessions/pkg_abc/audio')).toHaveLength(1);
+    page.close();
+  });
+
+  it('path route: LUNA’s dialog paths go to importPath', async () => {
+    const engine = engineWithSession(['Vocal']);
+    engine.nextDialogFiles = ['/Users/me/kick.wav'];
+    const page = await loadExamplePage('files.html', engine);
+    await connected(page);
+    (page.document.querySelector('#choose') as HTMLButtonElement).click();
+    await page.waitFor(() => logText(page).includes('importPath →'), 'the import');
+    expect(logText(page)).toContain('chooseFiles: 1 path(s): /Users/me/kick.wav');
+    expect(logText(page)).toContain('importPath → "kick.wav"');
+    page.close();
+  });
+
+  it('path route: native path drops are imported, and turning them off opts out', async () => {
+    // Luna runs in the Node realm here, so the stand-in bridge goes on its global.
+    const g = globalThis as { lunaAPI?: unknown; lunaHost?: { filesDropped?(i: unknown): void } };
+    const accepts: boolean[] = [];
+    g.lunaAPI = { setAcceptsFileDrops: (b: boolean) => accepts.push(b) };
+    try {
+      const page = await loadExamplePage('files.html', engineWithSession(['Vocal']));
+      await connected(page);
+      const box = page.document.querySelector('#paths') as HTMLInputElement;
+      expect(box.disabled).toBe(false);
+      box.checked = true;
+      box.dispatchEvent(new page.window.Event('change'));
+      expect(accepts).toEqual([true]);
+      g.lunaHost!.filesDropped!({ paths: ['/Users/me/snare.wav'], x: 10, y: 20 });
+      await page.waitFor(() => logText(page).includes('importPath →'), 'the import');
+      expect(logText(page)).toContain('onPathDrop: drop at 10,20: 1 path(s): /Users/me/snare.wav');
+      box.checked = false;
+      box.dispatchEvent(new page.window.Event('change'));
+      expect(accepts).toEqual([true, false]);
+      page.close();
+    } finally {
+      delete g.lunaAPI;
+      delete g.lunaHost;
+    }
+  });
+
+  it('picks up a session opened after the page loaded', async () => {
+    const engine = new Luna.MockEngine();
+    const page = await loadExamplePage('files.html', engine);
+    await page.waitFor(() => page.text('#status').startsWith('No session open'), 'the no-session status');
+    engine.addSession('abc', { tracks: ['Vocal'], name: 'Later', packageUid: 'pkg_abc' });
+    engine.setValue('/sessions', 'focused_session', 'abc');
+    await page.waitFor(() => page.text('#status').startsWith('Session "Later"'), 'the session to be picked up');
+    page.close();
+  });
+
+  it('without /gui the dialog is disabled and says why', async () => {
+    const engine = new Luna.MockEngine({ gui: false });
+    engine.addSession('abc', { tracks: ['Vocal'], name: 'Demo', packageUid: 'pkg_abc' });
+    const page = await loadExamplePage('files.html', engine);
+    await connected(page);
+    expect((page.document.querySelector('#choose') as HTMLButtonElement).disabled).toBe(true);
+    expect(page.text('#chooseNote')).toContain('no /gui');
+    page.close();
+  });
+});
+
 describe('examples/import.html', () => {
   it('uploads bytes, lists the source, and places it as a clip', async () => {
     const engine = engineWithSession(['Vocal']);
@@ -352,6 +439,18 @@ describe('examples/import.html', () => {
     await page.waitFor(() => page.text('#importStatus').startsWith('Placed'), 'the clip to be placed');
     const playlist = engine.children('/sessions/abc/playlists')[0]!;
     expect(engine.children(`/sessions/abc/playlists/${playlist}/clips`)).toHaveLength(1);
+    page.close();
+  });
+
+  it('uploads a File dropped on its drop zone', async () => {
+    const engine = engineWithSession(['Vocal']);
+    const page = await loadExamplePage('import.html', engine);
+    await page.waitFor(() => page.text('#status').includes('clips go to'), 'the page to connect');
+    const file = new page.window.File([new Uint8Array(1024).fill(9)], 'dropped.wav', { type: 'audio/wav' });
+    const drop = new page.window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
+    page.document.querySelector('#drop')!.dispatchEvent(drop);
+    await page.waitFor(() => page.text('#importStatus').includes('Imported "dropped.wav"'), 'the upload');
     page.close();
   });
 

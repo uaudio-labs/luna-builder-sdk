@@ -17,7 +17,8 @@ from `../dist/luna.global.js`, so run `npm run build` in the builder folder firs
 | `sends.html` | Every send and cue output: level, pan, mute, pre-fader, enable, meter, destination, and a picker that reroutes it (assign appends, so it uses `retarget`). |
 | `automation.html` | The first track's volume lane drawn live: insert a ramp, move, revalue and delete breakpoints, and drive the track's automation mode. |
 | `jobs.html` | Bounce channels or run LUNA's own main-bus export, with live state, progress and time remaining, and abort or delete any render. |
-| `import.html` | Pick a file, watch it upload to LUNA in chunks, see it in the live source list, place it as a clip through the tempo map. |
+| `files.html` | The two ways a user's file gets in, side by side (docs/FILES.md): a file picker and an HTML drop zone giving `File`s (decoded in the page, then `uploadFile`), and native path drops and LUNA's dialog giving paths (`importPath`). Logs every event, so it doubles as the inside-LUNA check. |
+| `import.html` | Pick or drop a file, watch it upload to LUNA in chunks, see it in the live source list, place it as a clip through the tempo map. |
 | `pianoroll.html` | A live read-only piano roll over one MIDI clip: notes edited in LUNA appear without a refresh. |
 | `tracks.html` | The raw wire: list the focused session's tracks through `luna.raw`, with no model layer. |
 

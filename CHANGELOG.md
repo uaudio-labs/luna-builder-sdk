@@ -6,6 +6,29 @@ engine is versioned separately.
 ## Unreleased
 
 Added
+- `docs/FILES.md`: the two ways a user's file reaches an Add On. The **File route**
+  (`<input type="file">`, HTML drop, `session.uploadFile`) works in LUNA, a browser and on the
+  wasm engine, and is the one to use when the page needs the audio. The **path route**
+  (`luna.gui.chooseFiles`, `Luna.onPathDrop`, `session.importPath`) is a LUNA optimization:
+  the engine reads the file from disk, and the page cannot read the paths.
+- `session.importPath(path, { name?, timeoutMs? })`: the engine copies a file it can read into
+  the session as a new source (`local_copy`), resolving to the listed `AudioSource`. No clip,
+  no `/gui` needed.
+- `Luna.onPathDrop(handler | { drop, dragOver?, dragLeave? })` and `Luna.canDropPaths()`: files
+  dropped on the page inside LUNA, as absolute paths. Publishes the `window.lunaHost`
+  callbacks LUNA calls and opts in to native drops; the returned unsubscribe hands drags back
+  to HTML `drop` events. Throws `Luna.Unsupported` outside LUNA.
+- `luna.gui.available()`: whether the engine has LUNA's `/gui` (absent on headless and wasm
+  engines).
+- `new Luna.MockEngine({ gui: false })` (and `MockEngine.demo({ gui: false })`): a mock without
+  `/gui`.
+- `examples/files.html` ("File routes (Builder)"): the four ways a file arrives (file picker,
+  HTML drop, native path drop, LUNA's dialog) side by side, logging every event; the check to
+  run inside LUNA.
+- `ua-builder probe` gives every page `LunaProbe.dropFiles(files, selector)` and
+  `LunaProbe.chooseFiles(selector, files)`, which deliver real `File`s (`'name.wav'` is a short
+  sine WAV that decodes), and `--luna-bridge` fakes LUNA's native bridge so
+  `LunaProbe.dropPaths(paths)` reaches `Luna.onPathDrop`.
 - Optional `manufacturer` manifest field: who makes the Add On, shown by LUNA in the
   MANUFACTURER column of Settings > Add Ons. `ua-builder new --manufacturer "Name"` writes it,
   and `ua-builder install` / `pack` reject a non-string value. The examples set it. In the `add_ons` shape a top-level
@@ -14,6 +37,16 @@ Added
   `luna.gui.addOns` items (`''` when the manifest has none).
 
 Changed
+- Without `/gui`, every `luna.gui` command and `session.importFile` reject at once with
+  `Luna.Unsupported` instead of posting to a missing node (a `chooseFiles` used to wait out
+  its 10-minute timeout).
+- `session.uploadFile` of a file whose bytes are already in the session resolves to that
+  source. LUNA files identical bytes once and answers `end` with the existing source's uid;
+  the SDK waited for the new uid instead and failed with `no_effect` after 30 s.
+- `session.uploadFile` takes the name from a `File` made in another realm (an iframe, a test
+  DOM) instead of refusing it for having no name.
+- `luna.gui.chooseFiles`, `session.importFile` and `session.uploadFile` document which route
+  they belong to: `chooseFiles` returns paths only the engine can read.
 - The agent skills, the scaffold README and `docs/llms.txt` now ask agents to end with
   `LUNA BUILDER SDK FEEDBACK:` instead of `UA BUILDER SDK FEEDBACK:` when the SDK could
   support their workflow better.

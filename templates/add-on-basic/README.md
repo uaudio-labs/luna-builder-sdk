@@ -28,6 +28,11 @@ bit in transit (zip extractions drop it). Run any command once through node —
 (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Space, Cmd/Ctrl+Space) keep working while the Add On has the
 focus. A key the page handles itself and claims with `preventDefault()` is left to the page.
 
+Loading the user's files: read the SDK's `docs/FILES.md` first. A file the page decodes
+comes from `<input type="file">` or an HTML drop and goes up with `session.uploadFile()`; a
+path from `luna.gui.chooseFiles()` or `Luna.onPathDrop()` is only for `session.importPath()`.
+In LUNA 3.1.0.4589 a file picker opens nothing, so always offer a drop zone too.
+
 Inside LUNA the page URL carries `?port=`, and `Luna.connect()` uses it. In a plain browser
 it falls back to LUNA on `localhost:4718`. To run on the in-page wasm engine instead, call
 `Luna.connect({ engine: 'wasm' })`.

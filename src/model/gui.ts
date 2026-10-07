@@ -1,17 +1,20 @@
 /**
- * LUNA's host surface: `/gui`. Present only when connected to LUNA itself (not the wasm
- * engine). Lets an Add On ask LUNA to open dialogs, switch pages, show other Add Ons,
- * open URLs and report progress.
+ * LUNA's host surface: `/gui`. Lets an Add On ask LUNA to open dialogs, switch pages, show
+ * other Add Ons, open URLs and report progress.
+ *
+ * `/gui` is LUNA's own UI, so it is absent on a headless engine and on the wasm engine
+ * (fact 103). Check {@link Gui.available} rather than inferring it from
+ * `Luna.isEmbeddedInLuna()`; without it every command rejects with `Luna.Unsupported`.
  *
  * @example
- * const files = await luna.gui.chooseFiles({ filters: ['*.wav'], allowMultiple: true });
+ * if (await luna.gui.available()) await luna.gui.setPage('mixer');
  * await luna.gui.setPage('mixer');
  * await luna.gui.openUrl('https://uaudio.com');
  * const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
  */
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
-import { RequestTimeout } from '../wire/errors';
+import { RequestTimeout, Unsupported } from '../wire/errors';
 import { Collection } from './collection';
 import { Node } from './node';
 
@@ -75,6 +78,7 @@ export class Gui extends Node {
   /** Record-arm mode of LUNA's transport bar. */
   readonly armMode: WritableProp<boolean>;
   readonly priorLaunchCount: Prop<number>;
+  private presence: Promise<boolean> | undefined;
 
   /** @internal */
   constructor(client: Client) {
@@ -90,6 +94,30 @@ export class Gui extends Node {
       set: (v) => client.store.set('/gui/transport', 'arm_mode', v),
     };
     this.priorLaunchCount = this.prop<number>('prior_launch_count');
+  }
+
+  /**
+   * True when the engine has LUNA's `/gui` (fact 103). Read once per connection: the
+   * root's children are listed, because a `get` of a missing `/gui` answers `{}` (fact 10).
+   *
+   * @example
+   * const paths = (await luna.gui.available()) ? await luna.gui.chooseFiles() : [];
+   */
+  available(): Promise<boolean> {
+    this.presence ??= this.client.raw
+      .get('/', { children: true, properties: false, commands: false })
+      .then((reply) => rootChildNames(reply).includes('gui'))
+      .catch((err: unknown) => {
+        this.presence = undefined; // a dropped connection is not an answer
+        throw err;
+      });
+    return this.presence;
+  }
+
+  /** Commands go to `/gui`, so refuse at once, not after a timeout, when it is absent. */
+  protected override async post<R = unknown>(command: string, payload?: unknown): Promise<R> {
+    if (!(await this.available())) throw new Unsupported(`luna.gui.${command}: this engine has no /gui (a headless or wasm engine). Check luna.gui.available() first.`);
+    return super.post<R>(command, payload);
   }
 
   /** The main window. */
@@ -137,8 +165,22 @@ export class Gui extends Node {
   }
 
   /**
-   * Native open-file dialog. Resolves to the chosen absolute paths, or `[]` if cancelled.
-   * `filters` are wildcards such as `['*.wav', '*.aif;*.aiff']`.
+   * LUNA's native open-file dialog. Resolves to the chosen **absolute paths**, or `[]` if
+   * cancelled. `filters` are wildcards such as `['*.wav', '*.aif;*.aiff']`.
+   *
+   * This is the **path route**, an optimization for getting files into the session: the
+   * engine reads the paths from disk (`session.importPath()`, `session.importFile()`), so the
+   * bytes never pass through the page. The page itself cannot read these paths; `fetch`
+   * and XHR refuse them. Needs `/gui` ({@link Gui.available}) and a native engine that can
+   * see the file.
+   *
+   * Want the audio in the page (decode, audition, slice)? Do not use this: use
+   * `<input type="file">`, which gives `File` objects everywhere, and
+   * `session.uploadFile({ bytes: file })` to put one into the session.
+   *
+   * @example
+   * const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
+   * if (path) await session.importPath(path);
    */
   chooseFiles(options: { title?: string; filters?: string[]; allowMultiple?: boolean; defaultPath?: string; timeoutMs?: number } = {}): Promise<string[]> {
     const payload: Record<string, unknown> = {};
@@ -149,7 +191,14 @@ export class Gui extends Node {
     return this.dialog('show_open_dialog', payload, 'release_file_chooser', options.timeoutMs);
   }
 
-  /** Native save dialog. Resolves to the chosen path, or `undefined` if cancelled. */
+  /**
+   * LUNA's native save dialog. Resolves to the chosen absolute path, or `undefined` if
+   * cancelled. Like {@link chooseFiles} the path is for the engine (for example a render's
+   * `outputPaths`); the page cannot write to it.
+   *
+   * @example
+   * const path = await luna.gui.chooseSavePath({ extensions: ['wav'] });
+   */
   async chooseSavePath(options: { defaultPath?: string; extensions?: string[]; timeoutMs?: number } = {}): Promise<string | undefined> {
     const payload: Record<string, unknown> = {};
     if (options.defaultPath !== undefined) payload['default_path'] = options.defaultPath;
@@ -208,4 +257,16 @@ function randomUid(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } };
   const raw = g.crypto?.randomUUID?.() ?? `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
   return raw.replaceAll('-', '');
+}
+
+/** Child names of a `get /?children=1` reply, as plain names. */
+function rootChildNames(reply: unknown): string[] {
+  const children = typeof reply === 'object' && reply !== null ? (reply as { children?: unknown }).children : undefined;
+  if (!Array.isArray(children)) return [];
+  const out: string[] = [];
+  for (const child of children) {
+    const raw = typeof child === 'string' ? child : typeof child === 'object' && child !== null ? ((child as { path?: unknown; name?: unknown }).path ?? (child as { name?: unknown }).name) : undefined;
+    if (typeof raw === 'string') out.push(raw.slice(raw.lastIndexOf('/') + 1));
+  }
+  return out;
 }

@@ -11,17 +11,20 @@
   button, input[type=file] { font: inherit; padding: 7px 11px; margin: 4px 8px 4px 0; }
   button:disabled { opacity: .5; }
   progress { width: 260px; }
+  #drop { border: 2px dashed #4a5563; border-radius: 10px; padding: 18px; margin-top: 10px; text-align: center; color: #acb9c8; }
+  #drop.over { border-color: #f0c674; color: #e4eaf1; }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid #343d48; }
   th { color: #acb9c8; font-weight: 400; }
   #status, #importStatus, #record { min-height: 24px; } code { color: #f0c674; }
 </style>
 <h1>Import and record</h1>
-<p>Pick a file and watch it upload to LUNA in chunks, appear in the session's source list,
+<p>Pick or drop a file and watch it upload to LUNA in chunks, appear in the session's source list,
 and go onto the timeline as a clip. The upload is <code>session.uploadFile()</code>, which
 sends base64 chunks through the engine's <code>begin</code>/<code>transfer</code>/<code>end</code>
-phases and reports progress after each one (fact 42). Use
-<code>session.importFile(path)</code> instead when LUNA can already read the file itself.</p>
+phases and reports progress after each one (fact 42). This is the File route: it works in LUNA and a browser alike. A path from
+<code>luna.gui.chooseFiles()</code> takes <code>session.importPath(path)</code> instead, which the
+page cannot read but the engine copies without the upload (docs/FILES.md).</p>
 <p>The clip's span is computed through the tempo map with
 <code>timeline.tickAtSeconds()</code>, so the source plays unstretched wherever it lands.</p>
 <button id="refresh">Connect</button><p id="status" role="status">Connecting…</p>
@@ -30,6 +33,7 @@ phases and reports progress after each one (fact 42). Use
   <input id="file" type="file" accept="audio/*">
   <button id="upload" disabled>Upload to the session</button>
   <progress id="progress" max="1" value="0"></progress>
+  <div id="drop">or drop an audio file here (the way that works in every LUNA; docs/FILES.md)</div>
 </div>
 <p id="importStatus"></p>
 <h2>Sources in this session</h2>
@@ -126,6 +130,15 @@ async function upload(file) {
 
 $('file').onchange = () => { $('upload').disabled = !$('file').files.length; };
 $('upload').onclick = () => { const f = $('file').files[0]; if (f) void upload(f); };
+// An HTML drop gives the page a File too. Without preventDefault() on dragover the drop is refused.
+$('drop').ondragover = (e) => { e.preventDefault(); $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+$('drop').ondrop = (e) => {
+  e.preventDefault();
+  $('drop').classList.remove('over');
+  const f = e.dataTransfer?.files[0];
+  if (f && session) void upload(f);
+};
 /** For scripted checks: hand it bytes and a name instead of using the file picker. */
 window.uploadBytes = (bytes, name) => upload(new File([bytes], name));
 

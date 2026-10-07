@@ -5,8 +5,14 @@
 ### Constructor
 
 ```ts
-new MockEngine(): MockEngine;
+new MockEngine(options): MockEngine;
 ```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`MockEngineOptions`](../interfaces/MockEngineOptions.md) |
 
 #### Returns
 
@@ -659,11 +665,17 @@ Read a property directly (no port involved).
 ### demo()
 
 ```ts
-static demo(): MockEngine;
+static demo(options): MockEngine;
 ```
 
 A small ready-made engine: one focused session, `Demo`, with four audio tracks. What a
 page gets from `?engine=mock` when it defines no `LunaMockSetup`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`MockEngineOptions`](../interfaces/MockEngineOptions.md) |
 
 #### Returns
 

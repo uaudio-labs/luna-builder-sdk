@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · File routes</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 1050px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 26px; } h2 { margin: 0 0 6px; font-size: 17px; }
+  p { color: #acb9c8; line-height: 1.6; margin: 6px 0; }
+  code { color: #f0c674; }
+  button, input[type=file] { font: inherit; padding: 7px 11px; margin: 4px 8px 4px 0; }
+  button:disabled, label.off { opacity: .5; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+  .panel { border: 1px solid #343d48; border-radius: 10px; padding: 14px; }
+  .route { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #8fa1b5; }
+  #zone { border: 2px dashed #4a5563; border-radius: 10px; padding: 26px; text-align: center; color: #acb9c8; }
+  #zone.over { border-color: #f0c674; background: #1f252c; color: #e4eaf1; }
+  #zone.paths { border-color: #7fb4e0; }
+  #env { font: 13px ui-monospace, monospace; color: #acb9c8; white-space: pre-wrap; }
+  #log { width: 100%; height: 260px; font: 12px ui-monospace, monospace; background: #0f1216; color: #e4eaf1; border: 1px solid #343d48; border-radius: 8px; padding: 8px; box-sizing: border-box; }
+  progress { width: 200px; }
+</style>
+<h1>File routes</h1>
+<p>A user's file reaches an Add On by one of two routes (<code>docs/FILES.md</code>). The
+<b>File route</b> gives the page <code>File</code> objects it can decode, and
+<code>session.uploadFile()</code> copies them into the session. The <b>path route</b> gives
+absolute paths the page cannot read; <code>session.importPath()</code> has the engine copy
+them. Try each panel and read the log: every event the page sees is written there.</p>
+<p id="status" role="status">Connecting…</p>
+<div id="env"></div>
+<p><label><input id="upload" type="checkbox" checked> Also add each <code>File</code> to the session with <code>uploadFile()</code></label>
+  <progress id="progress" max="1" value="0"></progress></p>
+
+<div class="grid">
+  <section class="panel">
+    <div class="route">File route</div>
+    <h2>1. File picker</h2>
+    <p><code>&lt;input type="file"&gt;</code>. Inside LUNA this needs LUNA to answer the webview's open panel.</p>
+    <input id="picker" type="file" accept="audio/*,.wav,.aif,.aiff,.mp3,.flac" multiple>
+  </section>
+  <section class="panel">
+    <div class="route">File route, or path route when 3 is on</div>
+    <h2>2. Drop zone</h2>
+    <div id="zone">Drop audio files here</div>
+    <p>HTML <code>drop</code> events with <code>dataTransfer.files</code>. While 3 is on, LUNA claims file drags and these carry no files.</p>
+  </section>
+  <section class="panel">
+    <div class="route">Path route</div>
+    <h2>3. Native path drops</h2>
+    <p><label id="pathLabel"><input id="paths" type="checkbox"> <code>Luna.onPathDrop()</code>: drops anywhere on the page arrive as paths</label></p>
+    <p id="pathNote"></p>
+  </section>
+  <section class="panel">
+    <div class="route">Path route</div>
+    <h2>4. LUNA's dialog</h2>
+    <button id="choose" disabled>luna.gui.chooseFiles()…</button>
+    <p id="chooseNote">Paths for <code>session.importPath()</code>; the page cannot read them.</p>
+  </section>
+</div>
+
+<h2 style="margin-top:22px">Log</h2>
+<button id="copy">Select the log</button><button id="clear">Clear</button>
+<textarea id="log" readonly></textarea>
+
+<script src="../dist/luna.global.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let luna, session, stopPaths;
+const lines = [];
+
+function log(text) {
+  const t = new Date().toISOString().slice(11, 23);
+  lines.push(`${t} ${text}`);
+  $('log').value = lines.join('\n');
+  $('log').scrollTop = $('log').scrollHeight;
+}
+/** For scripted checks. */
+window.filesLog = lines;
+
+const describeFile = (f) => `${f.name} (${f.size} bytes, type "${f.type || '?'}")`;
+const seconds = (ns) => (ns === undefined ? '?' : (ns / 1e9).toFixed(3));
+const describeSource = (s) => `"${s.name.value ?? s.id}" ${seconds(s.length.value)} s at ${s.sampleRate.value ?? '?'} Hz`;
+
+/** File route: decode in the page, then optionally upload. */
+async function takeFiles(files, from) {
+  log(`${from}: ${files.length} File(s)${files.length ? ': ' + files.map(describeFile).join(', ') : ''}`);
+  for (const file of files) {
+    try {
+      const Ctx = window.AudioContext ?? window.webkitAudioContext;
+      if (!Ctx) log(`  decode ${file.name}: no AudioContext in this page`);
+      else {
+        const audio = await new Ctx().decodeAudioData(await file.arrayBuffer());
+        log(`  decoded ${file.name} in the page: ${audio.duration.toFixed(3)} s, ${audio.numberOfChannels} ch, ${audio.sampleRate} Hz`);
+      }
+    } catch (e) { log(`  decode ${file.name} failed: ${e.message ?? e}`); }
+    if (!$('upload').checked || !session) continue;
+    try {
+      const t0 = performance.now();
+      const source = await session.uploadFile({ bytes: file, onProgress: (sent, total) => ($('progress').value = sent / total) });
+      log(`  uploadFile → ${describeSource(source)} in ${(performance.now() - t0).toFixed(0)} ms`);
+    } catch (e) { log(`  uploadFile ${file.name} failed: ${e.code ?? ''} ${e.message}`); }
+  }
+}
+
+/** Path route: the engine copies each path. */
+async function takePaths(paths, from) {
+  log(`${from}: ${paths.length} path(s)${paths.length ? ': ' + paths.join(', ') : ''}`);
+  if (!session) return;
+  for (const path of paths) {
+    try {
+      const t0 = performance.now();
+      const source = await session.importPath(path);
+      log(`  importPath → ${describeSource(source)} in ${(performance.now() - t0).toFixed(0)} ms`);
+    } catch (e) { log(`  importPath ${path} failed: ${e.code ?? ''} ${e.message}`); }
+  }
+}
+
+// 1. Picker. A click is logged so "nothing opened" is visible as a click with no change/cancel after it.
+$('picker').addEventListener('click', () => log('picker: clicked'));
+$('picker').addEventListener('cancel', () => log('picker: cancel event (dialog closed with nothing chosen)'));
+$('picker').addEventListener('change', () => {
+  const files = [...$('picker').files];
+  $('picker').value = '';
+  void takeFiles(files, 'picker: change');
+});
+
+// 2. HTML drop zone. Each kind of event is logged once per drag, with what it carries.
+let seenOver = false;
+const zone = $('zone');
+zone.addEventListener('dragenter', (e) => { seenOver = false; zone.classList.add('over'); log(`zone: dragenter, types [${[...(e.dataTransfer?.types ?? [])].join(', ')}]`); });
+zone.addEventListener('dragover', (e) => { e.preventDefault(); if (!seenOver) { seenOver = true; log('zone: dragover'); } });
+zone.addEventListener('dragleave', () => { zone.classList.remove('over'); log('zone: dragleave'); });
+zone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  zone.classList.remove('over');
+  void takeFiles([...(e.dataTransfer?.files ?? [])], 'zone: drop');
+});
+
+// 3. Native path drops.
+$('paths').addEventListener('change', () => {
+  if ($('paths').checked) {
+    try {
+      stopPaths = Luna.onPathDrop({
+        dragOver: ({ x, y }) => { if (!zone.classList.contains('paths')) log(`onPathDrop: drag over at ${x},${y}`); zone.classList.add('over', 'paths'); },
+        dragLeave: () => { zone.classList.remove('over', 'paths'); log('onPathDrop: drag left'); },
+        drop: ({ paths, x, y }) => { zone.classList.remove('over', 'paths'); void takePaths(paths, `onPathDrop: drop at ${x},${y}`); },
+      });
+      log('onPathDrop: on (LUNA now claims file drags)');
+    } catch (e) {
+      $('paths').checked = false;
+      log(`onPathDrop: ${e.code ?? ''} ${e.message}`);
+    }
+  } else {
+    stopPaths?.();
+    stopPaths = undefined;
+    log('onPathDrop: off (file drags go back to HTML drop events)');
+  }
+});
+
+// 4. LUNA's dialog.
+$('choose').onclick = async () => {
+  log('chooseFiles: opening');
+  try {
+    const paths = await luna.gui.chooseFiles({ filters: ['*.wav', '*.aif;*.aiff', '*.mp3', '*.flac'], allowMultiple: true });
+    if (!paths.length) log('chooseFiles: cancelled');
+    else await takePaths(paths, 'chooseFiles');
+  } catch (e) { log(`chooseFiles: ${e.code ?? ''} ${e.message}`); }
+};
+
+$('copy').onclick = () => { $('log').focus(); $('log').select(); };
+$('clear').onclick = () => { lines.length = 0; $('log').value = ''; };
+
+async function start() {
+  try {
+    luna = await Luna.connect();
+    Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+    const gui = await luna.gui.available();
+    const canPaths = Luna.canDropPaths();
+    $('env').textContent =
+      `${navigator.userAgent}\n` +
+      `SDK ${Luna.VERSION} · engine ${luna.engine} · embedded in LUNA ${Luna.isEmbeddedInLuna()} · ` +
+      `luna.gui.available() ${gui} · Luna.canDropPaths() ${canPaths}`;
+    log(`env: SDK ${Luna.VERSION}, engine ${luna.engine}, embedded ${Luna.isEmbeddedInLuna()}, gui ${gui}, canDropPaths ${canPaths}`);
+    $('choose').disabled = !gui;
+    if (!gui) $('chooseNote').textContent = 'This engine has no /gui, so there is no LUNA dialog: use the picker.';
+    $('paths').disabled = !canPaths;
+    $('pathLabel').classList.toggle('off', !canPaths);
+    $('pathNote').textContent = canPaths ? 'Off by default, so drops start on the HTML route.' : 'Not inside LUNA: drops can only be HTML drops here.';
+    await luna.sessions.ready();
+    // Follow the session: one opened, closed or focused after the page loaded is picked up.
+    luna.sessions.focused.onChange(bindSession);
+    luna.sessions.items.onChange(bindSession);
+    await bindSession();
+  } catch (e) { $('status').textContent = `${e.code ?? ''} ${e.message}`; }
+}
+
+let binding = 0;
+async function bindSession() {
+  const mine = ++binding;
+  const next = luna.sessions.current();
+  if (!next) {
+    session = undefined;
+    $('status').textContent = 'No session open in LUNA: files are read but not added.';
+    return;
+  }
+  if (next === session) return;
+  await next.ready();
+  if (mine !== binding) return; // a later change won
+  session = next;
+  $('status').textContent = `Session "${session.name.value ?? session.id}": sources added here stay in it.`;
+  log(`session: "${session.name.value ?? session.id}"`);
+}
+
+void start();
+window.addEventListener('pagehide', () => { stopPaths?.(); void luna?.close(); });
+</script>

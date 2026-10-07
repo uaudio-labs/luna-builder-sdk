@@ -13,6 +13,15 @@
  *   ua-builder probe http://localhost:8790/ --mock               # no LUNA: the demo mock session
  *   ua-builder probe http://localhost:8790/ --mock fixture.js    # no LUNA: fixture.js sets LunaMockSetup
  *   ua-builder probe http://localhost:8790/ --screenshot page.png
+ *   ua-builder probe http://localhost:8790/ --mock --expr "LunaProbe.dropFiles(['loop.wav'], '#zone')"
+ *   ua-builder probe http://localhost:8790/ --luna-bridge --expr "LunaProbe.dropPaths(['/Users/me/loop.wav'])"
+ *
+ * Every probed page gets `LunaProbe`, which simulates a user handing the page a file the
+ * way a browser does (the File route): `dropFiles` fires HTML `dragenter`/`dragover`/`drop`
+ * with real `File`s, `chooseFiles` fills an `<input type="file">` and fires `change`. Files
+ * are `'name.wav'` strings (a short sine WAV that decodes) or `{ name, type?, text?, size? }`.
+ * `--luna-bridge` also fakes LUNA's native bridge (`window.lunaAPI`), so `Luna.onPathDrop`
+ * works and `LunaProbe.dropPaths(paths, x?, y?)` drops paths as LUNA would (the path route).
  */
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -61,6 +70,86 @@ export const DEFAULT_EXPR = 'document.body.innerText';
 export const PAINTED = 'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))';
 
 /**
+ * Installed on every probed page before its own scripts: `LunaProbe.dropFiles` and
+ * `LunaProbe.chooseFiles`, the File route as a browser delivers it. Each resolves to whether
+ * the page took the files (a drop the page `preventDefault`ed, an input that exists).
+ */
+export const FILE_HELPERS = `(() => {
+  const wav = (seconds = 0.25, rate = 48000) => {
+    const n = Math.round(seconds * rate);
+    const view = new DataView(new ArrayBuffer(44 + n * 2));
+    const tag = (at, s) => { for (let i = 0; i < 4; i++) view.setUint8(at + i, s.charCodeAt(i)); };
+    tag(0, 'RIFF'); view.setUint32(4, 36 + n * 2, true); tag(8, 'WAVE'); tag(12, 'fmt ');
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true); tag(36, 'data'); view.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 8000), true);
+    return view.buffer;
+  };
+  const toFile = (f) => {
+    if (f instanceof File) return f;
+    const spec = typeof f === 'string' ? { name: f } : f;
+    const isWav = /\.wav$/i.test(spec.name);
+    const body = spec.text !== undefined ? spec.text : spec.size !== undefined ? new Uint8Array(spec.size) : isWav ? wav() : '';
+    return new File([body], spec.name, { type: spec.type ?? (isWav ? 'audio/wav' : '') });
+  };
+  const transfer = (files) => {
+    const dt = new DataTransfer();
+    for (const f of files) dt.items.add(toFile(f));
+    return dt;
+  };
+  const element = (target) => (typeof target === 'string' ? document.querySelector(target) : target ?? document.body);
+  globalThis.LunaProbe = Object.assign(globalThis.LunaProbe ?? {}, {
+    wav,
+    async dropFiles(files, target) {
+      const el = element(target);
+      if (!el) throw new Error('LunaProbe.dropFiles: no element ' + target);
+      const dataTransfer = transfer(files);
+      const fire = (type) => el.dispatchEvent(new DragEvent(type, { dataTransfer, bubbles: true, cancelable: true }));
+      fire('dragenter');
+      fire('dragover');
+      return !fire('drop');
+    },
+    async chooseFiles(selector, files) {
+      const input = document.querySelector(selector);
+      if (!input) throw new Error('LunaProbe.chooseFiles: no element ' + selector);
+      input.files = transfer(files).files;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return input.files.length > 0;
+    },
+  });
+})();`;
+
+/**
+ * Installed by `--luna-bridge`: a stand-in for LUNA's native webview bridge. The page sees
+ * `window.lunaAPI.setAcceptsFileDrops`, and `LunaProbe.dropPaths` calls the page's
+ * `window.lunaHost` exactly as LUNA does once the page has opted in; before that it returns
+ * false, since LUNA would have left the drag to the page's HTML drop. (`dropFiles` still fires
+ * HTML events while opted in; in LUNA those drags would carry no files.)
+ */
+export const FAKE_LUNA_BRIDGE = `(() => {
+  let accepts = false;
+  globalThis.lunaAPI = { setAcceptsFileDrops: (b) => { accepts = !!b; } };
+  const probe = (globalThis.LunaProbe ??= {});
+  Object.defineProperty(probe, 'acceptsPathDrops', { get: () => accepts, configurable: true });
+  Object.assign(probe, {
+    dropPaths(paths, x = 0, y = 0) {
+      if (!accepts) return false;
+      const call = (method, arg) => {
+        const host = globalThis.lunaHost;
+        if (host && typeof host[method] === 'function') host[method](arg);
+      };
+      const info = { paths, x: Math.round(x), y: Math.round(y) };
+      call('fileDragEnter', info);
+      call('fileDragOver', info);
+      call('filesDropped', info);
+      return true;
+    },
+  });
+})();`;
+
+/**
  * The page URL a `--mock` probe opens: `?engine=mock` added, so a page that calls a bare
  * `Luna.connect()` gets an in-memory engine instead of looking for LUNA.
  */
@@ -73,7 +162,7 @@ export function mockUrl(url: string): string {
 export async function probe(args: Args): Promise<number> {
   const url = args.positional[0];
   if (!url) {
-    console.error('usage: ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--screenshot <file.png>] [--chrome <path>]');
+    console.error('usage: ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--luna-bridge] [--screenshot <file.png>] [--chrome <path>]');
     return 2;
   }
   const mock = args.flags['mock'];
@@ -107,6 +196,8 @@ export async function probe(args: Args): Promise<number> {
     const page = await openPage(tab.webSocketDebuggerUrl);
     try {
       await page.send('Page.enable');
+      await page.send('Page.addScriptToEvaluateOnNewDocument', { source: FILE_HELPERS });
+      if (args.flags['luna-bridge']) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: FAKE_LUNA_BRIDGE });
       if (mockSetup !== undefined) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(mockSetup, 'utf8') });
       await page.send('Page.navigate', { url: target });
       const started = Date.now();

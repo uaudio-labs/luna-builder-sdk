@@ -74,14 +74,45 @@ The main window.
 
 ## Methods
 
+### available()
+
+```ts
+available(): Promise<boolean>;
+```
+
+True when the engine has LUNA's `/gui` (fact 103). Read once per connection: the
+root's children are listed, because a `get` of a missing `/gui` answers `{}` (fact 10).
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+#### Example
+
+```ts
+const paths = (await luna.gui.available()) ? await luna.gui.chooseFiles() : [];
+```
+
+***
+
 ### chooseFiles()
 
 ```ts
 chooseFiles(options): Promise<string[]>;
 ```
 
-Native open-file dialog. Resolves to the chosen absolute paths, or `[]` if cancelled.
-`filters` are wildcards such as `['*.wav', '*.aif;*.aiff']`.
+LUNA's native open-file dialog. Resolves to the chosen **absolute paths**, or `[]` if
+cancelled. `filters` are wildcards such as `['*.wav', '*.aif;*.aiff']`.
+
+This is the **path route**, an optimization for getting files into the session: the
+engine reads the paths from disk (`session.importPath()`, `session.importFile()`), so the
+bytes never pass through the page. The page itself cannot read these paths; `fetch`
+and XHR refuse them. Needs `/gui` ([Gui.available](#available)) and a native engine that can
+see the file.
+
+Want the audio in the page (decode, audition, slice)? Do not use this: use
+`<input type="file">`, which gives `File` objects everywhere, and
+`session.uploadFile({ bytes: file })` to put one into the session.
 
 #### Parameters
 
@@ -98,6 +129,13 @@ Native open-file dialog. Resolves to the chosen absolute paths, or `[]` if cance
 
 `Promise`\<`string`[]\>
 
+#### Example
+
+```ts
+const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
+if (path) await session.importPath(path);
+```
+
 ***
 
 ### chooseSavePath()
@@ -106,7 +144,9 @@ Native open-file dialog. Resolves to the chosen absolute paths, or `[]` if cance
 chooseSavePath(options): Promise<string | undefined>;
 ```
 
-Native save dialog. Resolves to the chosen path, or `undefined` if cancelled.
+LUNA's native save dialog. Resolves to the chosen absolute path, or `undefined` if
+cancelled. Like [chooseFiles](#choosefiles) the path is for the engine (for example a render's
+`outputPaths`); the page cannot write to it.
 
 #### Parameters
 
@@ -120,6 +160,12 @@ Native save dialog. Resolves to the chosen path, or `undefined` if cancelled.
 #### Returns
 
 `Promise`\<`string` \| `undefined`\>
+
+#### Example
+
+```ts
+const path = await luna.gui.chooseSavePath({ extensions: ['wav'] });
+```
 
 ***
 

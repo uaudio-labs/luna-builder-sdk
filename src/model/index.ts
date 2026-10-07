@@ -59,6 +59,6 @@ export type { SessionPackageRow, QueryOptions } from './workspace';
 export { Drivers, Device, Devices, Preferences, Render, Renders, Job, Jobs } from './system';
 export type { AudioDeviceInfo, AudioInput } from './system';
 export { Session, RECORD_LOOP_MARGIN_TICKS } from './session';
-export type { NewTrackOptions, NewBusOptions, TransactionOptions, SoloMode, UploadOptions, BounceOptions, ExportOptions, RecordOptions } from './session';
+export type { NewTrackOptions, NewBusOptions, TransactionOptions, SoloMode, UploadOptions, ImportPathOptions, BounceOptions, ExportOptions, RecordOptions } from './session';
 export { Sessions } from './sessions';
 export type { CreateSessionOptions } from './sessions';

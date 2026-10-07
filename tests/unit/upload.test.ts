@@ -74,4 +74,22 @@ describe('Luna.Session.uploadFile', () => {
     await playlist.clips.load();
     expect(playlist.clips.items[0]?.sourceUid.value).toBe(source.id);
   });
+
+  it('takes the name from a File made in another realm', async () => {
+    const { session } = await connected();
+    // Not an instance of this realm's Blob, as a File from an iframe or a test DOM is not.
+    const foreign = { name: 'other-realm.wav', size: 3, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+    const source = await session.uploadFile({ bytes: foreign as unknown as Blob });
+    expect(source.name.value).toBe('other-realm.wav');
+  });
+
+  it('resolves an upload of bytes already in the session to that source, as LUNA files them once (fact 42)', async () => {
+    const { engine, session } = await connected();
+    const first = await session.uploadFile({ bytes: bytes(3000), name: 'take.wav' });
+    const again = await session.uploadFile({ bytes: bytes(3000), name: 'take copy.wav', timeoutMs: 1000 });
+    expect(again).toBe(first);
+    expect(engine.children('/workspace/sessions/pkg_abc/audio')).toHaveLength(1);
+    const other = await session.uploadFile({ bytes: new Uint8Array(3000).fill(8), name: 'other.wav' });
+    expect(other.id).not.toBe(first.id);
+  });
 });

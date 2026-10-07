@@ -43,7 +43,7 @@ Resolution order in `src/client/connect.ts`: `port_` → mock → wasm → expli
 `url`/`host`/`port` → `?host=`/`?port=` → `ws://localhost:4718`.
 
 Native bridge (LUNA webview only): `window.lunaAPI.setAcceptsFileDrops` and
-`window.lunaHost` drag-and-drop callbacks. Everything else goes over the engine
+`window.lunaHost` drag-and-drop callbacks (paths, fact 102), wrapped by `Luna.onPathDrop`. Everything else goes over the engine
 connection, including LUNA UI actions through `luna.gui` (`/gui/...`).
 
 ## 2. Inside the SDK

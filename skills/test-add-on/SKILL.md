@@ -72,6 +72,11 @@ Put engine logic in a DOM-free file (`logic.js`) and test that. Test DOM code on
 on a mock with no LUNA (the fixture sets `globalThis.LunaMockSetup = (engine) => { ... }`). A test that needs `document` is a sign logic leaked into
 `main.js`.
 
+Files: `new Luna.MockEngine({ gui: false })` is an engine without `/gui` (headless, wasm); test
+that the page falls back. In a probe, `LunaProbe.dropFiles(['loop.wav'], '#zone')` and
+`LunaProbe.chooseFiles('#file', ['loop.wav'])` hand the page real `File`s; `--luna-bridge`
+adds `LunaProbe.dropPaths(paths)` for `Luna.onPathDrop` (docs/FILES.md, Testing).
+
 ## SDK feedback
 
 If part of this workflow was harder than the SDK should make it — a missing API, an

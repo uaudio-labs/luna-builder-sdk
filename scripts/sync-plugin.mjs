@@ -79,7 +79,7 @@ export const BUILDS = [
 ];
 
 /** Consumer docs only. `api/` is generated and large. */
-export const DOCS = ['QUICKSTART.md', 'MANIFEST.md', 'PROTOCOL.md', 'EVIDENCE.md', 'RECIPES.md', 'tree/luna-3.0.0.15776.json'];
+export const DOCS = ['QUICKSTART.md', 'FILES.md', 'MANIFEST.md', 'PROTOCOL.md', 'EVIDENCE.md', 'RECIPES.md', 'tree/luna-3.0.0.15776.json'];
 
 export const GLOBAL_DTS = `/** The global that the script-tag build (luna.global.js) defines. */
 declare const Luna: typeof import('./index.js');
