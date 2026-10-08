@@ -7,17 +7,30 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 
 ## Steps
 
-1. Scaffold. From the folder that should contain the Add On:
+1. Ask the user where the Add On opens, before scaffolding. Do not pick a target for them,
+   even when the request seems to imply one; the target decides the menu, the layout and
+   which manifest fields apply. Offer the targets `ua-builder new` accepts today:
+   - `window`: its own window.
+   - `browser`: a panel in LUNA's secondary browser beside the Timeline or Mixer.
+   - `editor`: the editor panel under the Timeline, in place of the Clip Editor, at its
+     height; it does not follow the selection.
+   - `app`: a full LUNA page alongside Timeline and Mixer.
+
+   The set of targets can change. If `ua-builder new` with no arguments prints a different
+   `--target` list, or `docs/MANIFEST.md` (`target` values) describes one not listed here,
+   offer what they say instead.
+
+   For `window`, also ask whether it shows only while a session is open
+   (`--show-with-session`) or regardless of the session (the default). Do not ask about
+   floating: a window floats with LUNA's plugin windows by default. Pass `--no-floating`
+   only if the user asks for an ordinary window.
+
+2. Scaffold with the answers as explicit flags. From the folder that should contain the
+   Add On:
    ```sh
-   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
+   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
-   The default is a `"window"` Add On with `"floating": true`, which floats with LUNA's plugin
-   windows. Pass `--no-floating` for an ordinary window. Pass `--show-with-session` for a
-   window that only shows while a session is open. Pass `--target browser` for a panel in
-   LUNA's secondary browser beside the Timeline or Mixer, `--target editor` for the editor
-   panel under the Timeline (in place of the Clip Editor, at its height; it does not follow
-   the selection), or `--target app` for a full page.
    Pass `--manufacturer` with the author's company or name; LUNA shows it in Settings > Add
    Ons, and without it the field is left out of the manifest.
    See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`, `manufacturer`).
@@ -26,20 +39,20 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
    run `node <builder>/dist/cli.js new ...` after `npm run build` in the builder package.
 
-2. Read `logic.js` and `main.js` in the scaffold. `logic.js` holds engine logic with no DOM
+3. Read `logic.js` and `main.js` in the scaffold. `logic.js` holds engine logic with no DOM
    and is what the tests exercise. `main.js` connects and renders. Keep that split.
 
-3. Implement the feature in `logic.js` first, as functions that take SDK objects
+4. Implement the feature in `logic.js` first, as functions that take SDK objects
    (`Luna.Session`, `Luna.Track`) and return plain data or perform engine actions. Then wire it
    in `main.js`. Read only the QUICKSTART section you need:
    `<builder>/docs/QUICKSTART.md` sections 3 to 11.
 
-4. Add a test in `tests/` for each logic function, using the pattern already there:
+5. Add a test in `tests/` for each logic function, using the pattern already there:
    `engine.addSession(...)`, `Luna.connect({ port_: engine.port() })`, `await luna.session()`,
    act, `await engine.settled()`, assert on `engine.requests`, `engine.value(...)`, or the
    model. For a control edit, assert `engine.touches` is one `:on` then one `:off` per edit.
 
-5. Try it in a browser with LUNA running: `npx ua-builder serve`, open
+6. Try it in a browser with LUNA running: `npx ua-builder serve`, open
    `http://localhost:8790/`. Then `npx ua-builder install` and open it from LUNA's Add Ons menu (Windows, Browsers, Editors or Apps, by target).
 
 ## Rules

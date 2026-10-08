@@ -26,7 +26,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 
 ## Skills (Claude Code)
 
-- skills/create-add-on: scaffold, connect, first feature, tests.
+- skills/create-add-on: ask the target, scaffold, connect, first feature, tests.
 - skills/add-feature: wrap an engine path the SDK does not type yet.
 - skills/test-add-on: MockEngine fixtures, settled(), live lane rules.
 - skills/debug-connection: nothing connects, no pushes, wrong port, reconnect.
