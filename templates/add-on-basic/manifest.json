@@ -1,7 +1,7 @@
 {
     "package_name": "__TITLE__",
     "id": "__ID__",
-    "title": "__TITLE__",
+    "name": "__TITLE__",
     "version": "0.1.0",
     "manufacturer": "__MANUFACTURER__",
     "sdk_version": "__SDK_VERSION__",

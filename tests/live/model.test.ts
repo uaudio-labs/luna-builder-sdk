@@ -81,7 +81,7 @@ describe.skipIf(!live)('live: model', () => {
     await Promise.all([luna.gui.addOns.load(), luna.gui.windows.load(), luna.drivers.load()]);
     expect(luna.gui.main.page.value).toBeDefined();
     expect(Array.isArray(luna.drivers.connected.value)).toBe(true);
-    expect(luna.gui.addOns.items.every((a) => typeof a.title.value === 'string')).toBe(true);
+    expect(luna.gui.addOns.items.every((a) => typeof a.name.value === 'string')).toBe(true);
   });
 
   it('adds and deletes a marker', async () => {

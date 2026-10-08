@@ -424,7 +424,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
   it('talks to the LUNA host surface: pages, add-ons, dialogs, tasks', async () => {
     const { engine, luna } = await connected();
     await Promise.all([luna.gui.addOns.load(), luna.gui.windows.load()]);
-    expect(luna.gui.addOns.items.map((a) => a.title.value)).toEqual(['Demo']);
+    expect(luna.gui.addOns.items.map((a) => a.name.value)).toEqual(['Demo']);
     expect(luna.gui.addOns.items[0]!.floating.value).toBe(true);
     expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.manufacturer.value).toBe('Example Co');

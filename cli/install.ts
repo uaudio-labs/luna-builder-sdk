@@ -18,7 +18,7 @@ export async function install(args: Args): Promise<number> {
   const installed = installedAddOns(folder);
   const own = installed.filter((a) => a.entry === target || sameFolder(a.entry, dir)).map((a) => a.entry);
   const clashes = addOnClashes(entries, installed, own);
-  if (clashes.length) throw new Error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nChange "id" or "title" in manifest.json, or remove the other Add On.`);
+  if (clashes.length) throw new Error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nChange "id" or "name" in manifest.json, or remove the other Add On.`);
   if (existsSync(target) || isDanglingLink(target)) {
     const st = lstatSync(target);
     if (st.isSymbolicLink()) {
@@ -60,8 +60,8 @@ function isDanglingLink(path: string): boolean {
   }
 }
 
-function report(entries: { id: string; title: string; target?: string }[]): number {
+function report(entries: { id: string; name: string; target?: string }[]): number {
   console.log(`LUNA will list:`);
-  for (const e of entries) console.log(`  ${e.title}  (${e.id})  under ${menuFor(e.target)}`);
+  for (const e of entries) console.log(`  ${e.name}  (${e.id})  under ${menuFor(e.target)}`);
   return 0;
 }

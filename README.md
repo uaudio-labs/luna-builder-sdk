@@ -40,7 +40,7 @@ the index for coding agents, and `skills/` holds shared Claude Code and Codex sk
 testing and debugging Add Ons. From this folder:
 
 ```sh
-npx ua-builder new my-add-on --title "My Add On"   # scaffold: manifest, page, logic, tests, vendored SDK
+npx ua-builder new my-add-on --name "My Add On"   # scaffold: manifest, page, logic, tests, vendored SDK
 cd my-add-on && npm install && npm test             # tests run against Luna.MockEngine, no LUNA
 npx ua-builder serve                                # http://localhost:8790/
 npx ua-builder probe http://localhost:8790/         # read the served page's live DOM as JSON

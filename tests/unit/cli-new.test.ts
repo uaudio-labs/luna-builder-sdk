@@ -84,27 +84,43 @@ describe('ua-builder new', () => {
   });
 
   it('refuses an id an installed Add On already uses, before writing anything', async () => {
-    installed('Other', { id: 'com.example.demo', title: 'Something Else', html: 'index.html' });
+    installed('Other', { id: 'com.example.demo', name: 'Something Else', html: 'index.html' });
     const { dir, code, out } = await scaffold();
     expect(code).toBe(1);
     expect(existsSync(dir)).toBe(false);
     expect(out).toContain('id "com.example.demo" is already used by "Something Else"');
   });
 
-  it('refuses a title an installed Add On already uses, ignoring case', async () => {
-    installed('Bundle.lunaaddon', { add_ons: [{ id: 'com.other.a', title: 'A' }, { id: 'com.other.demo', title: 'DEMO ' }] });
+  it('refuses a name an installed Add On already uses, ignoring case', async () => {
+    installed('Bundle.lunaaddon', { add_ons: [{ id: 'com.other.a', name: 'A' }, { id: 'com.other.demo', name: 'DEMO ' }] });
     const { dir, code, out } = await scaffold();
     expect(code).toBe(1);
     expect(existsSync(dir)).toBe(false);
-    expect(out).toContain('title "Demo" is already used by com.other.demo');
+    expect(out).toContain('name "Demo" is already used by com.other.demo');
   });
 
-  it('accepts a new --id and --title, and skips unreadable manifests', async () => {
-    installed('Other', { id: 'com.example.demo', title: 'Demo', html: 'index.html' });
+  it('refuses a name an installed Add On still declares as the deprecated title', async () => {
+    installed('Legacy', { id: 'com.other.demo', title: 'Demo', html: 'index.html' });
+    const { dir, code, out } = await scaffold();
+    expect(code).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+    expect(out).toContain('name "Demo" is already used by com.other.demo');
+  });
+
+  it('accepts a new --id and --name, and skips unreadable manifests', async () => {
+    installed('Other', { id: 'com.example.demo', name: 'Demo', html: 'index.html' });
     mkdirSync(join(addOns, 'Broken'));
     writeFileSync(join(addOns, 'Broken', 'manifest.json'), '{ not json');
-    const { dir, code } = await scaffold('--id', 'com.example.demo2', '--title', 'Demo 2');
+    const { dir, code } = await scaffold('--id', 'com.example.demo2', '--name', 'Demo 2');
     expect(code).toBe(0);
-    expect(readManifest(dir).entries[0]).toMatchObject({ id: 'com.example.demo2', title: 'Demo 2' });
+    const entry = readManifest(dir).entries[0];
+    expect(entry).toMatchObject({ id: 'com.example.demo2', name: 'Demo 2' });
+    expect(entry).not.toHaveProperty('title');
+  });
+
+  it('still takes --title as an alias for --name', async () => {
+    const { dir, code } = await scaffold('--title', 'Demo 3');
+    expect(code).toBe(0);
+    expect(readManifest(dir).entries[0]).toMatchObject({ name: 'Demo 3' });
   });
 });

@@ -23,7 +23,8 @@ export type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
 
 export class AddOn extends Node {
   readonly addOnId: Prop<string>;
-  readonly title: Prop<string>;
+  /** The manifest's `name`: its menu item and panel header. */
+  readonly name: Prop<string>;
   readonly target: Prop<AddOnTarget>;
   /** Absolute file path of the icon, or `''`. */
   readonly icon: Prop<string>;
@@ -38,7 +39,7 @@ export class AddOn extends Node {
   constructor(client: Client, path: string) {
     super(client, path);
     this.addOnId = this.prop<string>('id');
-    this.title = this.prop<string>('title');
+    this.name = this.prop<string>('name');
     this.target = this.prop<AddOnTarget>('target');
     this.icon = this.prop<string>('icon');
     this.floating = this.prop<boolean>('floating');

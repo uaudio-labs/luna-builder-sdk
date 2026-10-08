@@ -5,6 +5,9 @@ it carries, in brief. `CHANGELOG.md` has the detail.
 
 ## Unreleased
 
+- The manifest's `title` is now `name`, and `Luna.AddOn.title` is now `Luna.AddOn.name`.
+  LUNA and `ua-builder` still accept `title` in a manifest; rename it when convenient.
+  `ua-builder new` takes `--name` (`--title` still works).
 - New `docs/FILES.md`: the two ways a user's file reaches an Add On. A `File` the page can
   decode comes from `<input type="file">` or an HTML drop and goes into the session with
   `session.uploadFile()`; a path from `luna.gui.chooseFiles()` or the new `Luna.onPathDrop()`

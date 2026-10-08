@@ -29,7 +29,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 {
     "package_name": "My Add On",
     "id": "com.example.my_add_on",
-    "title": "My Add On",
+    "name": "My Add On",
     "version": "0.1.0",
     "manufacturer": "Example Audio",
     "sdk_version": "0.1.0-alpha.6",
@@ -49,8 +49,8 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
     "package_name": "My Add Ons",
     "manufacturer": "Example Audio",
     "add_ons": [
-        { "id": "com.example.a", "title": "A", "html": "a/index.html", "local_content_offset": "..", "width": 800, "height": 500 },
-        { "id": "com.example.b", "title": "B", "html": "b/index.html", "local_content_offset": "..", "target": "browser" }
+        { "id": "com.example.a", "name": "A", "html": "a/index.html", "local_content_offset": "..", "width": 800, "height": 500 },
+        { "id": "com.example.b", "name": "B", "html": "b/index.html", "local_content_offset": "..", "target": "browser" }
     ]
 }
 ```
@@ -72,7 +72,7 @@ size; see `width`, `height` below.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Unique across everything installed. Reverse-DNS by convention. |
-| `title` | string | Menu name. Also unique; duplicates collapse into one. |
+| `name` | string | Display name: the menu item, and the panel header for `"browser"` and `"editor"`. Also unique; duplicates collapse into one. Manifests written before `name` existed use `title` for it, which LUNA still reads when `name` is absent (`name` wins when both are present). `ua-builder` accepts `title` too, with a warning to rename it. LUNA reports it as the `name` property under `/gui/add_ons/<id>` (`name` on `luna.gui.addOns` items in the SDK). |
 | `html` or `url` | string | Exactly one; an entry with neither or both is dropped. `html` is a page shipped with the Add On, relative to the manifest folder (preferred, so the Add On stays relocatable) or absolute. `url` is a hosted page used as-is; you are responsible for it being well formed. Either may carry its own query string (`index.html?page=a`). |
 
 ### Optional
@@ -98,7 +98,7 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
   front if it is behind, and closes it if it is already in front. The item is check-marked
   while the window is open. See `floating` for how it layers.
 - **`"browser"`**: a panel in LUNA's secondary browser, the right-hand side panel that also
-  shows Media, Markers and Lyrics, with the Add On's `title` as its header. Its menu item is
+  shows Media, Markers and Lyrics, with the Add On's `name` as its header. Its menu item is
   enabled only on the Timeline and Mixer pages, where that panel lives, and disabled
   everywhere else, including while no session is open. Choosing the menu item shows the Add On,
   replacing whatever the panel showed (another browser Add On included); choosing it while it
@@ -109,7 +109,7 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
   Add On is showing is saved with the session: reopening the session shows it again (if it is
   still installed), and a session that was not showing one opens without it.
 - **`"editor"`**: the editor panel docked at the bottom of the Timeline, in place of LUNA's
-  Clip Editor, with the Add On's `title` in the panel's header. Its menu item is enabled only
+  Clip Editor, with the Add On's `name` in the panel's header. Its menu item is enabled only
   on the Timeline page, where that panel lives, and disabled everywhere else. Choosing the menu
   item opens the panel on the Add On, replacing the Clip Editor or another editor Add On;
   choosing it while it is showing closes the panel, and the panel shows the Clip Editor the
@@ -178,7 +178,7 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 - LUNA does not check that the file exists or read it when the manifest loads; a bad path is
   not an error, and an empty string is the same as leaving it out.
 - LUNA reports the resolved absolute path as the `icon` property under `/gui/add_ons/<id>`
-  (next to `id`, `title`, `target`, `floating`, `show_with_session` and `manufacturer`), or an empty string when there is none. It is not yet
+  (next to `id`, `name`, `target`, `floating`, `show_with_session` and `manufacturer`), or an empty string when there is none. It is not yet
   drawn in LUNA's menus.
 
 `local_content_offset`:
@@ -213,7 +213,7 @@ Read only by whatever installs the Add On: `ua-builder install`, or LUNA when it
 
 | Field | Notes |
 |---|---|
-| `package_name` | Name of the Add Ons folder entry: the symlink (or copy) `ua-builder install` creates, or the folder LUNA unzips a `.lunaaddon` file into. Without it the entry is named after the Add On folder (for a `.lunaaddon`, the folder at the top of the zip, else the file's name). Surrounding whitespace is trimmed. Does not affect menu names, which come from `title`. |
+| `package_name` | Name of the Add Ons folder entry: the symlink (or copy) `ua-builder install` creates, or the folder LUNA unzips a `.lunaaddon` file into. Without it the entry is named after the Add On folder (for a `.lunaaddon`, the folder at the top of the zip, else the file's name). Surrounding whitespace is trimmed. Does not affect menu names, which come from `name`. |
 
 `package_name` has to be a bare name, not a path. When LUNA installs a `.lunaaddon` file it
 falls back to that default name, with a warning, if the value is not a string, is blank, is
@@ -246,10 +246,10 @@ Everything else goes over the engine connection, including LUNA UI actions throu
 
 ## Checklist
 
-1. `manifest.json` at the Add On root, with `id`, `title` and exactly one of `html`/`url`,
+1. `manifest.json` at the Add On root, with `id`, `name` and exactly one of `html`/`url`,
    plus `width` and `height` for a `"window"`.
-2. Keep `id` and `title` unique across everything installed. `ua-builder new` and `install`
-   check both against the Add Ons folder (titles ignoring case) and refuse a clash.
+2. Keep `id` and `name` unique across everything installed. `ua-builder new` and `install`
+   check both against the Add Ons folder (names ignoring case) and refuse a clash.
 3. Relative `html`; set `local_content_offset` only if the page reaches above its folder.
 4. `target: "app"` only for a full LUNA page; `"browser"` for a panel beside the Timeline
    or Mixer, which should lay out for a narrow, user-resizable width; `"editor"` for the

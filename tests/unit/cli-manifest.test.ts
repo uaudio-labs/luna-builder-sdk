@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readManifest } from '../../cli/util';
 
 const dirs: string[] = [];
@@ -11,17 +11,36 @@ function addOn(entry: Record<string, unknown>, omit: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), 'ua-manifest-'));
   dirs.push(dir);
   writeFileSync(join(dir, 'index.html'), '<!doctype html>');
-  const manifest: Record<string, unknown> = { id: 'com.example.a', title: 'A', html: 'index.html', width: 400, height: 300, ...entry };
+  const manifest: Record<string, unknown> = { id: 'com.example.a', name: 'A', html: 'index.html', width: 400, height: 300, ...entry };
   for (const k of omit) delete manifest[k];
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
   return dir;
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('readManifest', () => {
+  it('requires a non-empty string name', () => {
+    expect(() => readManifest(addOn({}, ['name']))).toThrow(/"name" must be a non-empty string/);
+    expect(() => readManifest(addOn({ name: '' }))).toThrow(/"name" must be a non-empty string/);
+    expect(() => readManifest(addOn({ name: 7 }))).toThrow(/"name" must be a non-empty string/);
+  });
+
+  it('accepts the deprecated title in place of name, as LUNA does, with a warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(readManifest(addOn({ title: 'Old' }, ['name'])).entries[0]!.name).toBe('Old');
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/"title" is deprecated; rename it to "name"/));
+  });
+
+  it('prefers name over title, as LUNA does, and warns that title is ignored', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(readManifest(addOn({ name: 'New', title: 'Old' })).entries[0]!.name).toBe('New');
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/"title" is ignored when "name" is present/));
+  });
+
   it('accepts every target LUNA shows, and rejects one it would turn into "window"', () => {
     for (const target of ['window', 'app', 'page', 'browser', 'editor']) {
       expect(readManifest(addOn({ target })).entries[0]!.target).toBe(target);
@@ -49,7 +68,7 @@ describe('readManifest', () => {
   it('accepts a top-level string manufacturer in the add_ons shape, and rejects a non-string', () => {
     const shape = (manufacturer: unknown): string => {
       const dir = addOn({});
-      const entry = { id: 'com.example.a', title: 'A', html: 'index.html', width: 400, height: 300 };
+      const entry = { id: 'com.example.a', name: 'A', html: 'index.html', width: 400, height: 300 };
       writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ manufacturer, add_ons: [entry] }));
       return dir;
     };

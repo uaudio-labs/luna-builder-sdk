@@ -4,7 +4,7 @@ A LUNA Add On built with `@uaudio/luna-builder-sdk`.
 
 | File | Purpose |
 |---|---|
-| `manifest.json` | What LUNA reads: id, title, window size, entry page. See the SDK's `docs/MANIFEST.md`. |
+| `manifest.json` | What LUNA reads: id, name, window size, entry page. See the SDK's `docs/MANIFEST.md`. |
 | `index.html` | The page. Loads the vendored SDK bundle, then `logic.js`, then `main.js`. |
 | `logic.js` | Engine logic with no DOM. Tests run this against `Luna.MockEngine`. |
 | `main.js` | DOM wiring: connect, follow the focused session, render. |

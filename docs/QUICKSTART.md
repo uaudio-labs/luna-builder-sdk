@@ -6,7 +6,7 @@ No audio or MIDI streaming: live MIDI input is Web MIDI (`navigator.requestMIDIA
 ## 1. Create and run
 
 ```sh
-npx ua-builder new my-add-on --title "My Add On"
+npx ua-builder new my-add-on --name "My Add On"
 cd my-add-on && npm install
 npm test                  # mock engine, no LUNA
 npx ua-builder serve      # http://localhost:8790/  (with LUNA running: live data)

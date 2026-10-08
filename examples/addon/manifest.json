@@ -1,7 +1,7 @@
 {
     "package_name": "Mute Button",
     "id": "com.uaudio.builder.example_mute_button",
-    "title": "Mute Button (luna-builder-sdk example)",
+    "name": "Mute Button (luna-builder-sdk example)",
     "version": "0.1.0",
     "manufacturer": "Universal Audio",
     "sdk_version": "0.1.0-alpha.6",

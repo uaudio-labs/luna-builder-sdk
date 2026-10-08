@@ -177,12 +177,12 @@ try {
 
   // The bundled CLI must find the plugin as its package root and scaffold from sdk/.
   const scaffold = join(temporary, 'scaffolded');
-  execFileSync(process.execPath, [join(relocated, 'sdk/cli.js'), 'new', 'probe-add-on', '--dir', scaffold, '--title', 'Probe Add On'], { cwd: temporary, stdio: 'pipe' });
+  execFileSync(process.execPath, [join(relocated, 'sdk/cli.js'), 'new', 'probe-add-on', '--dir', scaffold, '--name', 'Probe Add On'], { cwd: temporary, stdio: 'pipe' });
   const addOn = join(scaffold, 'probe-add-on');
   assert.equal(await readFile(join(addOn, 'vendor/luna.global.js'), 'utf8'), await read(`${PLUGIN}/sdk/luna.global.js`), 'the relocated CLI vendored the wrong bundle');
   const manifest = JSON.parse(await readFile(join(addOn, 'manifest.json'), 'utf8'));
   assert.equal(manifest.sdk_version, pkg.version);
-  assert.equal(manifest.title, 'Probe Add On');
+  assert.equal(manifest.name, 'Probe Add On');
   assert.ok(!(await readFile(join(addOn, 'package.json'), 'utf8')).includes('__'), 'template placeholders survived the scaffold');
 
   // ------------------------------------------------------- relative links resolve

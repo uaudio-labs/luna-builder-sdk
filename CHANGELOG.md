@@ -37,6 +37,13 @@ Added
   `luna.gui.addOns` items (`''` when the manifest has none).
 
 Changed
+- The manifest's `title` is now `name`. LUNA still reads `title` when `name` is absent, and
+  `ua-builder` accepts it with a warning to rename it; `name` wins when both are present. The
+  templates and examples write `name`. LUNA publishes it as the `name` property under
+  `/gui/add_ons/<id>`, so `Luna.AddOn.title` is now `Luna.AddOn.name` (breaking; a LUNA that
+  predates the rename still publishes `title`, which `luna.gui.addOns` items no longer read).
+- `ua-builder new --name "Name"` sets the manifest's `name`; `--title` still works as an
+  alias. Clash messages from `new` and `install` say `name` instead of `title`.
 - Without `/gui`, every `luna.gui` command and `session.importFile` reject at once with
   `Luna.Unsupported` instead of posting to a missing node (a `chooseFiles` used to wait out
   its 10-minute timeout).

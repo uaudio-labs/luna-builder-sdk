@@ -1,4 +1,4 @@
-/** `ua-builder install` refuses an Add On whose id or title another installed Add On uses. */
+/** `ua-builder install` refuses an Add On whose id or name another installed Add On uses. */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,21 +38,21 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === 'win32')('ua-builder install', () => {
-  it('refuses an id or title already installed, and links nothing', async () => {
-    addOn(addOns, 'Other', { id: 'com.x.taken', title: 'Taken' });
+  it('refuses an id or name already installed, and links nothing', async () => {
+    addOn(addOns, 'Other', { id: 'com.x.taken', name: 'Taken' });
     const src = mkdtempSync(join(tmpdir(), 'ua-src-'));
     dirs.push(src);
-    const byId = addOn(src, 'a', { package_name: 'A', id: 'com.x.taken', title: 'Fresh' });
+    const byId = addOn(src, 'a', { package_name: 'A', id: 'com.x.taken', name: 'Fresh' });
     await expect(run(byId)).rejects.toThrow('id "com.x.taken" is already used by "Taken"');
     expect(existsSync(join(addOns, 'A'))).toBe(false);
-    const byTitle = addOn(src, 'b', { package_name: 'B', id: 'com.x.fresh', title: 'taken' });
-    await expect(run(byTitle)).rejects.toThrow('title "taken" is already used by com.x.taken');
+    const byName = addOn(src, 'b', { package_name: 'B', id: 'com.x.fresh', name: 'taken' });
+    await expect(run(byName)).rejects.toThrow('name "taken" is already used by com.x.taken');
   });
 
   it('reinstalls the same Add On without calling it a clash', async () => {
     const src = mkdtempSync(join(tmpdir(), 'ua-src-'));
     dirs.push(src);
-    const dir = addOn(src, 'mine', { package_name: 'Mine', id: 'com.x.mine', title: 'Mine' });
+    const dir = addOn(src, 'mine', { package_name: 'Mine', id: 'com.x.mine', name: 'Mine' });
     expect(await run(dir)).toBe(0);
     expect(await run(dir)).toBe(0);
     expect(existsSync(join(addOns, 'Mine', 'manifest.json'))).toBe(true);

@@ -208,7 +208,7 @@ Conventions applied during the port (from `uanet-clients/docs/api-codeability-re
 
 ## Add On packaging and host integration
 
-`manifest.json` keeps the existing spec (`docs/MANIFEST.md`: `id`, `title`,
+`manifest.json` keeps the existing spec (`docs/MANIFEST.md`: `id`, `name`,
 `width`, `height`, exactly one of `html`/`url`, optional `target`, `icon`,
 `local_content_offset`) and adds:
 

@@ -113,7 +113,10 @@ export interface Manifest {
 
 export interface ManifestEntry {
   id: string;
-  title: string;
+  /** The Add On's display name: its menu item and panel header. */
+  name: string;
+  /** @deprecated The old key for `name`. LUNA still reads it when `name` is absent. */
+  title?: string;
   html?: string;
   url?: string;
   /** Required for a `"window"`; LUNA sizes browser, app and editor Add Ons itself. */
@@ -142,18 +145,28 @@ export function menuFor(target: string | undefined): string {
   return 'Add Ons > Windows';
 }
 
+/**
+ * An entry's display name as LUNA reads it: `name`, else the deprecated `title`. Undefined
+ * when neither is a string.
+ */
+export function entryName(e: { [k: string]: unknown }): string | undefined {
+  if (e.name !== undefined) return typeof e.name === 'string' ? e.name : undefined;
+  return typeof e.title === 'string' ? e.title : undefined;
+}
+
 /** An Add On LUNA lists from its Add Ons folder, and the folder entry it came from. */
 export interface InstalledAddOn {
   id: string;
-  title: string;
+  name: string;
   /** The Add Ons folder entry (folder or symlink). */
   entry: string;
 }
 
 /**
  * Every Add On in LUNA's Add Ons folder, read leniently: an entry with no readable
- * `manifest.json` is skipped, as is a manifest entry without a string `id` and `title`. No
- * folder (LUNA not installed, or a platform LUNA does not run on) means none.
+ * `manifest.json` is skipped, as is a manifest entry without a string `id` and `name` (or
+ * the deprecated `title`). No folder (LUNA not installed, or a platform LUNA does not run on)
+ * means none.
  */
 export function installedAddOns(folder?: string): InstalledAddOn[] {
   let root: string;
@@ -174,33 +187,38 @@ export function installedAddOns(folder?: string): InstalledAddOn[] {
     }
     const entries = 'add_ons' in manifest ? (Array.isArray(manifest.add_ons) ? manifest.add_ons : []) : [manifest];
     for (const e of entries) {
-      if (typeof e?.id === 'string' && typeof e.title === 'string') out.push({ id: e.id, title: e.title, entry });
+      const name = e ? entryName(e) : undefined;
+      if (typeof e?.id === 'string' && name !== undefined) out.push({ id: e.id, name, entry });
     }
   }
   return out;
 }
 
 /**
- * The installed Add Ons whose `id` or `title` an Add On would collide with. LUNA needs both
- * unique across everything installed; a duplicate title collapses into one menu item. Titles
+ * The installed Add Ons whose `id` or `name` an Add On would collide with. LUNA needs both
+ * unique across everything installed; a duplicate name collapses into one menu item. Names
  * compare without case or surrounding whitespace, since they read the same in the menu.
  * Entries in `except` (the Add On's own install, being replaced) are left out.
  */
-export function addOnClashes(wanted: { id: string; title: string }[], installed: InstalledAddOn[], except: string[] = []): string[] {
-  const titleKey = (t: string) => t.trim().toLowerCase();
+export function addOnClashes(wanted: { id: string; name: string }[], installed: InstalledAddOn[], except: string[] = []): string[] {
+  const nameKey = (t: string) => t.trim().toLowerCase();
   const skip = new Set(except.map((p) => resolve(p)));
   const problems: string[] = [];
   for (const w of wanted) {
     for (const i of installed) {
       if (skip.has(resolve(i.entry))) continue;
-      if (i.id === w.id) problems.push(`id "${w.id}" is already used by "${i.title}" in ${i.entry}`);
-      else if (titleKey(i.title) === titleKey(w.title)) problems.push(`title "${w.title}" is already used by ${i.id} in ${i.entry}`);
+      if (i.id === w.id) problems.push(`id "${w.id}" is already used by "${i.name}" in ${i.entry}`);
+      else if (nameKey(i.name) === nameKey(w.name)) problems.push(`name "${w.name}" is already used by ${i.id} in ${i.entry}`);
     }
   }
   return problems;
 }
 
-/** Read and validate `manifest.json` in `dir`. Throws with a readable message on problems. */
+/**
+ * Read and validate `manifest.json` in `dir`. Throws with a readable message on problems.
+ * An entry that still uses the deprecated `title` is accepted with a warning, and its
+ * returned entry has `name` filled in from it.
+ */
 export function readManifest(dir: string): { manifest: Manifest; entries: ManifestEntry[] } {
   const path = join(dir, 'manifest.json');
   if (!existsSync(path)) throw new Error(`no manifest.json in ${dir}`);
@@ -217,7 +235,14 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
   }
   for (const [i, e] of entries.entries()) {
     const where = `entry ${i} (${e.id ?? 'no id'})`;
-    for (const k of ['id', 'title'] as const) if (typeof e[k] !== 'string' || !e[k]) problems.push(`${where}: "${k}" must be a non-empty string`);
+    if (typeof e.id !== 'string' || !e.id) problems.push(`${where}: "id" must be a non-empty string`);
+    if (e.name === undefined && e.title !== undefined) {
+      console.warn(`manifest.json ${where}: "title" is deprecated; rename it to "name"`);
+      if (typeof e.title === 'string') e.name = e.title;
+    } else if (e.title !== undefined) {
+      console.warn(`manifest.json ${where}: "title" is ignored when "name" is present; remove it`);
+    }
+    if (typeof e.name !== 'string' || !e.name) problems.push(`${where}: "name" must be a non-empty string`);
     for (const k of ['width', 'height'] as const) {
       if (e[k] === undefined ? isWindow(e.target) : typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number${isWindow(e.target) ? '' : ' when present'}`);
     }
@@ -234,7 +259,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
 export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
-  ua-builder new <name> [--id com.x.y] [--title "Title"] [--manufacturer "Name"] [--target window|app|browser|editor]
+  ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--target window|app|browser|editor]
                         [--no-floating] [--show-with-session] [--width 900 --height 600] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]

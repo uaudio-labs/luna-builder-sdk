@@ -35,7 +35,7 @@ scripts/        vendor-sdk.mjs — copy the script-tag bundle into an Add On fol
 This folder is a complete prebuilt copy of the package, so the CLI runs straight from it:
 
 ```bash
-node <plugin-root>/sdk/cli.js new my-add-on --title "My Add On"
+node <plugin-root>/sdk/cli.js new my-add-on --name "My Add On"
 node <plugin-root>/sdk/cli.js doctor
 ```
 
