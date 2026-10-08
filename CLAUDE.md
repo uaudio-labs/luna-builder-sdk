@@ -90,8 +90,8 @@ npm run check       # all of the above
 
 This repo is the SDK source (`uaudio/luna-builder-sdk`); it is not a pac target. `npm ci`
 builds `dist/` and `plugins/` through `prepare`. Two tree targets consume the checkout at
-`<tree>/github-repos/luna-builder-sdk`: `sdk/luna/builder-installer` (`npm pack` of it) and
-`sdk/luna/builder-examples/studiolo` (npm-installs it), so package.json `files` is the one
+`<tree>/github-repos/luna-builder-sdk`: `sdk/luna/builder/installer` (`npm pack` of it) and
+`sdk/luna/builder/examples/studiolo` (npm-installs it), so package.json `files` is the one
 list of what ships. `design/PLATFORM.md` maps every piece of the platform.
 
 The engine never goes into git: it is built and versioned separately (a release asset, later

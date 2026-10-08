@@ -352,7 +352,7 @@ luna-builder-sdk/
 ```
 
 The `sdk-luna` Stash repo keeps `LUNA SDK` and the two tree targets that consume this
-checkout: `sdk/luna/builder-installer` and `sdk/luna/builder-examples/studiolo`.
+checkout: `sdk/luna/builder/installer` and `sdk/luna/builder/examples/studiolo`.
 
 ## Risks and dependencies
 

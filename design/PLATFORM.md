@@ -157,8 +157,8 @@ through the scaffold and the `test-add-on` / `verify-add-on` skills.
 | Piece | Location | Relationship |
 |---|---|---|
 | SDK source (source of truth) | `<tree>/github-repos/luna-builder-sdk`, GitHub `uaudio/luna-builder-sdk` | Edited by hand; commits reviewed by hand. No pac target since 2026-09-28 |
-| Installer | `packages/sdk/luna/builder-installer` (repo `sdk-luna`, pac target) | `npm ci` + `npm pack` of the clone, zipped with setup scripts |
-| Example Add On: StudioLo | `packages/sdk/luna/builder-examples/studiolo` (pac target) | npm-installs the SDK from the clone; vitest, then `ua-builder pack` |
+| Installer | `packages/sdk/luna/builder/installer` (repo `sdk-luna`, pac target) | `npm ci` + `npm pack` of the clone, zipped with setup scripts |
+| Example Add On: StudioLo | `packages/sdk/luna/builder/examples/studiolo` (pac target) | npm-installs the SDK from the clone; vitest, then `ua-builder pack` |
 | Legacy LUNA SDK | `packages/sdk/luna/LUNA SDK` (`UANet` global) | Ideas only (reconnect, manifest spec); not a dependency |
 | LUNA GUI client lib | `packages/hbgui/next_gen/shared/uanet-clients` | Source of the ported domain objects; kept, no forced migration |
 | Native engine | `deviced` in `hbsystem`, inside LUNA.app | The thing `WebSocketPort` talks to |

@@ -65,8 +65,8 @@ git push
 
 `dist/` and `plugins/` are git-ignored; `npm ci` regenerates them in any checkout through
 the `prepare` script. Two tree targets consume this checkout, so rebuild it (`npm ci`) after
-a pull before building them: `sdk/luna/builder-installer` (`npm pack` of it, zipped with
-setup scripts) and `sdk/luna/builder-examples/studiolo` (npm-installs it).
+a pull before building them: `sdk/luna/builder/installer` (`npm pack` of it, zipped with
+setup scripts) and `sdk/luna/builder/examples/studiolo` (npm-installs it).
 
 ## Source layout
 
