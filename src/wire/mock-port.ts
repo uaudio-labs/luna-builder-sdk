@@ -424,7 +424,7 @@ export class MockEngine {
           }, 5);
           return { uid };
         },
-        // Fact 106: validation, hidden entries and order as LUNA's list_files.
+        // Fact 106: validation, hidden entries and order (naturalCompare) as LUNA's list_files.
         list_files: (data, engine) => {
           const fail = (code: string, why: string) => new UAError(code, `list_files: ${why}`, { cmd: 'post', path: '/gui/list_files' });
           const path = typeof data === 'object' && data !== null ? (data as { path?: unknown }).path : undefined;
@@ -437,16 +437,10 @@ export class MockEngine {
             const isFile = engine.folders[cut > 0 ? dir.slice(0, cut) : '/']?.includes(dir.slice(cut + 1));
             throw fail(isFile ? 'uasrv.invalid_value' : 'uasrv.filesystem_error', isFile ? 'path is a file' : 'no folder at path');
           }
-          const fold = (n: string) => n.replace(/[A-Z]/g, (c) => c.toLowerCase());
-          const bytes = (n: string) => new TextEncoder().encode(n);
-          const compare = (a: Uint8Array, b: Uint8Array) => {
-            for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i]! - b[i]!;
-            return a.length - b.length;
-          };
           const files = names
             .map((raw) => ({ name: raw.replace(/\/$/, ''), is_directory: raw.endsWith('/') }))
             .filter((e) => !e.name.startsWith('.'))
-            .sort((a, b) => compare(bytes(fold(a.name)), bytes(fold(b.name))) || compare(bytes(a.name), bytes(b.name)))
+            .sort((a, b) => naturalCompare(a.name, b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
             .map((e) => ({ name: e.name, path: `${dir === '/' ? '' : dir}/${e.name}`, is_directory: e.is_directory }));
           return { files };
         },
@@ -1995,5 +1989,78 @@ export class MockPort implements Port {
     if (this.status === status) return;
     this.status = status;
     for (const listener of this.statusListeners) listener(status);
+  }
+}
+
+/**
+ * LUNA's `list_files` order (fact 106): JUCE's `String::compareNatural`, case-insensitive.
+ * Whitespace runs count as one, digit runs compare by value (a run with a leading zero
+ * digit by digit), A-Z fold case, and a character that is not an ASCII letter or digit
+ * sorts before one that is. JUCE classifies through the C library, which in LUNA on macOS
+ * knows ASCII only, so `Ü` sorts with the punctuation and folds no case.
+ */
+function naturalCompare(a: string, b: string): number {
+  const s1 = [...a].map((c) => c.codePointAt(0)!).concat(0);
+  const s2 = [...b].map((c) => c.codePointAt(0)!).concat(0);
+  const isSpace = (c: number) => c === 32 || (c >= 9 && c <= 13);
+  const isDigit = (c: number) => c >= 48 && c <= 57;
+  const isAlnum = (c: number) => isDigit(c) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+  const upper = (c: number) => (c >= 97 && c <= 122 ? c - 32 : c);
+  let i = 0;
+  let j = 0;
+  for (let first = true; ; first = false) {
+    const space1 = isSpace(s1[i]!);
+    const space2 = isSpace(s2[j]!);
+    if (!first && space1 !== space2) {
+      if (s1[i] === 0) return -1;
+      if (s2[j] === 0) return 1;
+      return space2 ? 1 : -1;
+    }
+    while (isSpace(s1[i]!)) i++;
+    while (isSpace(s2[j]!)) j++;
+    if (isDigit(s1[i]!) && isDigit(s2[j]!)) {
+      const result = s1[i] === 48 || s2[j] === 48 ? digitsLeft(s1, i, s2, j) : digitsRight(s1, i, s2, j);
+      if (result !== 0) return result;
+    }
+    let c1 = s1[i++]!;
+    let c2 = s2[j++]!;
+    if (c1 !== c2) {
+      c1 = upper(c1);
+      c2 = upper(c2);
+    }
+    if (c1 === c2) {
+      if (c1 === 0) return 0;
+      continue;
+    }
+    const alnum1 = isAlnum(c1);
+    const alnum2 = isAlnum(c2);
+    if (alnum2 && !alnum1) return -1;
+    if (alnum1 && !alnum2) return 1;
+    return c1 < c2 ? -1 : 1;
+  }
+
+  /** Digit runs by value: the longer run is larger; equal lengths go by the first difference. */
+  function digitsRight(x: number[], xi: number, y: number[], yi: number): number {
+    for (let bias = 0; ; xi++, yi++) {
+      const d1 = isDigit(x[xi]!);
+      const d2 = isDigit(y[yi]!);
+      if (!d1 && !d2) return bias;
+      if (!d1) return -1;
+      if (!d2) return 1;
+      if (x[xi] !== y[yi] && bias === 0) bias = x[xi]! < y[yi]! ? -1 : 1;
+    }
+  }
+
+  /** Digit runs with a leading zero: digit by digit, like a fraction. */
+  function digitsLeft(x: number[], xi: number, y: number[], yi: number): number {
+    for (; ; xi++, yi++) {
+      const d1 = isDigit(x[xi]!);
+      const d2 = isDigit(y[yi]!);
+      if (!d1 && !d2) return 0;
+      if (!d1) return -1;
+      if (!d2) return 1;
+      if (x[xi]! < y[yi]!) return -1;
+      if (x[xi]! > y[yi]!) return 1;
+    }
   }
 }

@@ -43,12 +43,12 @@ describe.skipIf(!live)('live: listing a folder', () => {
     await luna?.close();
   });
 
-  it('fact 106: listFiles lists a folder without hidden entries, sorted ignoring case', async () => {
+  it('fact 106: listFiles lists a folder without hidden entries, in natural order', async () => {
     const folder = join(dir, 'listing');
     mkdirSync(join(folder, 'Sub'), { recursive: true });
-    for (const name of ['b.txt', 'A.wav', 'c.aif', '.hidden', 'Ünïcode.txt']) writeFileSync(join(folder, name), '');
+    for (const name of ['b.txt', 'A.wav', 'c.aif', '.hidden', 'Ünïcode.txt', 'take10.wav', 'take2.wav']) writeFileSync(join(folder, name), '');
     const entries = await luna.gui.listFiles(folder);
-    expect(entries.map((e) => e.name)).toEqual(['A.wav', 'b.txt', 'c.aif', 'Sub', 'Ünïcode.txt']);
+    expect(entries.map((e) => e.name)).toEqual(['Ünïcode.txt', 'A.wav', 'b.txt', 'c.aif', 'Sub', 'take2.wav', 'take10.wav']);
     expect(entries.find((e) => e.name === 'Sub')?.isDirectory).toBe(true);
     expect(entries.find((e) => e.name === 'A.wav')?.path.endsWith('/listing/A.wav')).toBe(true);
     await expect(luna.gui.listFiles(join(folder, 'missing'))).rejects.toMatchObject({ code: 'uasrv.filesystem_error' });

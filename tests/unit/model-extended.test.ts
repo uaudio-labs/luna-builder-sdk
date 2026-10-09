@@ -465,11 +465,12 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(await luna.gui.chooseFolders()).toEqual([]);
   });
 
-  it('lists a folder: hidden entries left out, sorted ignoring case, ASCII before UTF-8 (fact 106)', async () => {
+  it('lists a folder: hidden entries left out, in natural order (fact 106)', async () => {
     const { engine, luna } = await connected();
-    engine.folders['/Samples'] = ['zeta.wav', '.DS_Store', 'Ünïcode/', 'b.wav', 'A.wav', 'Loops/', '_tmp.txt'];
+    engine.folders['/Samples'] = ['zeta.wav', '.DS_Store', 'Ünïcode/', 'take10.wav', 'b.wav', 'A.wav', 'take2.wav', 'Loops/', '_tmp.txt', 'take02.wav'];
     const entries = await luna.gui.listFiles('/Samples');
-    expect(entries.map((e) => e.name)).toEqual(['_tmp.txt', 'A.wav', 'b.wav', 'Loops', 'zeta.wav', 'Ünïcode']);
+    // Digit runs by value (take2 before take10), case ignored, punctuation and non-ASCII first.
+    expect(entries.map((e) => e.name)).toEqual(['_tmp.txt', 'Ünïcode', 'A.wav', 'b.wav', 'Loops', 'take02.wav', 'take2.wav', 'take10.wav', 'zeta.wav']);
     expect(entries.find((e) => e.name === 'Loops')).toEqual({ name: 'Loops', path: '/Samples/Loops', isDirectory: true });
     expect(entries.find((e) => e.name === 'A.wav')).toEqual({ name: 'A.wav', path: '/Samples/A.wav', isDirectory: false });
     engine.folders['/Samples/Loops'] = [];

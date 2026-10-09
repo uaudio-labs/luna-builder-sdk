@@ -8,7 +8,8 @@ engine is versioned separately.
 Added
 - `luna.gui.listFiles(path)`: the files and folders directly inside a folder, as LUNA sees the
   disk, each `{ name, path, isDirectory }` (`Luna.FileEntry`). Hidden entries are left out and
-  the rest sorted by name, ignoring case. Rejects `uasrv.filesystem_error` when nothing is
+  the rest are in natural order like LUNA's own browsers: case ignored, `take2` before
+  `take10`. Rejects `uasrv.filesystem_error` when nothing is
   there and `uasrv.invalid_value` for a relative path or a file (fact 106).
 - `luna.gui.chooseFolders({ title?, allowMultiple?, defaultPath? })`: LUNA's native folder
   dialog, resolving to absolute folder paths or `[]` if cancelled.

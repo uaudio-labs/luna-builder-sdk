@@ -27,7 +27,7 @@ page (fact 42). It is an optimization, not a way to read files.
 | `session.importFile(path, trackUid?)` | an audio, MIDI or video file path | LUNA's own import: a clip at the selection, on `trackUid` or a new track | `/gui` |
 | `luna.gui.chooseFiles()` | LUNA's open dialog | absolute paths, or `[]` if cancelled | `/gui` |
 | `luna.gui.chooseFolders()` | LUNA's folder dialog | absolute folder paths, or `[]` if cancelled | `/gui` |
-| `luna.gui.listFiles(path)` | an absolute folder path | its entries `{ name, path, isDirectory }`, hidden ones left out, sorted by name | `/gui` |
+| `luna.gui.listFiles(path)` | an absolute folder path | its entries `{ name, path, isDirectory }`, hidden ones left out, in natural order (`take2` before `take10`) | `/gui` |
 | `Luna.onPathDrop(handler)` | files dragged onto the page in LUNA | absolute paths with the drop's page `x`, `y` | LUNA's webview |
 
 - Place a source with `session.insertClip({ sourceUid: source.id, ... })`.

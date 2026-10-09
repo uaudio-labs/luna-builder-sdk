@@ -223,8 +223,9 @@ export class Gui extends Node {
 
   /**
    * The files and folders directly inside the folder at `path`, as LUNA sees the disk (fact
-   * 106). Hidden entries are left out; the rest are sorted by name, ignoring the case of
-   * A-Z. `path` must be absolute.
+   * 106). Hidden entries are left out; the rest are in natural order, as LUNA's own browsers
+   * sort: case ignored, and numbers by value, so `take2` comes before `take10`. `path` must
+   * be absolute.
    *
    * Rejects with a `Luna.Error` whose `code` is `uasrv.filesystem_error` when nothing is at
    * `path` or it cannot be read, and `uasrv.invalid_value` when `path` is relative or names
