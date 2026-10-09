@@ -3,6 +3,15 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 0.1.0-alpha.8 — 2026-10-09
+
+- New `luna.gui.listFiles(path)` lists a folder's files and folders as LUNA sees the disk, in
+  LUNA's own natural order, and `luna.gui.chooseFolders()` opens LUNA's native folder dialog.
+  Both need a LUNA that has the commands; an older one rejects them with `Luna.Unsupported`.
+  `Luna.MockEngine` models both.
+- New example `browse.html` ("Folder browser (Builder)") browses folders, imports an audio file
+  onto a new track at the playhead, and drags audio rows onto LUNA's timeline.
+
 ## 0.1.0-alpha.7 — 2026-10-08
 
 - The manifest's `title` is now `name`, and `Luna.AddOn.title` is now `Luna.AddOn.name`.

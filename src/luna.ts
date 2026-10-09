@@ -51,4 +51,4 @@ export { onPathDrop, canDropPaths } from './client/path-drop';
 export type { PathDrop, PathDropHandlers } from './client/path-drop';
 
 /** SDK version, kept in sync with package.json by the build. */
-export const VERSION = '0.1.0-alpha.7';
+export const VERSION = '0.1.0-alpha.8';

@@ -3,7 +3,7 @@
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
-## Unreleased
+## 0.1.0-alpha.8
 
 Added
 - `luna.gui.listFiles(path)`: the files and folders directly inside a folder, as LUNA sees the
