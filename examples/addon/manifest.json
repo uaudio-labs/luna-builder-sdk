@@ -4,7 +4,7 @@
     "name": "Mute Button (luna-builder-sdk example)",
     "version": "0.1.0",
     "manufacturer": "Universal Audio",
-    "sdk_version": "0.1.0-alpha.6",
+    "sdk_version": "0.1.0-alpha.7",
     "min_luna_version": "1.9.0",
     "engines": ["luna", "wasm"],
     "html": "index.html",

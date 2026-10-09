@@ -3,7 +3,7 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
-## Unreleased
+## 0.1.0-alpha.7 — 2026-10-08
 
 - The manifest's `title` is now `name`, and `Luna.AddOn.title` is now `Luna.AddOn.name`.
   LUNA and `ua-builder` still accept `title` in a manifest; rename it when convenient.

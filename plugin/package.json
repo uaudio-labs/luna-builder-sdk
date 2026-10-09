@@ -1,6 +1,6 @@
 {
   "name": "@uaudio/luna-builder-sdk",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "description": "Prebuilt @uaudio/luna-builder-sdk shipped inside the ua-luna-builder agent plugin",
   "license": "Apache-2.0",
   "private": true,
