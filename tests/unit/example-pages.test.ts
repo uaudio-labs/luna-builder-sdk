@@ -509,3 +509,79 @@ describe('examples/pianoroll.html', () => {
     page.close();
   });
 });
+
+describe('examples/browse.html', () => {
+  function engineWithDisk() {
+    const engine = engineWithSession(['Vocal']);
+    engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store', 'notes.txt'];
+    engine.folders['/Samples/Loops'] = ['beat.aif'];
+    return engine;
+  }
+  const names = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.all('#list .name').map((n) => n.textContent);
+
+  it('lists ?path=, opens a subfolder on click and goes back up', async () => {
+    const page = await loadExamplePage('browse.html', engineWithDisk(), { search: '?path=/Samples' });
+    await page.waitFor(() => names(page).length === 3, 'the listing');
+    expect(names(page)).toEqual(['kick.wav', 'Loops', 'notes.txt']);
+    expect(page.text('#status')).toContain('1 folder(s), 2 file(s) in /Samples');
+    (page.document.querySelector('#list li.dir') as HTMLElement).click();
+    await page.waitFor(() => names(page).join() === 'beat.aif', 'the subfolder');
+    expect((page.document.querySelector('#path') as HTMLInputElement).value).toBe('/Samples/Loops');
+    (page.document.querySelector('#up') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 3, 'the parent');
+    page.close();
+  });
+
+  it('imports an audio file onto a new track at the playhead, as one undo entry; other files get no button', async () => {
+    const engine = engineWithDisk();
+    engine.setValue('/sessions/abc', 'play_start', 4 * Luna.TICKS_PER_BEAT);
+    const page = await loadExamplePage('browse.html', engine, { search: '?path=/Samples' });
+    await page.waitFor(() => page.all('#list button').length === 1, 'the import button');
+    await page.waitFor(() => !(page.document.querySelector('#list button') as HTMLButtonElement).disabled, 'a session');
+    const tracksBefore = engine.children('/sessions/abc/tracks').length;
+    (page.document.querySelector('#list button') as HTMLButtonElement).click();
+    await page.waitFor(() => page.text('#status').startsWith('Imported'), 'the import');
+    expect(page.text('#status')).toContain('"kick" onto a new track at 2|1|');
+    expect(engine.children('/sessions/abc/tracks')).toHaveLength(tracksBefore + 1);
+    const posts = engine.requests.filter((r) => r.path.startsWith('/sessions/abc/')).map((r) => r.path.split('/').pop());
+    expect(posts).toEqual(expect.arrayContaining(['new_track', 'insert_clip']));
+    const insert = engine.requests.find((r) => r.path.endsWith('/insert_clip'))!.data as { start: number; track_uid: string };
+    expect(insert.start).toBe(4 * Luna.TICKS_PER_BEAT);
+    expect(engine.has(`/sessions/abc/tracks/${insert.track_uid}`)).toBe(true);
+    page.close();
+  });
+
+  it('makes audio rows draggable with their file:// URL and path; folders and other files are not', async () => {
+    const page = await loadExamplePage('browse.html', engineWithDisk(), { search: '?path=/Samples' });
+    await page.waitFor(() => page.all('#list li').length === 3, 'the listing');
+    const [kick, loops, notes] = page.all('#list li') as HTMLElement[];
+    expect([kick!.draggable, loops!.draggable, notes!.draggable]).toEqual([true, false, false]);
+    const data: Record<string, string> = {};
+    const start = new page.window.Event('dragstart', { bubbles: true });
+    Object.defineProperty(start, 'dataTransfer', { value: { setData: (k: string, v: string) => (data[k] = v), effectAllowed: '' } });
+    kick!.dispatchEvent(start);
+    expect(data).toEqual({ 'text/uri-list': 'file:///Samples/kick.wav', 'text/plain': '/Samples/kick.wav' });
+    page.close();
+  });
+
+  it('browses the folder chosen in LUNA’s dialog, and explains a bad path', async () => {
+    const engine = engineWithDisk();
+    engine.nextDialogFiles = ['/Samples/Loops'];
+    const page = await loadExamplePage('browse.html', engine);
+    await page.waitFor(() => !(page.document.querySelector('#choose') as HTMLButtonElement).disabled, 'the page to connect');
+    (page.document.querySelector('#choose') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).join() === 'beat.aif', 'the chosen folder');
+    (page.document.querySelector('#path') as HTMLInputElement).value = '/Nope';
+    page.document.querySelector('#go')!.dispatchEvent(new page.window.Event('submit', { cancelable: true }));
+    await page.waitFor(() => page.text('#status').includes('uasrv.filesystem_error'), 'the error');
+    expect(names(page).join()).toBe('beat.aif'); // the last good listing stays
+    page.close();
+  });
+
+  it('without /gui says there is no listing', async () => {
+    const page = await loadExamplePage('browse.html', new Luna.MockEngine({ gui: false }));
+    await page.waitFor(() => page.text('#status').includes('no /gui'), 'the no-gui status');
+    expect((page.document.querySelector('#choose') as HTMLButtonElement).disabled).toBe(true);
+    page.close();
+  });
+});

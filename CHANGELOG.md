@@ -3,6 +3,23 @@
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
 engine is versioned separately.
 
+## Unreleased
+
+Added
+- `luna.gui.listFiles(path)`: the files and folders directly inside a folder, as LUNA sees the
+  disk, each `{ name, path, isDirectory }` (`Luna.FileEntry`). Hidden entries are left out and
+  the rest sorted by name, ignoring case. Rejects `uasrv.filesystem_error` when nothing is
+  there and `uasrv.invalid_value` for a relative path or a file (fact 106).
+- `luna.gui.chooseFolders({ title?, allowMultiple?, defaultPath? })`: LUNA's native folder
+  dialog, resolving to absolute folder paths or `[]` if cancelled.
+- Both need a LUNA that has the commands; an older one rejects them with `Luna.Unsupported`.
+- `Luna.MockEngine` models both: `engine.folders` is the disk `listFiles` reads, and
+  `nextDialogFiles` is what `chooseFolders` selects.
+- `examples/browse.html` ("Folder browser (Builder)"): browse folders with `listFiles` and
+  start from LUNA's folder dialog. Import copies an audio file in with `importPath` and puts
+  it on a new track at the playhead (`newTrack` + `insertClip` in one transaction); audio rows
+  can also be dragged onto LUNA's timeline, carrying the file's `file://` URL and path.
+
 ## 0.1.0-alpha.7
 
 Added

@@ -26,6 +26,8 @@ page (fact 42). It is an optimization, not a way to read files.
 | `session.importPath(path)` | an audio file path the engine can open | an audio source, no clip | a native engine that sees the file |
 | `session.importFile(path, trackUid?)` | an audio, MIDI or video file path | LUNA's own import: a clip at the selection, on `trackUid` or a new track | `/gui` |
 | `luna.gui.chooseFiles()` | LUNA's open dialog | absolute paths, or `[]` if cancelled | `/gui` |
+| `luna.gui.chooseFolders()` | LUNA's folder dialog | absolute folder paths, or `[]` if cancelled | `/gui` |
+| `luna.gui.listFiles(path)` | an absolute folder path | its entries `{ name, path, isDirectory }`, hidden ones left out, sorted by name | `/gui` |
 | `Luna.onPathDrop(handler)` | files dragged onto the page in LUNA | absolute paths with the drop's page `x`, `y` | LUNA's webview |
 
 - Place a source with `session.insertClip({ sourceUid: source.id, ... })`.
@@ -60,6 +62,14 @@ if (await luna.gui.available()) {
   for (const path of paths) await session.importPath(path);   // a source, no clip
 }
 
+// A whole folder: pick it, list it, import the audio in it.
+const [folder] = await luna.gui.chooseFolders();
+if (folder) {
+  for (const entry of await luna.gui.listFiles(folder)) {
+    if (!entry.isDirectory && /\.(wav|aiff?)$/i.test(entry.name)) await session.importPath(entry.path);
+  }
+}
+
 if (Luna.canDropPaths()) {
   const stop = Luna.onPathDrop({
     dragOver: () => zone.classList.add('hot'),
@@ -70,10 +80,15 @@ if (Luna.canDropPaths()) {
 }
 ```
 
-- `chooseFiles`, `chooseSavePath`, `importFile` and every other `luna.gui` command reject
+- `chooseFiles`, `chooseFolders`, `listFiles`, `chooseSavePath`, `importFile` and every other `luna.gui` command reject
   with `Luna.Unsupported` when the engine has no `/gui` (a headless or wasm engine; fact 103).
   Check `luna.gui.available()`, not `Luna.isEmbeddedInLuna()`.
 - `importPath` needs no `/gui`, but the engine must be able to open the path.
+- `listFiles` reads the disk as LUNA sees it, one level deep; recurse into `isDirectory`
+  entries yourself. It rejects with code `uasrv.filesystem_error` when nothing is at the
+  path or LUNA cannot read it, and `uasrv.invalid_value` for a relative path or a file. A
+  LUNA older than `chooseFolders` and `listFiles` rejects them with `Luna.Unsupported`
+  (fact 106). `examples/browse.html` is a folder browser built on the two.
 - While a path-drop handler is registered, LUNA claims every file drag, so HTML `drop`
   events carry no files (fact 102). One page can still offer both: an `<input type="file">`
   for the File route and path drops for the session.

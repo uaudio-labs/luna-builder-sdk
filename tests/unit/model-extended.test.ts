@@ -455,6 +455,48 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(taskPosts).toEqual(['/gui/add_task', '/gui/update_task', '/gui/remove_task']);
   });
 
+  it('chooses folders through show_folder_dialog and releases the request (fact 106)', async () => {
+    const { engine, luna } = await connected();
+    engine.nextDialogFiles = ['/Samples/Kicks', '/Samples/Snares'];
+    expect(await luna.gui.chooseFolders({ title: 'Pick', allowMultiple: true, defaultPath: '/Samples' })).toEqual(['/Samples/Kicks', '/Samples/Snares']);
+    expect(engine.requests.find((r) => r.path === '/gui/show_folder_dialog')?.data).toEqual({ title: 'Pick', allow_multiple: true, default_path: '/Samples' });
+    expect(engine.requests.at(-1)?.path).toBe('/gui/release_file_chooser');
+    engine.nextDialogFiles = [];
+    expect(await luna.gui.chooseFolders()).toEqual([]);
+  });
+
+  it('lists a folder: hidden entries left out, sorted ignoring case, ASCII before UTF-8 (fact 106)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Samples'] = ['zeta.wav', '.DS_Store', 'Ünïcode/', 'b.wav', 'A.wav', 'Loops/', '_tmp.txt'];
+    const entries = await luna.gui.listFiles('/Samples');
+    expect(entries.map((e) => e.name)).toEqual(['_tmp.txt', 'A.wav', 'b.wav', 'Loops', 'zeta.wav', 'Ünïcode']);
+    expect(entries.find((e) => e.name === 'Loops')).toEqual({ name: 'Loops', path: '/Samples/Loops', isDirectory: true });
+    expect(entries.find((e) => e.name === 'A.wav')).toEqual({ name: 'A.wav', path: '/Samples/A.wav', isDirectory: false });
+    engine.folders['/Samples/Loops'] = [];
+    expect(await luna.gui.listFiles('/Samples/Loops/')).toEqual([]);
+  });
+
+  it('rejects listFiles with the engine codes LUNA answers (fact 106)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Samples'] = ['kick.wav'];
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.listFiles('/Nope'))).toBe('uasrv.filesystem_error');
+    expect(await code(luna.gui.listFiles('/Samples/kick.wav'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.listFiles('Samples'))).toBe('uasrv.invalid_value');
+  });
+
+  it('reports a LUNA without list_files or show_folder_dialog as Luna.Unsupported', async () => {
+    const { engine, luna } = await connected();
+    engine.fail('/gui/list_files', 'uasrv.invalid_object');
+    await expect(luna.gui.listFiles('/Samples')).rejects.toBeInstanceOf(Luna.Unsupported);
+    engine.fail('/gui/show_folder_dialog', 'uasrv.invalid_object');
+    await expect(luna.gui.chooseFolders()).rejects.toBeInstanceOf(Luna.Unsupported);
+    const headless = new Luna.MockEngine({ gui: false });
+    const bare = await Luna.connect({ port_: headless.port() });
+    await expect(bare.gui.listFiles('/Samples')).rejects.toBeInstanceOf(Luna.Unsupported);
+    await bare.close();
+  });
+
   it('exposes jobs with cancel only', async () => {
     const { engine, luna } = await connected();
     engine.addNode('/jobs/j1', { properties: { uid: 'j1', session_uid: 'abc', job_type: 'chord_extraction', status: 'running', stage: 'processing', error: '', warning: '', cancellable: true, percent_complete: 40 }, commands: {} });

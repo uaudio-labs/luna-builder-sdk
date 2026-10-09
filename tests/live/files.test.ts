@@ -1,13 +1,13 @@
 /**
- * Live lane for getting files in: `/gui` presence (fact 103) and the path route's
- * `importPath` (fact 42, `local_copy`). Needs LUNA on 4718 with a session open. It writes a
+ * Live lane for getting files in: `/gui` presence (fact 103), `listFiles` (fact 106) and the
+ * path route's `importPath` (fact 42, `local_copy`). Needs LUNA on 4718 with a session open. It writes a
  * quarter-second WAV to the temp folder, imports it as a source and trashes the source again;
  * nothing is placed on the timeline.
  *
  * The File route inside LUNA (picking and dropping a real file) needs a person: see
  * docs/FILES.md, Testing.
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -27,6 +27,35 @@ function wav(seconds = 0.25, rate = 48000): Uint8Array {
   for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 8000), true);
   return new Uint8Array(view.buffer);
 }
+
+// Needs no session: /gui answers with LUNA on its home page.
+describe.skipIf(!live)('live: listing a folder', () => {
+  let luna: Luna.Client;
+  let dir: string;
+
+  beforeAll(async () => {
+    luna = await Luna.connect({ requestTimeoutMs: 8000 });
+    dir = mkdtempSync(join(tmpdir(), 'ua-live-list-'));
+  });
+
+  afterAll(async () => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    await luna?.close();
+  });
+
+  it('fact 106: listFiles lists a folder without hidden entries, sorted ignoring case', async () => {
+    const folder = join(dir, 'listing');
+    mkdirSync(join(folder, 'Sub'), { recursive: true });
+    for (const name of ['b.txt', 'A.wav', 'c.aif', '.hidden', 'Ünïcode.txt']) writeFileSync(join(folder, name), '');
+    const entries = await luna.gui.listFiles(folder);
+    expect(entries.map((e) => e.name)).toEqual(['A.wav', 'b.txt', 'c.aif', 'Sub', 'Ünïcode.txt']);
+    expect(entries.find((e) => e.name === 'Sub')?.isDirectory).toBe(true);
+    expect(entries.find((e) => e.name === 'A.wav')?.path.endsWith('/listing/A.wav')).toBe(true);
+    await expect(luna.gui.listFiles(join(folder, 'missing'))).rejects.toMatchObject({ code: 'uasrv.filesystem_error' });
+    await expect(luna.gui.listFiles(join(folder, 'b.txt'))).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.listFiles('relative/path')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+  });
+});
 
 describe.skipIf(!live)('live: files', () => {
   let luna: Luna.Client;

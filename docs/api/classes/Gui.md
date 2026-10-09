@@ -138,6 +138,40 @@ if (path) await session.importPath(path);
 
 ***
 
+### chooseFolders()
+
+```ts
+chooseFolders(options): Promise<string[]>;
+```
+
+LUNA's native folder dialog. Resolves to the chosen folders' **absolute paths**, or `[]`
+if cancelled. A path route like [chooseFiles](#choosefiles): hand the paths to
+[listFiles](#listfiles) or the engine, not to `fetch`. Needs `/gui` ([Gui.available](#available)) and a
+LUNA that has the dialog (fact 106); an older one rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `allowMultiple?`: `boolean`; `defaultPath?`: `string`; `timeoutMs?`: `number`; `title?`: `string`; \} |
+| `options.allowMultiple?` | `boolean` |
+| `options.defaultPath?` | `string` |
+| `options.timeoutMs?` | `number` |
+| `options.title?` | `string` |
+
+#### Returns
+
+`Promise`\<`string`[]\>
+
+#### Example
+
+```ts
+const [folder] = await luna.gui.chooseFolders({ title: 'Choose a sample folder' });
+if (folder) console.log(await luna.gui.listFiles(folder));
+```
+
+***
+
 ### chooseSavePath()
 
 ```ts
@@ -218,6 +252,40 @@ Run a LUNA rack command by id with extra fields as its data. Escape hatch.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### listFiles()
+
+```ts
+listFiles(path): Promise<FileEntry[]>;
+```
+
+The files and folders directly inside the folder at `path`, as LUNA sees the disk (fact
+106). Hidden entries are left out; the rest are sorted by name, ignoring the case of
+A-Z. `path` must be absolute.
+
+Rejects with a `Luna.Error` whose `code` is `uasrv.filesystem_error` when nothing is at
+`path` or it cannot be read, and `uasrv.invalid_value` when `path` is relative or names
+a file. An older LUNA without the command rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`Promise`\<[`FileEntry`](../interfaces/FileEntry.md)[]\>
+
+#### Example
+
+```ts
+for (const entry of await luna.gui.listFiles('/Users/me/Samples')) {
+  if (!entry.isDirectory && entry.name.endsWith('.wav')) await session.importPath(entry.path);
+}
+```
 
 ***
 

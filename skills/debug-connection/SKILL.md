@@ -74,6 +74,7 @@ Works in a browser, nothing inside LUNA? See docs/FILES.md, "Inside LUNA today".
 - `fetch` of a `chooseFiles` path fails: by design. Pass it to `session.importPath()`.
 - `uploadFile` resolved to an older source: the bytes were already in the session (fact 42).
 - `chooseFiles` or `importFile` rejects `unsupported`: no `/gui` (headless or wasm engine).
+  `chooseFolders` and `listFiles` also reject it on a LUNA older than those commands (fact 106).
 
 ## SDK feedback
 

@@ -414,6 +414,42 @@ export class MockEngine {
           }, 5);
           return { uid };
         },
+        show_folder_dialog: (_data, engine) => {
+          const uid = `fc${engine.nextRow()}`;
+          engine.addNode(`/gui/file_chooser/${uid}`, { properties: { status: 'pending', files: [] } });
+          setTimeout(() => {
+            if (!engine.has(`/gui/file_chooser/${uid}`)) return;
+            engine.setValue(`/gui/file_chooser/${uid}`, 'files', engine.nextDialogFiles.map((p) => ({ path: p })));
+            engine.setValue(`/gui/file_chooser/${uid}`, 'status', engine.nextDialogFiles.length ? 'selected' : 'cancelled');
+          }, 5);
+          return { uid };
+        },
+        // Fact 106: validation, hidden entries and order as LUNA's list_files.
+        list_files: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `list_files: ${why}`, { cmd: 'post', path: '/gui/list_files' });
+          const path = typeof data === 'object' && data !== null ? (data as { path?: unknown }).path : undefined;
+          if (path === undefined || path === null) throw fail('uasrv.missing_field', 'path is required');
+          if (typeof path !== 'string' || !/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
+          const dir = path.length > 1 ? path.replace(/[\\/]+$/, '') : path;
+          const names = engine.folders[dir];
+          if (!names) {
+            const cut = dir.lastIndexOf('/');
+            const isFile = engine.folders[cut > 0 ? dir.slice(0, cut) : '/']?.includes(dir.slice(cut + 1));
+            throw fail(isFile ? 'uasrv.invalid_value' : 'uasrv.filesystem_error', isFile ? 'path is a file' : 'no folder at path');
+          }
+          const fold = (n: string) => n.replace(/[A-Z]/g, (c) => c.toLowerCase());
+          const bytes = (n: string) => new TextEncoder().encode(n);
+          const compare = (a: Uint8Array, b: Uint8Array) => {
+            for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i]! - b[i]!;
+            return a.length - b.length;
+          };
+          const files = names
+            .map((raw) => ({ name: raw.replace(/\/$/, ''), is_directory: raw.endsWith('/') }))
+            .filter((e) => !e.name.startsWith('.'))
+            .sort((a, b) => compare(bytes(fold(a.name)), bytes(fold(b.name))) || compare(bytes(a.name), bytes(b.name)))
+            .map((e) => ({ name: e.name, path: `${dir === '/' ? '' : dir}/${e.name}`, is_directory: e.is_directory }));
+          return { files };
+        },
         show_save_dialog: (_data, engine) => {
           const uid = `fc${engine.nextRow()}`;
           engine.addNode(`/gui/file_chooser/${uid}`, { properties: { status: 'pending', files: [] } });
@@ -435,6 +471,15 @@ export class MockEngine {
 
   /** What the next mock file dialog "selects"; empty means the user cancelled. */
   nextDialogFiles: string[] = [];
+
+  /**
+   * The disk `/gui/list_files` reads: each folder's absolute path to the names inside it,
+   * a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA.
+   *
+   * @example
+   * engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];
+   */
+  folders: Record<string, string[]> = {};
 
   private rowCounter = 100;
   /** @internal */

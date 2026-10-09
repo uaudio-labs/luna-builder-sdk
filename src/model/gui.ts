@@ -11,10 +11,11 @@
  * await luna.gui.setPage('mixer');
  * await luna.gui.openUrl('https://uaudio.com');
  * const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
+ * const entries = await luna.gui.listFiles('/Users/me/Music');
  */
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
-import { RequestTimeout, Unsupported } from '../wire/errors';
+import { RequestTimeout, UAError, Unsupported } from '../wire/errors';
 import { Collection } from './collection';
 import { Node } from './node';
 
@@ -64,6 +65,16 @@ export class GuiWindow extends Node {
     super(client, path);
     this.page = this.writableProp<GuiPage>('page');
   }
+}
+
+/** One entry of {@link Gui.listFiles}: a file or folder directly inside the listed folder. */
+export interface FileEntry {
+  /** The entry's name, without its folder. */
+  name: string;
+  /** Absolute path, for the engine (`session.importPath()`); the page cannot read it. */
+  path: string;
+  /** True for a folder, or a link to one. */
+  isDirectory: boolean;
 }
 
 export interface ProgressTask {
@@ -193,6 +204,43 @@ export class Gui extends Node {
   }
 
   /**
+   * LUNA's native folder dialog. Resolves to the chosen folders' **absolute paths**, or `[]`
+   * if cancelled. A path route like {@link chooseFiles}: hand the paths to
+   * {@link listFiles} or the engine, not to `fetch`. Needs `/gui` ({@link Gui.available}) and a
+   * LUNA that has the dialog (fact 106); an older one rejects with `Luna.Unsupported`.
+   *
+   * @example
+   * const [folder] = await luna.gui.chooseFolders({ title: 'Choose a sample folder' });
+   * if (folder) console.log(await luna.gui.listFiles(folder));
+   */
+  chooseFolders(options: { title?: string; allowMultiple?: boolean; defaultPath?: string; timeoutMs?: number } = {}): Promise<string[]> {
+    const payload: Record<string, unknown> = {};
+    if (options.title !== undefined) payload['title'] = options.title;
+    if (options.allowMultiple !== undefined) payload['allow_multiple'] = options.allowMultiple;
+    if (options.defaultPath !== undefined) payload['default_path'] = options.defaultPath;
+    return this.dialog('show_folder_dialog', payload, 'release_file_chooser', options.timeoutMs).catch(olderLuna('chooseFolders', 'show_folder_dialog'));
+  }
+
+  /**
+   * The files and folders directly inside the folder at `path`, as LUNA sees the disk (fact
+   * 106). Hidden entries are left out; the rest are sorted by name, ignoring the case of
+   * A-Z. `path` must be absolute.
+   *
+   * Rejects with a `Luna.Error` whose `code` is `uasrv.filesystem_error` when nothing is at
+   * `path` or it cannot be read, and `uasrv.invalid_value` when `path` is relative or names
+   * a file. An older LUNA without the command rejects with `Luna.Unsupported`.
+   *
+   * @example
+   * for (const entry of await luna.gui.listFiles('/Users/me/Samples')) {
+   *   if (!entry.isDirectory && entry.name.endsWith('.wav')) await session.importPath(entry.path);
+   * }
+   */
+  async listFiles(path: string): Promise<FileEntry[]> {
+    const reply = await this.post<{ files?: { name: string; path: string; is_directory: boolean }[] } | null>('list_files', { path }).catch(olderLuna('listFiles', 'list_files'));
+    return (reply?.files ?? []).map((f) => ({ name: f.name, path: f.path, isDirectory: f.is_directory }));
+  }
+
+  /**
    * LUNA's native save dialog. Resolves to the chosen absolute path, or `undefined` if
    * cancelled. Like {@link chooseFiles} the path is for the engine (for example a render's
    * `outputPaths`); the page cannot write to it.
@@ -252,6 +300,19 @@ export class Gui extends Node {
       await this.post(release, { uid }).catch(() => undefined);
     }
   }
+}
+
+/**
+ * A LUNA that predates a `/gui` command answers it `uasrv.invalid_object` (fact 106); say
+ * so instead of passing on an error that reads like a bad path.
+ */
+function olderLuna(method: string, command: string): (err: unknown) => never {
+  return (err) => {
+    if (err instanceof UAError && err.code === 'uasrv.invalid_object') {
+      throw new Unsupported(`luna.gui.${method}: this LUNA has no /gui/${command}; it needs a newer LUNA.`);
+    }
+    throw err;
+  };
 }
 
 function randomUid(): string {

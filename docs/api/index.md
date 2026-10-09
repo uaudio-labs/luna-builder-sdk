@@ -94,6 +94,7 @@
 | [DragOptions](interfaces/DragOptions.md) | - |
 | [Event](interfaces/Event.md) | One change pushed by the engine, normalised: a trailing `/value` is stripped, multi-updates are already expanded, and `operation` marks a child added or removed at `path`. |
 | [ExportOptions](interfaces/ExportOptions.md) | - |
+| [FileEntry](interfaces/FileEntry.md) | One entry of [Gui.listFiles](classes/Gui.md#listfiles): a file or folder directly inside the listed folder. |
 | [Gesture](interfaces/Gesture.md) | - |
 | [GestureOptions](interfaces/GestureOptions.md) | - |
 | [GetOptions](interfaces/GetOptions.md) | Query parameters accepted by `get`, in camelCase. Booleans become `1`/`0` on the wire. See `hbsystem/networking/docs/operations.md`. |
