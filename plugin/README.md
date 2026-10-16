@@ -1,10 +1,9 @@
 # LUNA Add On Builder — Claude Code and Codex plugin
 
 Build, test and install LUNA Add Ons. Everything needed is in this folder: the
-`@uaudio/luna-builder-sdk` builds, its CLI, six skills, the scaffold template, four worked
+`@uaudio/luna-builder-sdk` builds, its CLI, five skills, the scaffold templates, four worked
 examples and the consumer docs. No npm install, no network, no MCP server. LUNA must be
-running on the same machine — or not at all, if the Add On runs on the in-page WebAssembly
-engine.
+running on the same machine.
 
 ## Skills
 
@@ -14,16 +13,16 @@ engine.
 | [add-feature](skills/add-feature/SKILL.md) | Wrap an engine path the SDK does not type yet. |
 | [test-add-on](skills/test-add-on/SKILL.md) | `Luna.MockEngine` fixtures, the live lane, `settled()`. |
 | [debug-connection](skills/debug-connection/SKILL.md) | Nothing connects, no pushes, wrong port, reconnect. |
-| [port-to-wasm](skills/port-to-wasm/SKILL.md) | Run the Add On with no LUNA, on the in-page engine. |
 | [verify-add-on](skills/verify-add-on/SKILL.md) | Prove it against a running LUNA from a second client; check the undo queue. |
 
 ## What is in here
 
 ```
 sdk/            the SDK: index.{js,cjs} + declarations, wire/, luna.global.js (script tag,
-                defines the Luna global), cli.js (the ua-builder CLI)
-skills/         the six skills above
-templates/      add-on-basic — what `ua-builder new` copies
+                defines the Luna global), global.d.ts (its types), cli.js (the ua-builder CLI)
+skills/         the five skills above
+templates/      add-on-basic — what `ua-builder new` copies; add-on-typescript — the same in
+                TypeScript, built by Vite (`--template add-on-typescript`)
 examples/       addon (master mute), mixer, inserts, ruler, sends, automation, jobs,
                 import, pianoroll, arrangement, editor, tracks, and the check-*.mjs probes
 docs/           QUICKSTART, FILES, RECIPES, MANIFEST, PROTOCOL, EVIDENCE, tree/ (a LUNA tree shape snapshot)

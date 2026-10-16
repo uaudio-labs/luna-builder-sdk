@@ -1,6 +1,6 @@
 # Developing luna-builder-sdk
 
-For work on the SDK itself, in this repo (`uaudio/luna-builder-sdk` on GitHub). None of this
+For work on the SDK itself, at `packages/sdk/luna/builder/sdk` in the `sdk-luna` repo. None of this
 ships: package.json "files" lists what does, and `README.md` is the consumer-facing page.
 Architecture and recorded decisions are in `design/DESIGN.md`, phases and status in
 `design/PLAN.md`, and `design/PLATFORM.md` maps every piece of the platform.
@@ -22,7 +22,7 @@ npm run test:engine         # against a wasm engine build in headless Chrome (UA
 
 Open `luna-builder-sdk` as the Codex project, or launch `codex` from this directory.
 `AGENTS.md` points to the shared guidance in `CLAUDE.md`; `.agents/skills/` contains
-relative symlinks to the six original skill folders. No plugin installation is
+relative symlinks to the five original skill folders. No plugin installation is
 needed for checkout work. Start a new task after changing project instructions.
 Opening the enclosing HB tree does not automatically discover this nested folder's
 skills; use the SDK folder as the task's working directory.
@@ -51,22 +51,15 @@ skills carry front matter and no provider-specific paths, that no example reache
 the plugin, and that the plugin still scaffolds an Add On when relocated. It runs as part
 of `npm run check`.
 
-## Publish to GitHub
+## Commit
 
-This repo is the SDK source; there is no pac target and no mirror step. In an HB tree the
-checkout lives at `<tree>/github-repos/luna-builder-sdk`. Commit and push by hand after
-`npm run check` passes:
+This folder is the SDK source, inside the `sdk-luna` repo next to its consumers; it is not a
+pac target. Commit with the rest of `sdk-luna` after `npm run check` passes.
 
-```sh
-git status && git diff
-git add -A && git commit -m "<JIRA-ID>: <change>"
-git push
-```
-
-`dist/` and `plugins/` are git-ignored; `npm ci` regenerates them in any checkout through
-the `prepare` script. Two tree targets consume this checkout, so rebuild it (`npm ci`) after
-a pull before building them: `sdk/luna/builder/installer` (`npm pack` of it, zipped with
-setup scripts) and `sdk/luna/builder/examples/studiolo` (npm-installs it).
+`dist/` and `plugins/` are git-ignored; `npm ci` regenerates them through the `prepare`
+script. Two tree targets consume this folder: `sdk/luna/builder/installer` (`npm ci` +
+`npm pack` of it, zipped with setup scripts) and `add-ons/studiolo`
+(npm-installs it, so run `npm ci` here first after a pull).
 
 ## Source layout
 
@@ -82,7 +75,7 @@ cli/          ua-builder: new, serve, test, probe, install, pack, doctor, tree
 templates/    add-on-basic scaffold
 docs/         consumer docs: QUICKSTART.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
 design/       DESIGN.md, PLAN.md, PLATFORM.md (not shipped)
-skills/       create-add-on, add-feature, test-add-on, debug-connection, port-to-wasm, verify-add-on
+skills/       create-add-on, add-feature, test-add-on, debug-connection, verify-add-on
 plugin/       the agent plugin's hand-written shell; catalogs in .claude-plugin/ and .agents/plugins/
 plugins/      generated, git-ignored: ua-luna-builder, the shell plus copies of everything it carries
 scripts/      sync-plugin.mjs (generate the plugin), check-plugin.mjs (prove it is current)

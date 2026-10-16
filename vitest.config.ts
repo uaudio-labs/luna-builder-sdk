@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 
 // Lanes:
@@ -7,6 +8,7 @@ import { defineConfig } from 'vitest/config';
 const live = process.env['UA_LIVE'] === '1';
 
 export default defineConfig({
+  define: { __PACKAGE_VERSION__: JSON.stringify(JSON.parse(readFileSync('package.json', 'utf8')).version) },
   test: {
     include: live ? ['tests/live/**/*.test.ts'] : ['tests/unit/**/*.test.ts'],
     // node by default; the example-page tests opt into jsdom per file, because the SDK

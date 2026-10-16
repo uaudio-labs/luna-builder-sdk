@@ -8,7 +8,7 @@
 
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
-| <a id="addons"></a> `addOns` | `readonly` | [`Collection`](Collection.md)\<[`AddOn`](AddOn.md)\> | Installed Add Ons, by manifest id. | - |
+| <a id="addons"></a> `addOns` | `readonly` | [`Collection`](Collection.md)\<[`AddOn`](AddOn.md)\> | Installed Add Ons, by manifest id in lowercase (`byId('com.example.foo')`). | - |
 | <a id="armmode"></a> `armMode` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Record-arm mode of LUNA's transport bar. | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |

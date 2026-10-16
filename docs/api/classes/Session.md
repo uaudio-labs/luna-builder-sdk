@@ -350,8 +350,8 @@ importFile(path, trackUid?): Promise<unknown>;
 LUNA's own import: the File > Import action. Imports an audio, MIDI or video file at
 the selection start, onto `trackUid` or a new track, making a clip as LUNA does.
 
-A **path route** command run by LUNA's UI, so it needs `/gui`: without it (a headless or
-wasm engine) it rejects with `Luna.Unsupported` (fact 103). To add a source without a
+A **path route** command run by LUNA's UI, so it needs `/gui`: without it (a headless
+engine) it rejects with `Luna.Unsupported` (fact 103). To add a source without a
 clip, or without `/gui`, use [importPath](#importpath); for a browser `File`, [uploadFile](#uploadfile).
 
 #### Parameters
@@ -387,7 +387,7 @@ is made: pass the source's `id` to [insertClip](#insertclip).
 This is the **path route**, an optimization: the engine reads `path` itself, so the bytes
 never pass through the page. Take the path from `luna.gui.chooseFiles()` or
 `Luna.onPathDrop()`. It needs no `/gui`, but the engine must see the file: a native
-engine on the same machine, not the wasm engine. A path the engine cannot open rejects
+engine on the same machine. A path the engine cannot open rejects
 with LUNA's `device.database_error`. For a browser `File`, use [uploadFile](#uploadfile).
 
 #### Parameters
@@ -502,7 +502,7 @@ newBus(options): Promise<Bus>;
 ```
 
 Create an aux bus (`new_track` with `track_type: "bus"`, fact 83) in one undo step, and
-resolve to the [Bus](Bus.md) once it is listed in [buses](#buses).
+resolve to the [Bus](Bus.md) once it is listed in [buses](#buses) with its properties loaded.
 
 #### Parameters
 
@@ -865,8 +865,8 @@ Upload a file the engine cannot read from disk - a browser `File`, or any bytes 
 this session's package as a new audio source, and resolve to it once the workspace
 lists it (fact 42).
 
-This is the **File route**, and the one that works everywhere: in LUNA, in a browser and
-on the wasm engine, with no `/gui`. Get the `File` from `<input type="file">` or an HTML
+This is the **File route**, and the one that works everywhere: in LUNA and in a browser,
+with no `/gui`. Get the `File` from `<input type="file">` or an HTML
 `drop` event; the page can decode and audition the same `File` too. When the page only
 needs the file in the session and has an engine-readable path (from
 `luna.gui.chooseFiles()` or `Luna.onPathDrop()`), [importPath](#importpath) is the faster path

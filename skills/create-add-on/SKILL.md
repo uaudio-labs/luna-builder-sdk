@@ -28,9 +28,14 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 2. Scaffold with the answers as explicit flags. From the folder that should contain the
    Add On:
    ```sh
-   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600]   # floating, session and size flags: window only
+   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600] [--template add-on-typescript]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
+   Pass `--template add-on-typescript` when the Add On is TypeScript, React or anything else
+   that needs a bundler; do not set up your own bundler, `Luna` typings or pack exclusions.
+   It builds `src/` into one classic script, `dist/main.js`; run `npm run build` before
+   `serve` or `install`, and `npm run pack` (not `ua-builder pack`) to ship. Its README says
+   how to add React.
    Pass `--manufacturer` with the author's company or name; LUNA shows it in Settings > Add
    Ons, and without it the field is left out of the manifest.
    See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`, `manufacturer`).
@@ -39,12 +44,13 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
    run `node <builder>/dist/cli.js new ...` after `npm run build` in the builder package.
 
-3. Read `logic.js` and `main.js` in the scaffold. `logic.js` holds engine logic with no DOM
-   and is what the tests exercise. `main.js` connects and renders. Keep that split.
+3. Read `logic.js` and `main.js` in the scaffold (`src/logic.ts` and `src/main.ts` in the
+   TypeScript one). The logic file holds engine logic with no DOM and is what the tests
+   exercise. The main file connects and renders. Keep that split.
 
-4. Implement the feature in `logic.js` first, as functions that take SDK objects
+4. Implement the feature in the logic file first, as functions that take SDK objects
    (`Luna.Session`, `Luna.Track`) and return plain data or perform engine actions. Then wire it
-   in `main.js`. Read only the QUICKSTART section you need:
+   in the main file. Read only the QUICKSTART section you need:
    `<builder>/docs/QUICKSTART.md` sections 3 to 11.
 
 5. Add a test in `tests/` for each logic function, using the pattern already there:
@@ -68,9 +74,9 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
   Put them and every `onChange` of rebuilt DOM in a `Luna.Bindings` (`{ bindings }`,
   `bindings.on(prop, fn)`), `clear()` it when rebuilding, and rebuild through
   `bindings.whenIdle(render)`, never mid-drag.
-- Call `Luna.bindShortcuts(luna)` once after connecting, so LUNA's undo, redo, play and record
-  keys keep working while the Add On has the focus (QUICKSTART section 2). A key the page
-  wants for itself: handle it and call `preventDefault()`.
+- Call `Luna.bindShortcuts(luna)` once after connecting, so undo, redo, play and record work
+  outside LUNA too; inside LUNA, unclaimed keys already go to LUNA (QUICKSTART section 2). A
+  key the page wants for itself: handle it and call `preventDefault()`.
 - Group related writes in `session.transaction(name, fn)` so they undo as one step.
 - Keep every unsubscribe function and call it when the session changes.
 - Use `luna.raw` only when no typed method exists, and then consider adding one
@@ -78,13 +84,19 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 - The SDK does not stream audio or MIDI. For live MIDI input use Web MIDI
   (`navigator.requestMIDIAccess()`) in the page; sending MIDI is up to the Add On. Do not try
   to stream through the SDK or `luna.raw`.
-- Do not use `<script type="module">` in the page; Windows loads Add Ons from `file://`.
+- Do not use `<script type="module">` in the page; Windows loads Add Ons from `file://`. In
+  the TypeScript template, read `Luna` as the global (typed by the tsconfig); importing the
+  SDK in `src/` bundles a second copy.
 - Loading a user's file (docs/FILES.md): if the page needs the audio, use
   `<input type="file">` or an HTML `drop` and `session.uploadFile()`. Never take a path from
   `luna.gui.chooseFiles()` and try to read it; those paths are only for `session.importPath()`.
   Always include an HTML drop zone: in LUNA 3.1.0.4589 and earlier a file picker opens
   nothing (docs/FILES.md, "Inside LUNA today").
 - Guard every `luna.gui` call with `await luna.gui.available()`; `/gui` is absent off LUNA.
+- API keys and tokens go in `luna.secrets` (docs/MANIFEST.md, "Secrets"), never in
+  `localStorage`, IndexedDB, cookies, the manifest or a file in the Add On. Name them by
+  service (`openai.api_key`), and say so in the UI when `luna.secrets.storage` is `'memory'`.
+  Namespace any other web storage keys by the Add On's `id`.
 
 ## Verify
 
@@ -95,6 +107,7 @@ the session name. Inside LUNA the Add On appears in the menu named by `manifest.
 
 If part of this workflow was harder than the SDK should make it — a missing API, an
 awkward idiom, boilerplate the SDK could absorb — end your reply with the line
-`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
-support the improved workflow: what you were doing, what was awkward, and the API you
-wished for.
+`LUNA BUILDER SDK FEEDBACK: <version>`, where `<version>` is the `ua-builder` row of
+`ua-builder doctor` (for example `LUNA BUILDER SDK FEEDBACK: 0.1.0.1234`), followed by a
+prompt that can be used to update the SDK to support the improved workflow: what you were
+doing, what was awkward, and the API you wished for.

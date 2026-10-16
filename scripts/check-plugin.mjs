@@ -4,7 +4,8 @@
  *
  * The plugin folder is generated (`npm run build`, which runs sync-plugin) and git-ignored.
  * This proves four things about it, because a plugin fails silently in ways a package does not:
- *   1. one version across package.json, both host manifests and both catalogs;
+ *   1. one version, package.json's, across the generated host manifests and the builds (the
+ *      shell manifests and the catalogs carry none);
  *   2. the catalogs point at the plugin folder that is actually here;
  *   3. every generated file (shell, builds, skills, template, examples, docs) matches its
  *      original, and `dist/` itself matches a fresh build, so nothing shipped is stale;
@@ -20,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
-import { BUILDS, DOCS, GLOBAL_DTS, PLUGIN, SHELL, repointExample, withCliNote } from './sync-plugin.mjs';
+import { BUILDS, DOCS, GLOBAL_DTS, PLUGIN, SHELL, VERSIONED_SHELL, repointExample, withCliNote, withVersion } from './sync-plugin.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const fast = process.argv.includes('--fast');
@@ -32,7 +33,12 @@ const stale = (what) => `Stale ${what}: run npm run build`;
 // ---------------------------------------------------------------- 1. one version
 
 const pkg = await json('package.json');
-assert.match(pkg.version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/, 'package.json version is not semver');
+// major.minor.patch in source; the installer build appends the Bamboo build number.
+assert.match(pkg.version, /^\d+\.\d+\.\d+(\.\d+)?$/, 'package.json version is not major.minor.patch[.build]');
+
+for (const name of VERSIONED_SHELL) {
+  assert.equal((await json(`${SHELL}/${name}`)).version, undefined, `${SHELL}/${name} must not set a version; the sync adds package.json's`);
+}
 
 const vendored = await json(`${PLUGIN}/package.json`);
 assert.equal(vendored.name, pkg.name, 'the plugin must vendor the package under its own name');
@@ -56,10 +62,10 @@ for (const host of ['claude', 'codex']) {
 // ------------------------------------------------- 2. catalogs point at this folder
 
 const claude = await json('.claude-plugin/marketplace.json');
-assert.equal(claude.metadata.version, pkg.version, stale('.claude-plugin/marketplace.json'));
 const claudeEntry = claude.plugins.find((p) => p.name === 'ua-luna-builder');
 assert.ok(claudeEntry, 'ua-luna-builder is missing from the Claude catalog');
-assert.equal(claudeEntry.version, pkg.version);
+// The catalogs carry no version, so plugin.json (from package.json) is the only one.
+assert.equal(claude.metadata?.version ?? claudeEntry.version, undefined, 'the Claude catalog must not set a version');
 // A relative string is the local-directory source form; anything else has to be resolvable.
 assert.equal(claudeEntry.source, `./${PLUGIN}`, 'the Claude catalog must point at the plugin in this repo');
 
@@ -92,7 +98,7 @@ try {
     const source = await read(`dist/${name}`);
     assert.equal(await read(`${PLUGIN}/sdk/${name}`), name.endsWith('.ts') ? source : stripMap(source), stale(`${PLUGIN}/sdk/${name}`));
   }
-  assert.equal(await read(`${PLUGIN}/sdk/luna.global.d.ts`), GLOBAL_DTS, stale('the Luna global declaration'));
+  assert.equal(await read(`${PLUGIN}/${GLOBAL_DTS.to}`), await read(GLOBAL_DTS.from), stale('the Luna global declaration'));
   if (process.platform !== 'win32') {
     // The plugin's bin: without the executable bit, `npx ua-builder` in a scaffold that
     // file:-depends on this plugin dies with "Permission denied".
@@ -111,14 +117,14 @@ try {
   }
 
   for (const [from, into, rewrite] of [
-    [SHELL, PLUGIN, (s) => s],
+    [SHELL, PLUGIN, (s, relative) => (VERSIONED_SHELL.includes(relative) ? withVersion(s, pkg.version) : s)],
     ['examples', `${PLUGIN}/examples`, repointExample],
     ['templates', `${PLUGIN}/templates`, (s) => s],
   ]) {
     for (const entry of await readdir(join(root, from), { withFileTypes: true, recursive: true })) {
       if (!entry.isFile() || entry.name === '.DS_Store') continue;
       const relative = join(entry.parentPath.slice(join(root, from).length + 1), entry.name);
-      assert.equal(await read(join(into, relative)), rewrite(await read(join(from, relative))), stale(join(into, relative)));
+      assert.equal(await read(join(into, relative)), rewrite(await read(join(from, relative)), relative), stale(join(into, relative)));
     }
   }
   for (const name of DOCS) assert.equal(await read(`${PLUGIN}/docs/${name}`), await read(`docs/${name}`), stale(`${PLUGIN}/docs/${name}`));
@@ -182,7 +188,7 @@ try {
   assert.equal(await readFile(join(addOn, 'vendor/luna.global.js'), 'utf8'), await read(`${PLUGIN}/sdk/luna.global.js`), 'the relocated CLI vendored the wrong bundle');
   const manifest = JSON.parse(await readFile(join(addOn, 'manifest.json'), 'utf8'));
   assert.equal(manifest.sdk_version, pkg.version);
-  assert.equal(manifest.name, 'Probe Add On');
+  assert.equal(manifest.title, 'Probe Add On');
   assert.ok(!(await readFile(join(addOn, 'package.json'), 'utf8')).includes('__'), 'template placeholders survived the scaffold');
 
   // ------------------------------------------------------- relative links resolve

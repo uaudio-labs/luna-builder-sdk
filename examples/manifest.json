@@ -1,12 +1,11 @@
 {
     "package_name": "Builder SDK Examples",
-    "sdk_version": "0.1.0-alpha.8",
-    "min_luna_version": "1.9.0",
+    "min_luna_version": "3.1.1",
     "manufacturer": "Universal Audio",
     "add_ons": [
         {
             "id": "com.uaudio.builder.arrangement",
-            "name": "Clips and waveforms (Builder)",
+            "title": "Clips and waveforms (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -18,7 +17,7 @@
         },
         {
             "id": "com.uaudio.builder.automation",
-            "name": "Automation (Builder)",
+            "title": "Automation (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -30,7 +29,7 @@
         },
         {
             "id": "com.uaudio.builder.browse",
-            "name": "Folder browser (Builder)",
+            "title": "Folder browser (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -42,7 +41,7 @@
         },
         {
             "id": "com.uaudio.builder.editor",
-            "name": "Edit clips and notes (Builder)",
+            "title": "Edit clips and notes (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -54,11 +53,10 @@
         },
         {
             "id": "com.uaudio.builder.files",
-            "name": "File routes (Builder)",
+            "title": "File routes (Builder)",
             "version": "0.1.0",
             "engines": [
-                "luna",
-                "wasm"
+                "luna"
             ],
             "html": "files.html",
             "local_content_offset": "..",
@@ -66,8 +64,32 @@
             "height": 900
         },
         {
+            "id": "com.uaudio.builder.secrets",
+            "title": "Secrets (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "secrets.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.secrets.second",
+            "title": "Secrets, second Add On (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "secrets.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
+        },
+        {
             "id": "com.uaudio.builder.import",
-            "name": "Import and record (Builder)",
+            "title": "Import and record (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -79,7 +101,7 @@
         },
         {
             "id": "com.uaudio.builder.inserts",
-            "name": "Inserts (Builder)",
+            "title": "Inserts (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -91,7 +113,7 @@
         },
         {
             "id": "com.uaudio.builder.jobs",
-            "name": "Bounce and export (Builder)",
+            "title": "Bounce and export (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -103,11 +125,10 @@
         },
         {
             "id": "com.uaudio.builder.mixer",
-            "name": "Mixer (Builder)",
+            "title": "Mixer (Builder)",
             "version": "0.1.0",
             "engines": [
-                "luna",
-                "wasm"
+                "luna"
             ],
             "html": "mixer.html",
             "local_content_offset": "..",
@@ -116,11 +137,10 @@
         },
         {
             "id": "com.uaudio.builder.pianoroll",
-            "name": "Piano roll (Builder)",
+            "title": "Piano roll (Builder)",
             "version": "0.1.0",
             "engines": [
-                "luna",
-                "wasm"
+                "luna"
             ],
             "html": "pianoroll.html",
             "local_content_offset": "..",
@@ -129,11 +149,10 @@
         },
         {
             "id": "com.uaudio.builder.ruler",
-            "name": "Ruler (Builder)",
+            "title": "Ruler (Builder)",
             "version": "0.1.0",
             "engines": [
-                "luna",
-                "wasm"
+                "luna"
             ],
             "html": "ruler.html",
             "local_content_offset": "..",
@@ -142,7 +161,7 @@
         },
         {
             "id": "com.uaudio.builder.sends",
-            "name": "Sends (Builder)",
+            "title": "Sends (Builder)",
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -154,11 +173,10 @@
         },
         {
             "id": "com.uaudio.builder.tracks",
-            "name": "Tracks, raw wire (Builder)",
+            "title": "Tracks, raw wire (Builder)",
             "version": "0.1.0",
             "engines": [
-                "luna",
-                "wasm"
+                "luna"
             ],
             "html": "tracks.html",
             "local_content_offset": "..",

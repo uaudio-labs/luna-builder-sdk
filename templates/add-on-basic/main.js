@@ -1,4 +1,4 @@
-// __TITLE__: DOM wiring. Connects to LUNA (or the wasm engine), follows the focused
+// __TITLE__: DOM wiring. Connects to LUNA, follows the focused
 // session, and renders what logic.js computes. Every listener returned by onChange is kept
 // so it can be released when the session changes.
 
@@ -73,7 +73,7 @@ async function connect() {
   for (;;) {
     try {
       // Inside LUNA the page URL carries ?port=; in a browser this falls back to LUNA on
-      // localhost. Pass { engine: 'wasm' } to run on the in-page engine instead.
+      // localhost.
       luna = await Luna.connect();
       break;
     } catch (e) {

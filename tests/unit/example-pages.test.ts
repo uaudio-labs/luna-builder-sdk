@@ -585,3 +585,22 @@ describe('examples/browse.html', () => {
     page.close();
   });
 });
+
+describe('examples/secrets.html', () => {
+  const logText = (page: Awaited<ReturnType<typeof loadExamplePage>>) => (page.document.querySelector('#log') as HTMLTextAreaElement).value;
+
+  it('outside LUNA keeps the key in page memory and shows only its length and last four characters', async () => {
+    const page = await loadExamplePage('secrets.html', engineWithSession());
+    await page.waitFor(() => page.text('#status').startsWith('Connected'), 'the page to connect');
+    expect(page.text('#storage')).toContain('page memory');
+    (page.window as unknown as { console: Console }).console.warn = () => {};
+    (page.document.querySelector('#value') as HTMLInputElement).value = 'sk-test-abcd1234';
+    (page.document.querySelector('#save') as HTMLButtonElement).click();
+    await page.waitFor(() => logText(page).includes('set: ok'), 'the save');
+    (page.document.querySelector('#read') as HTMLButtonElement).click();
+    await page.waitFor(() => logText(page).includes('get:'), 'the read');
+    expect(logText(page)).toContain('get: 16 characters, ending "1234"');
+    expect(logText(page)).not.toContain('sk-test');
+    page.close();
+  });
+});

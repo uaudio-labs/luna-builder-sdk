@@ -18,13 +18,15 @@ from `../dist/luna.global.js`, so run `npm run build` in the builder folder firs
 | `automation.html` | The first track's volume lane drawn live: insert a ramp, move, revalue and delete breakpoints, and drive the track's automation mode. |
 | `jobs.html` | Bounce channels or run LUNA's own main-bus export, with live state, progress and time remaining, and abort or delete any render. |
 | `files.html` | The two ways a user's file gets in, side by side (docs/FILES.md): a file picker and an HTML drop zone giving `File`s (decoded in the page, then `uploadFile`), and native path drops and LUNA's dialog giving paths (`importPath`). Logs every event, so it doubles as the inside-LUNA check. |
+| `secrets.html` | `luna.secrets`: save, read and delete an API key in the OS keychain inside LUNA (page memory elsewhere), and check that LUNA does not answer an iframe. Installed as two Add Ons with different ids over the one file, to show each has its own keys. |
 | `browse.html` | A folder browser over the disk as LUNA sees it: `luna.gui.listFiles()` for each folder, LUNA's folder dialog (`chooseFolders()`) or a typed path to start, an Import button that copies an audio file in (`importPath`) and puts it on a new track at the playhead in one undo entry, and audio rows you can drag onto LUNA's timeline. Needs LUNA's `/gui`. |
 | `import.html` | Pick or drop a file, watch it upload to LUNA in chunks, see it in the live source list, place it as a clip through the tempo map. |
 | `pianoroll.html` | A live read-only piano roll over one MIDI clip: notes edited in LUNA appear without a refresh. |
 | `tracks.html` | The raw wire: list the focused session's tracks through `luna.raw`, with no model layer. |
 
-Every page that connects calls `Luna.bindShortcuts(luna)`, so LUNA's undo, redo, play and
-record keys work while it has the focus; `tests/unit/examples-api.test.ts` enforces it.
+Inside LUNA, keys a page does not `preventDefault()` go on to LUNA's own shortcuts. Every page
+that connects also calls `Luna.bindShortcuts(luna)`, so undo, redo, play and record work when it
+runs outside LUNA; `tests/unit/examples-api.test.ts` enforces it.
 
 ## Checks
 
@@ -77,20 +79,3 @@ Open a page from any static server (or `file://` on macOS) while LUNA is running
 ```sh
 npx ua-builder serve          # http://localhost:8790/
 ```
-
-## Run on the wasm engine
-
-```sh
-npx ua-builder serve --engine <path to hbsystem/wasm_engine/dist/Release>
-open "http://localhost:8790/mixer.html?engine=wasm"
-```
-
-`Luna.connect()` sees `?engine=wasm` and boots the engine from `/__engine/`. The engine starts
-with no session (fact 36), so most pages show "no session open" until one is created. From
-the page's console:
-
-```js
-await Luna.connect({ engine: 'wasm' }).then((luna) => luna.sessions.create({ name: 'scratch' }));
-```
-
-Pages whose `engines` list omits `wasm` need a native LUNA.

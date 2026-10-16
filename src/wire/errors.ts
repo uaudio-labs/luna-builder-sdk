@@ -29,10 +29,10 @@ export class UAError extends Error {
   }
 }
 
-/** No engine answered at the address. Start LUNA, or pass `{ engine: 'wasm' }`. */
+/** No engine answered at the address. Start LUNA and open a session. */
 export class NotRunning extends UAError {
   constructor(url: string) {
-    super('not_running', `No LUNA engine at ${url}. Start LUNA and open a session, or connect with { engine: 'wasm' }.`);
+    super('not_running', `No LUNA engine at ${url}. Start LUNA and open a session.`);
     this.name = 'NotRunning';
   }
 }
@@ -53,7 +53,7 @@ export class ConnectionLost extends UAError {
   }
 }
 
-/** The feature is not available on this engine (for example the wasm engine has no licensing). */
+/** The feature is not available on this engine (for example a headless engine has no `/gui`). */
 export class Unsupported extends UAError {
   constructor(what: string) {
     super('unsupported', what);

@@ -1,6 +1,5 @@
 {
   "name": "@uaudio/luna-builder-sdk",
-  "version": "0.1.0-alpha.8",
   "description": "Prebuilt @uaudio/luna-builder-sdk shipped inside the ua-luna-builder agent plugin",
   "license": "Apache-2.0",
   "private": true,
@@ -19,6 +18,9 @@
       "types": "./sdk/wire/index.d.ts",
       "import": "./sdk/wire/index.js",
       "require": "./sdk/wire/index.cjs"
+    },
+    "./global": {
+      "types": "./sdk/global.d.ts"
     },
     "./package.json": "./package.json"
   },

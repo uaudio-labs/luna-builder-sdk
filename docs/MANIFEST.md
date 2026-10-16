@@ -29,12 +29,11 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 {
     "package_name": "My Add On",
     "id": "com.example.my_add_on",
-    "name": "My Add On",
+    "title": "My Add On",
     "version": "0.1.0",
     "manufacturer": "Example Audio",
-    "sdk_version": "0.1.0-alpha.8",
-    "min_luna_version": "1.9.0",
-    "engines": ["luna", "wasm"],
+    "min_luna_version": "3.1.1",
+    "engines": ["luna"],
     "html": "index.html",
     "target": "window",
     "floating": true,
@@ -49,8 +48,8 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
     "package_name": "My Add Ons",
     "manufacturer": "Example Audio",
     "add_ons": [
-        { "id": "com.example.a", "name": "A", "html": "a/index.html", "local_content_offset": "..", "width": 800, "height": 500 },
-        { "id": "com.example.b", "name": "B", "html": "b/index.html", "local_content_offset": "..", "target": "browser" }
+        { "id": "com.example.a", "title": "A", "html": "a/index.html", "local_content_offset": "..", "width": 800, "height": 500 },
+        { "id": "com.example.b", "title": "B", "html": "b/index.html", "local_content_offset": "..", "target": "browser" }
     ]
 }
 ```
@@ -71,8 +70,8 @@ size; see `width`, `height` below.
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Unique across everything installed. Reverse-DNS by convention. |
-| `name` | string | Display name: the menu item, and the panel header for `"browser"` and `"editor"`. Also unique; duplicates collapse into one. Manifests written before `name` existed use `title` for it, which LUNA still reads when `name` is absent (`name` wins when both are present). `ua-builder` accepts `title` too, with a warning to rename it. LUNA reports it as the `name` property under `/gui/add_ons/<id>` (`name` on `luna.gui.addOns` items in the SDK). |
+| `id` | string | Unique across everything installed. Reverse-DNS by convention. Compared without case: `com.Example.Foo` and `com.example.foo` are the same Add On, and LUNA reports the id in lowercase (in `/gui/add_ons/<id>` too), so write it in lowercase. On macOS it also names the page's storage (see [How LUNA loads the page](#how-luna-loads-the-page)), so keep it the same from one version to the next. |
+| `title` | string | Display name: the menu item, and the panel header for `"browser"` and `"editor"`. Also unique; duplicates collapse into one. Newer LUNA releases also accept it as `name`, which wins when both are present, but releases that predate `name` read only `title` and drop an entry without it, so write `title`. `ua-builder` warns when an entry has both and they differ. LUNA reports it as the `name` property under `/gui/add_ons/<id>` (`name` on `luna.gui.addOns` items in the SDK). |
 | `html` or `url` | string | Exactly one; an entry with neither or both is dropped. `html` is a page shipped with the Add On, relative to the manifest folder (preferred, so the Add On stays relocatable) or absolute. `url` is a hosted page used as-is; you are responsible for it being well formed. Either may carry its own query string (`index.html?page=a`). |
 
 ### Optional
@@ -98,7 +97,7 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
   front if it is behind, and closes it if it is already in front. The item is check-marked
   while the window is open. See `floating` for how it layers.
 - **`"browser"`**: a panel in LUNA's secondary browser, the right-hand side panel that also
-  shows Media, Markers and Lyrics, with the Add On's `name` as its header. Its menu item is
+  shows Media, Markers and Lyrics, with the Add On's `title` as its header. Its menu item is
   enabled only on the Timeline and Mixer pages, where that panel lives, and disabled
   everywhere else, including while no session is open. Choosing the menu item shows the Add On,
   replacing whatever the panel showed (another browser Add On included); choosing it while it
@@ -109,7 +108,7 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
   Add On is showing is saved with the session: reopening the session shows it again (if it is
   still installed), and a session that was not showing one opens without it.
 - **`"editor"`**: the editor panel docked at the bottom of the Timeline, in place of LUNA's
-  Clip Editor, with the Add On's `name` in the panel's header. Its menu item is enabled only
+  Clip Editor, with the Add On's `title` in the panel's header. Its menu item is enabled only
   on the Timeline page, where that panel lives, and disabled everywhere else. Choosing the menu
   item opens the panel on the Add On, replacing the Clip Editor or another editor Add On;
   choosing it while it is showing closes the panel, and the panel shows the Clip Editor the
@@ -203,17 +202,23 @@ compatibility.
 | Field | Type | Notes |
 |---|---|---|
 | `sdk_version` | string | The `@uaudio/luna-builder-sdk` version it was built against. Top-level or per entry. |
-| `min_luna_version` | string | Lowest LUNA the Add On supports. |
-| `engines` | string[] | `["luna"]`, `["wasm"]` or both. Declares which engines the page handles. |
+| `min_luna_version` | string | Lowest LUNA the Add On supports, e.g. `"3.1.1"`. Top-level or per entry. When the running LUNA is older, the Add On stays installed but LUNA will not open it: the Add Ons menu lists it disabled with the version it needs ("My Add On (Requires LUNA 3.2.0)"), Settings > Add Ons shows it dimmed with the same note, it is not reopened at launch, and installing it says which LUNA it needs instead of opening it. LUNA releases before 3.1.1 do not check it. |
+| `engines` | string[] | `["luna"]`. Declares which engines the page handles. |
 
 ### Tooling only
 
 Read only by whatever installs the Add On: `ua-builder install`, or LUNA when it opens a
 `.lunaaddon` file. It has no effect once the Add On is loaded.
 
+`ua-builder pack` zips the Add On folder, leaving out what the page never loads: dotfiles
+(`.env`, `.git`), `node_modules/`, `tests/`, TypeScript and JSX sources, source maps
+(`--source-maps` keeps them), `tsconfig.json` and bundler configs, and, when one of those
+configs is present, the top-level `src/`. It refuses to pack when an `html` page loads a
+local script or stylesheet that is missing or left out, and warns about a module script.
+
 | Field | Notes |
 |---|---|
-| `package_name` | Name of the Add Ons folder entry: the symlink (or copy) `ua-builder install` creates, or the folder LUNA unzips a `.lunaaddon` file into. Without it the entry is named after the Add On folder (for a `.lunaaddon`, the folder at the top of the zip, else the file's name). Surrounding whitespace is trimmed. Does not affect menu names, which come from `name`. |
+| `package_name` | Name of the Add Ons folder entry: the symlink (or copy) `ua-builder install` creates, or the folder LUNA unzips a `.lunaaddon` file into. Without it the entry is named after the Add On folder (for a `.lunaaddon`, the folder at the top of the zip, else the file's name). Surrounding whitespace is trimmed. Does not affect menu names, which come from `title`. |
 
 `package_name` has to be a bare name, not a path. When LUNA installs a `.lunaaddon` file it
 falls back to that default name, with a warning, if the value is not a string, is blank, is
@@ -235,21 +240,59 @@ source folder has a working name you would not want shown there (`add-ons` → `
   resources works, but only inside the manifest folder or the `local_content_offset` folder;
   a reference outside it fails to load. Keep resource references relative to the `html` file
   so they resolve either way.
+- On macOS each local page is its own origin, named by its `id`: its `localStorage`,
+  IndexedDB, cookies and cache are its own, and no other Add On can read or change them. They
+  last across launches and updates while the `id` stays the same; change the `id` and the
+  Add On starts with empty storage. Web storage is still not a place for secrets such as API
+  keys; use `luna.secrets` (see "Secrets" below).
 - On Windows the page is loaded from `file://`, where module scripts are blocked: use the
-  script-tag bundle (`vendor/luna.global.js`).
+  script-tag bundle (`vendor/luna.global.js`), and bundle your own code to a classic script.
+  The `add-on-typescript` template (`ua-builder new --template add-on-typescript`) builds
+  TypeScript, and React or any other bundled library, into one (`dist/main.js`).
 - A `url` page is loaded from your server, so normal web rules apply (CORS, mixed content).
 
 The native bridge is minimal: native file drops, which deliver absolute **paths** rather
-than `File`s. Use it through `Luna.onPathDrop()`, not directly; without it, file drops reach the
-page as ordinary HTML `drop` events with `File`s. See [FILES.md](FILES.md) for which to use.
+than `File`s, and secrets. Use them through `Luna.onPathDrop()` and `luna.secrets`, not
+directly; without the bridge, file drops reach the page as ordinary HTML `drop` events with
+`File`s (see [FILES.md](FILES.md) for which to use) and secrets stay in page memory.
 Everything else goes over the engine connection, including LUNA UI actions through `luna.gui`.
+
+## Secrets
+
+Keep API keys, tokens and passwords in `luna.secrets`, never in `localStorage`, IndexedDB,
+cookies, the manifest or the Add On's files. Anything in the Add On folder ships with it when
+you share the `.lunaaddon`, and web storage is readable by any script the page loads.
+
+```js
+let key = await luna.secrets.get('openai.api_key'); // null if never stored
+if (!key) {
+  key = await askTheUser(); // your own settings form
+  await luna.secrets.set('openai.api_key', key);
+}
+await luna.secrets.delete('openai.api_key'); // a "Disconnect" button
+```
+
+- Inside LUNA, values go to the OS credential store: the login keychain on macOS, Credential
+  Manager on Windows. LUNA scopes them by the manifest's `id`, so another Add On cannot read
+  them, and it answers only the Add On's own page: not an iframe in it, and not a page it
+  navigated to. Keep the `id` stable; a new `id` starts with no secrets.
+- Elsewhere (a browser, `ua-builder serve`, a LUNA that predates secrets) values live in page
+  memory and are gone on reload; the first `set` warns on the console. `luna.secrets.storage`
+  is `'keychain'` or `'memory'`; tell the user when keys will not be remembered.
+- Names are 1 to 128 characters from `A-Z a-z 0-9 . _ -`; namespace them by service, for
+  example `openai.api_key`. A value is a string of at most 2560 UTF-8 bytes.
+- Errors carry a `code`: `invalid_name`, `too_large`, `store_error` (the OS store refused, for
+  example the user denied keychain access), `timeout` (no answer).
+- Uninstalling the Add On does not remove its secrets. Offer a way to delete them.
+- On macOS, LUNA may ask the user once to allow keychain access, for example after an update.
 
 ## Checklist
 
-1. `manifest.json` at the Add On root, with `id`, `name` and exactly one of `html`/`url`,
+1. `manifest.json` at the Add On root, with `id`, `title` and exactly one of `html`/`url`,
    plus `width` and `height` for a `"window"`.
-2. Keep `id` and `name` unique across everything installed. `ua-builder new` and `install`
-   check both against the Add Ons folder (names ignoring case) and refuse a clash.
+2. Keep `id` and `title` unique across everything installed, ignoring case, and write `id` in
+   lowercase. `ua-builder new` and `install` check both against the Add Ons folder and
+   refuse a clash.
 3. Relative `html`; set `local_content_offset` only if the page reaches above its folder.
 4. `target: "app"` only for a full LUNA page; `"browser"` for a panel beside the Timeline
    or Mixer, which should lay out for a narrow, user-resizable width; `"editor"` for the

@@ -15,23 +15,22 @@ npx ua-builder install    # symlink into LUNA's Add Ons folder -> Add Ons menu
 
 The scaffold has `index.html`, `logic.js` (engine logic, tested), `main.js` (DOM) and
 `vendor/luna.global.js` (the SDK). `manifest.json` is what LUNA reads; see `MANIFEST.md`.
+TypeScript or React: `--template add-on-typescript` builds `src/` into one classic script, `dist/main.js`,
+with `Luna` a typed global (`"types": ["@uaudio/luna-builder-sdk/global"]`); its README has the rest.
 
 ## 2. Connect
 
 ```js
 const luna = await Luna.connect();               // inside LUNA (?port= on the URL) or LUNA on localhost
-const luna = await Luna.connect({ engine: 'wasm' }); // in-page wasm engine (or ?engine=wasm on the URL)
 const luna = await Luna.connect({ engine: 'mock', setup: (e) => e.addSession('s', { tracks: ['Vox'] }) }); // no engine (or ?engine=mock)
 ```
-
-Wasm needs COOP/COEP headers and same-origin engine files (`ua-builder serve --engine <dir>`), boots with no session
-(`luna.sessions.create(...)`), needs a click for audio (`luna.wasm.resumeAudio()`) and has no `luna.gui`; see `skills/port-to-wasm/SKILL.md`.
 
 Throws `Luna.NotRunning` if nothing answers; afterwards it reconnects by itself. `luna.status`
 is a Prop (`connecting | connected | disconnected | closed`); `luna.engine` names the engine.
 
-An Add On has the keyboard while in front, so bind LUNA's shortcuts (undo, redo, play, record)
-after connecting; they act on any key the page does not `preventDefault()` outside a text field:
+Inside LUNA, every key the page does not `preventDefault()` goes on to LUNA's own shortcuts. Bind
+the standard ones (undo, redo, play, record) after connecting so they also work when the page runs
+outside LUNA; inside LUNA the call does nothing:
 
 ```js
 Luna.bindShortcuts(luna);                                                // fact 79
@@ -86,7 +85,7 @@ Tick 0 is not always bar 1, so seek to `{ bar: 1 }`; `returnToZero()` goes to th
 start. A seek sets the play start and both loop marks, like LUNA's locate; `setPlayStart(to)` keeps
 the loop. Both resolve once LUNA shows it; playing, they jump unless `{ sync: 'next_bar' | 'loop_end' }`.
 
-`location` arrives only several times a second (its `min_sec` is fractional on wasm, fact 96).
+`location` arrives only several times a second (its `min_sec` seconds can be fractional, fact 96).
 `Luna.bindClock(el, t, { render })` anchors on each push and interpolates per frame while playing.
 
 Ticks: `Luna.TICKS_PER_BEAT` (96e9), `Luna.WHOLE_NOTE`, `Luna.QUARTER_NOTE`, ...
@@ -242,7 +241,7 @@ await luna.gui.setPage('mixer'); await luna.gui.openUrl(url); await luna.gui.rev
 const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
 ```
 
-`/gui` is absent on headless and wasm engines. Getting a user's file in: [FILES.md](FILES.md).
+`/gui` is absent on a headless engine. Getting a user's file in: [FILES.md](FILES.md).
 
 ## 12. Escape hatch
 
@@ -288,10 +287,10 @@ go quiet (`--settle <ms>`, default 250), then prints the expression as JSON. `--
 page on `?engine=mock` with no LUNA: a demo session, or `--mock fixture.js` setting
 `globalThis.LunaMockSetup = (engine) => { ... }`. `--screenshot page.png` saves it once painted.
 
-## 15. Inside LUNA vs a browser vs wasm
+## 15. Inside LUNA vs a browser
 
 LUNA adds `?port=` (`Luna.isEmbeddedInLuna()`); a browser reaches LUNA on localhost, or
-`?engine=wasm`/`?engine=mock`. Windows loads Add Ons from `file://`: use the script-tag bundle.
+runs on `?engine=mock`. Windows loads Add Ons from `file://`: use the script-tag bundle.
 The WebSocket has no auth. Files differ most: [FILES.md](FILES.md), "Inside LUNA today".
 
 ## 16. Units, in one line

@@ -18,10 +18,18 @@
  */
 import { UAError } from '../wire/errors';
 
-/** Lifecycle states reported by the engine. */
+/**
+ * Lifecycle states reported by the engine.
+ *
+ * @hidden
+ */
 export type WasmState = 'loading' | 'booting' | 'running' | 'stopping' | 'stopped' | 'error';
 
-/** The subset of the Emscripten module the SDK uses. */
+/**
+ * The subset of the Emscripten module the SDK uses.
+ *
+ * @hidden
+ */
 export interface WasmModule {
   ccall(name: string, returnType: string | null, argTypes: string[], args: unknown[]): unknown;
   UAPersist?: {
@@ -31,7 +39,11 @@ export interface WasmModule {
   };
 }
 
-/** The page-side hooks the engine calls (`globalThis.WasmDeviced`). */
+/**
+ * The page-side hooks the engine calls (`globalThis.WasmDeviced`).
+ *
+ * @hidden
+ */
 export interface WasmHooks {
   onReply(id: number, error: string, json: string): void;
   onUpdate(path: string, json: string): void;
@@ -74,6 +86,8 @@ export interface AudioHealth {
 /**
  * A booted engine. Created by {@link bootWasmEngine}; the {@link WasmPort} talks through it.
  * One engine per page: shutdown is terminal, reload the page to boot again.
+ *
+ * @hidden
  */
 export class WasmEngine {
   private currentState: WasmState = 'loading';

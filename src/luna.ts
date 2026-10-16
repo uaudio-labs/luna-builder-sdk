@@ -24,9 +24,13 @@ export { UAError as Error, NotRunning, RequestTimeout, ConnectionLost, Unsupport
 export { WebSocketPort, DEFAULT_LUNA_PORT } from './wire/websocket-port';
 export type { WebSocketPortOptions, SocketLike, SocketConstructor } from './wire/websocket-port';
 export { MockEngine, MockPort } from './wire/mock-port';
+/** @hidden */
 export { WasmPort, wasmUpdateToEvent } from './wire/wasm-port';
+/** @hidden */
 export type { WasmPortOptions } from './wire/wasm-port';
+/** @hidden */
 export { WasmEngine, bootWasmEngine } from './engine/loader';
+/** @hidden */
 export type { WasmState, BootOptions, AudioHealth, WasmModule, WasmHooks, ModuleFactory } from './engine/loader';
 export type { MockNodeSpec, CommandHandler, MockMidiRow, MockEngineOptions } from './wire/mock-port';
 export { expandMulti } from './wire/multi';
@@ -49,6 +53,13 @@ export { isEmbeddedInLuna, locationOptions, hasNativeBridge, isLunaEnginePort } 
 export type { LocationOptions } from './client/detect';
 export { onPathDrop, canDropPaths } from './client/path-drop';
 export type { PathDrop, PathDropHandlers } from './client/path-drop';
+export { Secrets, MAX_SECRET_NAME_LENGTH, MAX_SECRET_BYTES } from './client/secrets';
+export type { SecretStorage } from './client/secrets';
 
-/** SDK version, kept in sync with package.json by the build. */
-export const VERSION = '0.1.0-alpha.8';
+declare const __PACKAGE_VERSION__: string;
+
+/**
+ * SDK version, compiled in from package.json: major.minor.patch in source, and with the
+ * Bamboo build number as a fourth part in a shipped SDK, e.g. 0.1.0.1234 (0 for a local build).
+ */
+export const VERSION: string = __PACKAGE_VERSION__;

@@ -1,6 +1,6 @@
 # Class: Unsupported
 
-The feature is not available on this engine (for example the wasm engine has no licensing).
+The feature is not available on this engine (for example a headless engine has no `/gui`).
 
 ## Extends
 

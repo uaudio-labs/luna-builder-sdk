@@ -1,7 +1,81 @@
 # Changelog
 
-Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries. The wasm
-engine is versioned separately.
+Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
+
+## 0.1.1
+
+Added
+- `luna.secrets.get(name)`, `set(name, value)` and `delete(name)`: API keys and tokens in the
+  OS credential store (the macOS login keychain, Windows Credential Manager), scoped by LUNA
+  to the Add On's `id` and readable only by the Add On's own page (fact 107).
+  `luna.secrets.storage` is `'keychain'` inside a LUNA that supports it and `'memory'`
+  elsewhere, where values last until the page reloads. `Luna.Secrets`, `Luna.SecretStorage`,
+  `Luna.MAX_SECRET_NAME_LENGTH` (128) and `Luna.MAX_SECRET_BYTES` (2560).
+- docs/MANIFEST.md has a "Secrets" section; the create-add-on and verify-add-on skills now
+  check that no secret is kept in web storage or in the Add On's files.
+- `ua-builder new --template add-on-typescript`: a TypeScript scaffold. Vite builds `src/`
+  into one classic script, `dist/main.js`, that the page loads after the vendored SDK, since
+  Windows blocks module scripts under `file://`. React or any other bundled library goes in
+  the same way (the scaffold's README says how). `npm run pack` builds, then packs.
+- `@uaudio/luna-builder-sdk/global`: types the `Luna` global for code that reads it instead of
+  importing the SDK. Add it to tsconfig `"types"`; `Luna.connect()` and `Luna.Session` both
+  resolve. The agent plugin ships it as `sdk/global.d.ts`, replacing `sdk/luna.global.d.ts`.
+- `ua-builder pack --source-maps` keeps source maps, which are now left out by default.
+
+Changed
+- Inside LUNA, keys an Add On page does not `preventDefault()` now go on to LUNA's own
+  shortcuts, the user's remappings included, in page and window Add Ons alike.
+  `Luna.bindShortcuts` therefore installs nothing inside LUNA and keeps working as before
+  outside it; `ShortcutsBinding.installed` says which.
+- `min_luna_version` in the templates and the examples is now `3.1.1`, the first LUNA that
+  checks it. A LUNA older than an Add On's `min_luna_version` will not open the Add On and
+  lists it disabled in the Add Ons menu with the version it needs (docs/MANIFEST.md).
+- `ua-builder pack` leaves out what the page never loads: TypeScript and JSX sources, source
+  maps, `tsconfig.json` and bundler configs, and the top-level `src/` when one of those configs
+  is there. It refuses to pack when a page loads a local script or stylesheet that is missing
+  (an unbuilt `dist/`) or left out, and warns about a module script.
+- `ua-builder new` lists the templates when `--template` names none of them.
+- `ua-builder new`, the template and the examples write the manifest's display name as
+  `title` again, not `name`. LUNA releases that predate `name` read only `title` and drop an
+  entry without it; newer releases read either. `ua-builder install` and `pack` no longer
+  warn that `title` is deprecated, still accept `name`, and warn when an entry has both and
+  they differ.
+- Add On ids compare without regard to case, as LUNA now treats them, and on macOS each Add On
+  page gets its own origin, and so its own web storage, named by its id. `ua-builder` warns
+  about an id with capitals and treats ids that differ only in case as clashing; write ids in
+  lowercase (docs/MANIFEST.md).
+
+Fixed
+- `Luna.Port`, `Luna.Event`, `Luna.Unsubscribe` and the other wire types (`PortStatus`,
+  `EventHandler`, `GetOptions`, `SubscribeOptions`, `StatusListener`, `Operation`, `Verb`,
+  `WireMessage`, `LogFn`, `LogLevel`, `WebSocketPortOptions`, `SocketLike`,
+  `SocketConstructor`, `MockNodeSpec`, `CommandHandler`, `MockMidiRow`, `MockEngineOptions`)
+  are types again in the declarations. They were declared as values, so using one as a type
+  failed to compile, and `Luna.Event` silently meant the DOM's `Event`.
+- `session.newBus()` resolves once the bus's properties are loaded. It resolved as soon as the
+  bus was listed, which, when LUNA's `added` push came before the read of its properties
+  (fact 7), gave a bus whose `name`, `busType` and `stemFormat` were still `undefined`.
+
+## 0.1.0
+
+Changed
+- Versions now follow the builds UA Connect publishes. The source carries `major.minor.patch`
+  (`0.1.0`) with no prerelease tag, and each shipped SDK adds the Bamboo build number as a
+  fourth part, for example `0.1.0.1234`, in `package.json`, `Luna.VERSION`, the plugin
+  manifests, the catalogs and the `sdk_version` of scaffolded Add Ons. A local build uses
+  build number `0`. Whether a build is for internal use or for external developers is set by
+  where it is deployed, not by the version. No API or CLI changes.
+- The skills, the scaffold README and `llms.txt` now ask agents to put the SDK version on the
+  feedback line, as `LUNA BUILDER SDK FEEDBACK: <version>`, taken from the `ua-builder`
+  row of `ua-builder doctor`, so feedback can be matched to the build it came from.
+
+## 0.1.0-alpha.9
+
+Changed
+- The SDK is no longer cloned from GitHub; it comes as a folder (for example, inside the LUNA
+  Add On Builder installer). `README.md` now starts setup with `npm ci` in that folder, and a
+  plugin marketplace is added from the folder instead of a clone. No API, CLI or plugin
+  changes.
 
 ## 0.1.0-alpha.8
 

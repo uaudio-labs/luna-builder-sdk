@@ -84,7 +84,7 @@ export async function serve(args: Args): Promise<number> {
   if (port !== wantedPort) console.error(`port ${wantedPort} is busy (a stale 'ua-builder serve'?); using ${port} instead`);
 
   const lines = [`Serving ${dir}`, `  http://localhost:${port}/`];
-  lines.push(engineDir ? `  http://localhost:${port}/__engine/devicedwasm.js   (wasm engine from ${engineDir})` : '  no wasm engine mounted (--engine <dir>)');
+  if (engineDir) lines.push(`  http://localhost:${port}/__engine/devicedwasm.js   (wasm engine from ${engineDir})`);
   if (args.flags['luna']) {
     const forwardPort = flagNumber(args, 'forward-port', 4719);
     const lunaPort = flagNumber(args, 'luna-port', 4718);
@@ -103,7 +103,7 @@ export async function serve(args: Args): Promise<number> {
     lines.push(`  Forwarding 0.0.0.0:${forwardPort} -> 127.0.0.1:${lunaPort} (LUNA)`);
     lines.push(`  From another device: http://${ip}:${port}/?host=${ip}&port=${forwardPort}`);
   }
-  lines.push('', 'COOP/COEP headers are on, so pages here can also boot the wasm engine. Ctrl-C to stop.');
+  lines.push('', 'Ctrl-C to stop.');
   console.log(lines.join('\n'));
   await new Promise(() => undefined);
   return 0;

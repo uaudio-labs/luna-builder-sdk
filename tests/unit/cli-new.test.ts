@@ -114,13 +114,40 @@ describe('ua-builder new', () => {
     const { dir, code } = await scaffold('--id', 'com.example.demo2', '--name', 'Demo 2');
     expect(code).toBe(0);
     const entry = readManifest(dir).entries[0];
-    expect(entry).toMatchObject({ id: 'com.example.demo2', name: 'Demo 2' });
-    expect(entry).not.toHaveProperty('title');
+    // The manifest writes title, which every LUNA release reads; readManifest fills in name.
+    expect(entry).toMatchObject({ id: 'com.example.demo2', name: 'Demo 2', title: 'Demo 2' });
+    expect(JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))).not.toHaveProperty('name');
   });
 
   it('still takes --title as an alias for --name', async () => {
     const { dir, code } = await scaffold('--title', 'Demo 3');
     expect(code).toBe(0);
     expect(readManifest(dir).entries[0]).toMatchObject({ name: 'Demo 3' });
+  });
+
+  it('scaffolds the TypeScript template: sources in src/, the page loading the built bundle', async () => {
+    const { dir, code, out } = await scaffold('--template', 'add-on-typescript', '--name', 'TS Demo');
+    expect(code).toBe(0);
+    for (const rel of ['src/main.ts', 'src/logic.ts', 'tests/setup.ts', 'tests/add-on.test.ts', 'tsconfig.json', 'vite.config.ts', 'vendor/luna.global.js']) {
+      expect(existsSync(join(dir, rel)), rel).toBe(true);
+    }
+    for (const rel of ['package.json', 'src/main.ts', 'src/logic.ts', 'tests/add-on.test.ts']) {
+      expect(readFileSync(join(dir, rel), 'utf8'), rel).not.toMatch(/__[A-Z_]+__/);
+    }
+    const html = readFileSync(join(dir, 'index.html'), 'utf8');
+    expect(html).toContain('<script src="vendor/luna.global.js"></script>');
+    expect(html).toContain('<script src="dist/main.js"></script>');
+    expect(html).not.toMatch(/type="module"/);
+    expect(JSON.parse(readFileSync(join(dir, 'tsconfig.json'), 'utf8')).compilerOptions.types).toEqual(['@uaudio/luna-builder-sdk/global']);
+    expect(readManifest(dir).entries[0]).toMatchObject({ name: 'TS Demo', html: 'index.html' });
+    expect(out).toContain('npm run build');
+    expect(out).toContain('src/main.ts');
+  });
+
+  it('names the templates there are when --template is unknown', async () => {
+    const { dir, code, out } = await scaffold('--template', 'nope');
+    expect(code).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+    expect(out).toMatch(/available: .*add-on-basic.*add-on-typescript/);
   });
 });

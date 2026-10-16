@@ -6,7 +6,7 @@
 | ------ | ------ | ------ | ------ |
 | <a id="devices"></a> `devices` | `readonly` | [`Devices`](Devices.md) | - |
 | <a id="drivers"></a> `drivers` | `readonly` | [`Drivers`](Drivers.md) | - |
-| <a id="engine"></a> `engine` | `readonly` | [`Engine`](../type-aliases/Engine.md) | Which engine this client is talking to. |
+| <a id="engine"></a> `engine` | `readonly` | `Engine` | Which engine this client is talking to: `'luna'` or `'mock'`. |
 | <a id="gui"></a> `gui` | `readonly` | [`Gui`](Gui.md) | LUNA's host surface (dialogs, pages, Add Ons). Only present inside LUNA. |
 | <a id="jobs"></a> `jobs` | `readonly` | [`Jobs`](Jobs.md) | - |
 | <a id="plugins"></a> `plugins` | `readonly` | [`Plugins`](Plugins.md) | The plugin catalog (`/plugins`). Call `load()` once before reading. |
@@ -14,6 +14,7 @@
 | <a id="presets"></a> `presets` | `readonly` | [`Presets`](Presets.md) | The preset library query (`/presets`). |
 | <a id="raw"></a> `raw` | `readonly` | [`Port`](../interfaces/Port.md) | The transport. Escape hatch: `luna.raw.get('/sessions')`. |
 | <a id="renders"></a> `renders` | `readonly` | [`Renders`](Renders.md) | - |
+| <a id="secrets"></a> `secrets` | `readonly` | [`Secrets`](Secrets.md) | API keys and tokens in the OS credential store, scoped to this Add On (page memory outside LUNA). |
 | <a id="sessions"></a> `sessions` | `readonly` | [`Sessions`](Sessions.md) | Open sessions and the commands that create or open them. |
 | <a id="status"></a> `status` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`PortStatus`](../type-aliases/PortStatus.md)\> | Connection status as a [Prop](../interfaces/Prop.md). |
 | <a id="store"></a> `store` | `readonly` | [`Store`](Store.md) | The path-keyed mirror the domain objects read from. |
@@ -49,22 +50,6 @@ would: `luna.mock.setValue(path, 'name', 'Lead')`.
 ##### Returns
 
 [`MockEngine`](MockEngine.md) \| `undefined`
-
-***
-
-### wasm
-
-#### Get Signature
-
-```ts
-get wasm(): WasmEngine | undefined;
-```
-
-The in-page wasm engine (audio, persistence, health) when `engine === 'wasm'`.
-
-##### Returns
-
-[`WasmEngine`](WasmEngine.md) \| `undefined`
 
 ## Methods
 

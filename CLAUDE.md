@@ -39,18 +39,52 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 
 ## Docs and skills
 
-- What ships (package.json `files`, and so the SDK's GitHub repo) is public: `README.md`,
+- What ships (package.json `files`, and so the installer zip) is public: `README.md`,
   `CHANGELOG.md`, `NOTICE`, `docs/`, `skills/`, `templates/`, `examples/`, `plugins/`. Keep
   tree paths, pac, Jira and planning out of them. Internal material goes in `design/`
   (DESIGN.md, PLAN.md, PLATFORM.md), `DEVELOPING.md` or here.
+- Wasm engine support (`WasmPort`, `src/engine/`, `engine: 'wasm'`, the `serve` engine mount)
+  stays in the code but is not released yet: keep it out of everything that ships, and tag
+  its public declarations `@hidden` so `docs/api/` leaves them out.
 - `docs/QUICKSTART.md` is the user-facing entry point; keep it under 300 lines and keep every
   snippet runnable. `docs/api/` is generated (`npm run docs:api`); never edit it by hand.
 - `docs/llms.txt` indexes everything for agents; update it when a doc or skill is added.
 - `skills/*/SKILL.md` are shared Claude Code and Codex skills. Keep them procedural and short, pointing at doc
   sections rather than repeating them.
-- `templates/add-on-basic/` is what `ua-builder new` copies; placeholders are `__NAME__`,
+- `templates/add-on-basic/` is what `ua-builder new` copies, and `templates/add-on-typescript/`
+  with `--template add-on-typescript` (Vite builds `src/` into the IIFE `dist/main.js`; `Luna`
+  is the global typed by `types/global.d.ts`). Placeholders in both are `__NAME__`,
   `__SLUG__`, `__ID__`, `__TITLE__`, `__TARGET__`, `__FLOATING__`, `__SHOW_WITH_SESSION__`, `__WIDTH__`, `__HEIGHT__`, `__SDK_VERSION__`,
-  `__BUILDER_PATH__`. Run the scaffold's own tests after changing it.
+  `__BUILDER_PATH__`. Run the scaffold's own tests after changing either (`npm install`, `npm
+  test`; for TypeScript also `npm run typecheck` and `npm run pack`).
+
+## Updating the minimum LUNA version
+
+For a request like "update the luna builder sdk min luna version to 3.2". The value is the
+`min_luna_version` new Add Ons declare. LUNA 3.1.1 and later refuse to open an Add On whose
+value is newer than they are, and list it disabled in the Add Ons menu as "Requires LUNA x.y.z".
+LUNA's side reads the value from each manifest, so a bump is a change to this repo only.
+
+1. Write the version as `major.minor.patch` ("3.2" becomes `3.2.0`).
+2. Find every declaration, from this directory:
+   `git grep -n '"min_luna_version"' -- .`. That lists the templates
+   (`templates/add-on-basic/manifest.json`, `templates/add-on-typescript/manifest.json`),
+   `examples/manifest.json`,
+   `examples/addon/manifest.json` and the manifest example in `docs/MANIFEST.md`. Set each to
+   the new value. Also update `packages/add-ons/studiolo/src/manifest.json` (`add-ons` repo).
+3. Leave these alone:
+   - "LUNA releases before 3.1.1 do not check it" in the `docs/MANIFEST.md` field table, which
+     names the first LUNA that checks the field, not the minimum.
+   - "LUNA 1.9.0" in `docs/EVIDENCE.md` and `tests/unit/multi.test.ts`, which records where a
+     capture came from.
+   - `plugins/`, which is generated.
+4. Add a `Changed` line to the top section of `CHANGELOG.md`: the new value, and that Add Ons
+   scaffolded from now on will not open on an older LUNA. Add Ons already scaffolded keep the
+   value in their own manifest.
+5. `npm test`, then `npm run build && npm run check:plugin` so the plugin's copies of the
+   templates and examples carry the new value.
+6. Commit in the `sdk-luna` repo with the Jira prefix (ask for the ID), on the current branch
+   (`packages/sdk/luna/CLAUDE.md`: no new branch unless asked).
 
 ## The agent plugin
 
@@ -88,11 +122,12 @@ npm run check       # all of the above
 
 ## Repo and consumers
 
-This repo is the SDK source (`uaudio/luna-builder-sdk`); it is not a pac target. `npm ci`
-builds `dist/` and `plugins/` through `prepare`. Two tree targets consume the checkout at
-`<tree>/github-repos/luna-builder-sdk`: `sdk/luna/builder/installer` (`npm pack` of it) and
-`sdk/luna/builder/examples/studiolo` (npm-installs it), so package.json `files` is the one
-list of what ships. `design/PLATFORM.md` maps every piece of the platform.
+The SDK source lives at `packages/sdk/luna/builder/sdk` in the `sdk-luna` repo (it moved
+there from the `uaudio-labs/luna-builder-sdk` GitHub repo); it is not a pac target. `npm ci`
+builds `dist/` and `plugins/` through `prepare`. Two sibling tree targets consume it:
+`sdk/luna/builder/installer` (`npm pack` of it) and `add-ons/studiolo`
+(npm-installs it), so package.json `files` is the one list of what ships.
+`design/PLATFORM.md` maps every piece of the platform.
 
 The engine never goes into git: it is built and versioned separately (a release asset, later
 a hosted URL). No manifest pins a compatible engine version yet.

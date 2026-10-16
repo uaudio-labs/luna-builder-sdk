@@ -13,7 +13,7 @@
  *   `string_value`) re-derives the other three and pushes them to every port, the writer
  *   included (fact 97); the mappings are the mock's documented stand-ins, not LUNA's;
  * - pushes are delivered on a later macrotask, never synchronously; `await engine.settled()`;
- * - `new MockEngine({ gui: false })` has no `/gui`, like a headless or wasm engine (fact 103).
+ * - `new MockEngine({ gui: false })` has no `/gui`, like a headless engine (fact 103).
  *
  * @example
  * const engine = new Luna.MockEngine();
@@ -164,7 +164,7 @@ const CONTROL_VIEWS = new Set(['value', 'real_value', 'normalized_value', 'strin
 export interface MockEngineOptions {
   /**
    * Include LUNA's `/gui` (dialogs, pages, Add Ons). Default `true`, as inside LUNA; `false`
-   * models a headless or wasm engine, where `luna.gui.available()` is false (fact 103).
+   * models a headless engine, where `luna.gui.available()` is false (fact 103).
    */
   gui?: boolean;
 }

@@ -1,6 +1,6 @@
 # Class: NotRunning
 
-No engine answered at the address. Start LUNA, or pass `{ engine: 'wasm' }`.
+No engine answered at the address. Start LUNA and open a session.
 
 ## Extends
 

@@ -64,6 +64,15 @@ export function repointExample(text) {
     .replaceAll('../dist/index.js', '../sdk/index.js');
 }
 
+/** Shell manifests that carry the package version: `plugin/` leaves it out, the sync adds it. */
+export const VERSIONED_SHELL = ['package.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json'];
+
+/** A shell manifest with the package version placed after its name. */
+export function withVersion(text, version) {
+  const { name, version: _, ...rest } = JSON.parse(text);
+  return `${JSON.stringify({ name, version, ...rest }, null, 2)}\n`;
+}
+
 /** Builds: module, CJS, declarations, the script-tag bundle and the CLI. */
 export const BUILDS = [
   'index.js',
@@ -81,14 +90,15 @@ export const BUILDS = [
 /** Consumer docs only. `api/` is generated and large. */
 export const DOCS = ['QUICKSTART.md', 'FILES.md', 'MANIFEST.md', 'PROTOCOL.md', 'EVIDENCE.md', 'RECIPES.md', 'tree/luna-3.0.0.15776.json'];
 
-export const GLOBAL_DTS = `/** The global that the script-tag build (luna.global.js) defines. */
-declare const Luna: typeof import('./index.js');
-`;
+/** The typed `Luna` global (`@uaudio/luna-builder-sdk/global`), hand-written in `types/`. */
+export const GLOBAL_DTS = { from: 'types/global.d.ts', to: 'sdk/global.d.ts' };
 
 async function main() {
   // Every file in the folder is generated, so start from nothing.
   await rm(plugin, { recursive: true, force: true });
   await cp(join(root, SHELL), plugin, { recursive: true, filter: noDsStore });
+  const { version } = JSON.parse(await read('package.json'));
+  for (const name of VERSIONED_SHELL) await write(name, withVersion(await read(`${SHELL}/${name}`), version));
 
   for (const name of BUILDS) {
     const text = await read(`dist/${name}`);
@@ -97,7 +107,7 @@ async function main() {
   // The plugin's package.json bin points here; writeFile drops the executable bit that
   // `npx ua-builder` needs in a scaffold that file:-depends on this plugin.
   await chmod(join(plugin, 'sdk', 'cli.js'), 0o755);
-  await write('sdk/luna.global.d.ts', GLOBAL_DTS);
+  await write(GLOBAL_DTS.to, await read(GLOBAL_DTS.from));
 
   for (const skill of (await readdir(join(root, 'skills'), { withFileTypes: true })).filter((e) => e.isDirectory())) {
     await cp(join(root, 'skills', skill.name), join(plugin, 'skills', skill.name), { recursive: true });

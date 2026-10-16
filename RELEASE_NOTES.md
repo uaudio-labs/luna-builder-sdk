@@ -3,6 +3,33 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 0.1.1 — 2026-10-15
+
+- New `luna.secrets` keeps API keys and tokens in the OS keychain, scoped to the Add On.
+- New `ua-builder new --template add-on-typescript` scaffolds a TypeScript Add On, and
+  `@uaudio/luna-builder-sdk/global` types the `Luna` global.
+- `ua-builder pack` leaves out sources, source maps and build configs, and refuses to pack a
+  page whose local scripts or stylesheets are missing.
+- Inside LUNA, keys an Add On page does not handle now reach LUNA's own shortcuts, so
+  `Luna.bindShortcuts` installs nothing there.
+- New Add Ons declare `min_luna_version` `3.1.1`; an older LUNA will not open them.
+- Manifests write the display name as `title` again, which every LUNA release reads.
+- Add On ids are case-insensitive and should be lowercase; each id gets its own web storage.
+- The wire types (`Luna.Port`, `Luna.Event` and others) are types again in the declarations.
+- `session.newBus()` resolves only once the bus's properties are loaded.
+
+## 0.1.0 — 2026-10-12
+
+- Versions follow the builds UA Connect publishes: `0.1.0.<build number>`, with build `0` for
+  a local build, instead of `0.1.0-alpha.N`. No API changes.
+- The SDK feedback line agents write now carries the SDK version:
+  `LUNA BUILDER SDK FEEDBACK: <version>`.
+
+## 0.1.0-alpha.9 — 2026-10-09
+
+- The SDK no longer comes from a GitHub clone: run `npm ci` in the SDK folder you were given,
+  and add the plugin marketplace from that folder. No API changes.
+
 ## 0.1.0-alpha.8 — 2026-10-09
 
 - New `luna.gui.listFiles(path)` lists a folder's files and folders as LUNA sees the disk, in

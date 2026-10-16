@@ -42,7 +42,7 @@
 | [Musical](classes/Musical.md) | The musical structure of one session. |
 | [Node](classes/Node.md) | - |
 | [NoSessionOpen](classes/NoSessionOpen.md) | No session is open in the engine. |
-| [NotRunning](classes/NotRunning.md) | No engine answered at the address. Start LUNA, or pass `{ engine: 'wasm' }`. |
+| [NotRunning](classes/NotRunning.md) | No engine answered at the address. Start LUNA and open a session. |
 | [Output](classes/Output.md) | - |
 | [Playlist](classes/Playlist.md) | - |
 | [Plugin](classes/Plugin.md) | - |
@@ -53,6 +53,7 @@
 | [Renders](classes/Renders.md) | An observable ordered collection with id lookup. |
 | [RequestTimeout](classes/RequestTimeout.md) | The engine did not answer a request within the port's timeout. |
 | [Scheduler](classes/Scheduler.md) | Coalesces change notifications. In a browser it flushes on the next animation frame with a timer fallback (hidden tabs suspend rAF); elsewhere on a macrotask. Tests call `flush()`. |
+| [Secrets](classes/Secrets.md) | Per-Add-On secrets, at `luna.secrets`. Values are strings; names are 1 to 128 characters from `A-Z a-z 0-9 . _ -`. |
 | [Session](classes/Session.md) | - |
 | [SessionPackage](classes/SessionPackage.md) | One session package as a live node. |
 | [Sessions](classes/Sessions.md) | - |
@@ -63,9 +64,7 @@
 | [TimeSignature](classes/TimeSignature.md) | - |
 | [Track](classes/Track.md) | - |
 | [Transport](classes/Transport.md) | - |
-| [Unsupported](classes/Unsupported.md) | The feature is not available on this engine (for example the wasm engine has no licensing). |
-| [WasmEngine](classes/WasmEngine.md) | A booted engine. Created by [bootWasmEngine](functions/bootWasmEngine.md); the [WasmPort](classes/WasmPort.md) talks through it. One engine per page: shutdown is terminal, reload the page to boot again. |
-| [WasmPort](classes/WasmPort.md) | A connection to one engine. |
+| [Unsupported](classes/Unsupported.md) | The feature is not available on this engine (for example a headless engine has no `/gui`). |
 | [Waveforms](classes/Waveforms.md) | A bounded cache of overview pages, keyed by source, analysis and page index. A short page (the end of the analysis, or growth in progress) is never cached, so a recording still being written is re-read until it settles. |
 | [WebSocketPort](classes/WebSocketPort.md) | A connection to one engine. |
 | [Workspace](classes/Workspace.md) | - |
@@ -78,7 +77,6 @@
 | [AudioHealth](interfaces/AudioHealth.md) | Audio-path health as the engine reports it. |
 | [AudioInput](interfaces/AudioInput.md) | A device input a track can record from, as [Client.audioInputs](classes/Client.md#audioinputs) lists it. |
 | [BarBeat](interfaces/BarBeat.md) | A bar|beat position as the engine reports it in `location.bar_beat`, and as `timeline.barBeat()` returns it. `tick` is in **engine** ticks (the remainder within the beat), not display ticks; [formatBarBeat](functions/formatBarBeat.md) does the conversion. |
-| [BootOptions](interfaces/BootOptions.md) | - |
 | [BounceOptions](interfaces/BounceOptions.md) | - |
 | [Breakpoint](interfaces/Breakpoint.md) | - |
 | [ChordSpec](interfaces/ChordSpec.md) | A chord to write with `musical.setChords`. |
@@ -143,9 +141,6 @@
 | [TransactionOptions](interfaces/TransactionOptions.md) | - |
 | [TransportLocation](interfaces/TransportLocation.md) | The `location` property of a session. |
 | [UploadOptions](interfaces/UploadOptions.md) | - |
-| [WasmHooks](interfaces/WasmHooks.md) | The page-side hooks the engine calls (`globalThis.WasmDeviced`). |
-| [WasmModule](interfaces/WasmModule.md) | The subset of the Emscripten module the SDK uses. |
-| [WasmPortOptions](interfaces/WasmPortOptions.md) | - |
 | [WaveformChannel](interfaces/WaveformChannel.md) | - |
 | [WaveformColumns](interfaces/WaveformColumns.md) | - |
 | [WaveformLane](interfaces/WaveformLane.md) | - |
@@ -168,7 +163,6 @@
 | [CommandHandler](type-aliases/CommandHandler.md) | - |
 | [ContextType](type-aliases/ContextType.md) | - |
 | [ControlType](type-aliases/ControlType.md) | - |
-| [Engine](type-aliases/Engine.md) | - |
 | [EventHandler](type-aliases/EventHandler.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [FolderMode](type-aliases/FolderMode.md) | - |
 | [GuiPage](type-aliases/GuiPage.md) | - |
@@ -176,12 +170,12 @@
 | [KeyCombo](type-aliases/KeyCombo.md) | A key combination as `Modifier+...+Key`. Modifiers are `Mod` (Cmd on a Mac, Ctrl elsewhere), `Cmd`, `Ctrl`, `Alt` and `Shift`, and the ones named must be exactly the ones held. The key is a `KeyboardEvent.key` (`z`, case-insensitive) or `KeyboardEvent.code` (`Space`, `Numpad0`, `KeyZ`). |
 | [LogFn](type-aliases/LogFn.md) | Where a port reports what it does: status changes, reconnect attempts, timeouts, and listeners that threw. The default sends `warn` and `error` to the console. |
 | [LogLevel](type-aliases/LogLevel.md) | Severity of a [LogFn](type-aliases/LogFn.md) message. |
-| [ModuleFactory](type-aliases/ModuleFactory.md) | - |
 | [Operation](type-aliases/Operation.md) | Structural change carried by an [Event](interfaces/Event.md). Absent for a property value change. |
 | [OverviewKind](type-aliases/OverviewKind.md) | `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. |
 | [PortStatus](type-aliases/PortStatus.md) | Connection state as reported by [Port.onStatus](interfaces/Port.md#onstatus). |
 | [RecPlayMode](type-aliases/RecPlayMode.md) | - |
 | [Releasable](type-aliases/Releasable.md) | Something [Bindings](classes/Bindings.md) can release: an unsubscribe function or an object with `dispose()`. |
+| [SecretStorage](type-aliases/SecretStorage.md) | Where [Secrets](classes/Secrets.md) keeps values: the OS credential store, or page memory. |
 | [SeekTarget](type-aliases/SeekTarget.md) | Where to seek: a tick, or a bar|beat|tick position (`beat` defaults to 1, `tick` to 0). |
 | [ShortcutBindings](type-aliases/ShortcutBindings.md) | - |
 | [ShortcutCommand](type-aliases/ShortcutCommand.md) | The commands the standard shortcuts cover. |
@@ -195,7 +189,6 @@
 | [TrackType](type-aliases/TrackType.md) | - |
 | [Unsubscribe](type-aliases/Unsubscribe.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [Verb](type-aliases/Verb.md) | UANet verbs. |
-| [WasmState](type-aliases/WasmState.md) | Lifecycle states reported by the engine. |
 
 ## Variables
 
@@ -212,6 +205,8 @@
 | [EDIT\_TIMEOUT\_MS](variables/EDIT_TIMEOUT_MS.md) | How long [settle](functions/settle.md) waits by default for the model to reflect an edit. |
 | [EIGHTH\_NOTE](variables/EIGHTH_NOTE.md) | - |
 | [HALF\_NOTE](variables/HALF_NOTE.md) | - |
+| [MAX\_SECRET\_BYTES](variables/MAX_SECRET_BYTES.md) | Largest secret value, in UTF-8 bytes (Windows Credential Manager's limit, applied everywhere). |
+| [MAX\_SECRET\_NAME\_LENGTH](variables/MAX_SECRET_NAME_LENGTH.md) | Longest secret name, in characters. |
 | [OVERVIEW\_PAIR\_NS](variables/OVERVIEW_PAIR_NS.md) | Nanoseconds per fine overview pair: 125 samples at 48 kHz (fact 72). |
 | [PLUGIN\_ERROR\_MISSING](variables/PLUGIN_ERROR_MISSING.md) | The engine reports a missing plugin with this error string. |
 | [QUARTER\_NOTE](variables/QUARTER_NOTE.md) | - |
@@ -220,7 +215,7 @@
 | [SIXTEENTH\_NOTE](variables/SIXTEENTH_NOTE.md) | - |
 | [TICKS\_PER\_BEAT](variables/TICKS_PER_BEAT.md) | - |
 | [TICKS\_PER\_DISPLAY\_TICK](variables/TICKS_PER_DISPLAY_TICK.md) | - |
-| [VERSION](variables/VERSION.md) | SDK version, kept in sync with package.json by the build. |
+| [VERSION](variables/VERSION.md) | SDK version, compiled in from package.json: major.minor.patch in source, and with the Bamboo build number as a fourth part in a shipped SDK, e.g. 0.1.0.1234 (0 for a local build). |
 | [WAVEFORM\_PAGE](variables/WAVEFORM_PAGE.md) | Pairs per cached page; four pages cover a minute of fine pairs. |
 | [WHOLE\_NOTE](variables/WHOLE_NOTE.md) | - |
 
@@ -235,9 +230,8 @@
 | [bindDrag](functions/bindDrag.md) | Bind a div or canvas knob (or fader, or one axis of an XY pad) to one control, or to several that move together. Dragging captures the pointer and moves the value by pointer travel; arrow, Page and Home/End keys nudge it; double-click resets it. The element becomes a focusable `role="slider"` whose `aria-valuenow` and `aria-valuetext` follow the control. Writes go to the controls' `normalized` view, and the first control's value is the one shown. |
 | [bindGesture](functions/bindGesture.md) | Bracket every drag on `target` with `begin()`/`end()` on `controls` (one control, or all the controls one element drives). |
 | [bindRange](functions/bindRange.md) | Bind a native `<input type="range">` to `control`: touch on press, write on `input`, follow LUNA outside a drag, settle on LUNA's value on release, double-click to reset. Keyboard changes the browser makes are one-shot writes, which the control brackets itself. |
-| [bindShortcuts](functions/bindShortcuts.md) | Give an Add On LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind its own key handling. |
-| [bootWasmEngine](functions/bootWasmEngine.md) | Load and boot the engine once per page. Resolves when the services report `running`. Rejects with `Luna.Error` code `engine_boot` on failure or timeout. |
-| [canDropPaths](functions/canDropPaths.md) | True when native path drops can be used: the page is in LUNA's webview, which publishes `window.lunaAPI.setAcceptsFileDrops`. False in a browser, on the wasm engine and in tests. |
+| [bindShortcuts](functions/bindShortcuts.md) | Give a page LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind its own key handling, when LUNA is not there to handle them. |
+| [canDropPaths](functions/canDropPaths.md) | True when native path drops can be used: the page is in LUNA's webview, which publishes `window.lunaAPI.setAcceptsFileDrops`. False in a browser and in tests. |
 | [clients](functions/clients.md) | Every [Client](classes/Client.md) this page has made and not closed, in creation order. A tooling hook: `ua-builder probe` waits on `Luna.clients().some((c) => c.connected)` to know an Add On's page has finished connecting before it reads the DOM. |
 | [clipAudio](functions/clipAudio.md) | Which audio a clip plays, or `undefined` when there is nothing safe to draw: no source, or a render LUNA has named but not yet announced. In that second case draw the clip's outline rather than the unstretched original at the wrong scale. |
 | [clipTypeFrom](functions/clipTypeFrom.md) | The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. |
@@ -281,7 +275,6 @@
 | [ticksToSeconds](functions/ticksToSeconds.md) | Ticks to seconds at a constant tempo. |
 | [toEvent](functions/toEvent.md) | Turn a decoded wire message into the normalised event the Store consumes. |
 | [traceWaveform](functions/traceWaveform.md) | Add one channel's waveform to a path as LUNA fills it: for every run of drawable columns, one closed shape through the column centres, the top outline (`mid - axis - max * half`) left to right and the bottom outline (`mid + axis - min * half`) back, squared off at the run's outer edges. `NaN` columns break the shape. It only adds subpaths; call `beginPath()` before and `fill()` after, so several channels or clips fill in one go. |
-| [wasmUpdateToEvent](functions/wasmUpdateToEvent.md) | Turn one `onUpdate(path, json)` into a normalised event. Exported for tests. |
 | [waveformColumns](functions/waveformColumns.md) | Reduce a [WaveformRange](interfaces/WaveformRange.md) to one min/max per drawn column, per channel, the way LUNA's own timeline does: |
 | [waveformLanes](functions/waveformLanes.md) | Split `height` pixels from `top` into one equal lane per channel, stacked in file order (left above right for stereo), each with a zero line and a full-scale half-height. `gap` pixels are kept clear at the top and bottom of every lane; LUNA keeps none. |
 | [waveformPeak](functions/waveformPeak.md) | The loudest absolute value in a range, across every channel, in 0..1; 0 when the range is empty. To normalize a clip, pass `gain: 1 / peak` to [waveformColumns](functions/waveformColumns.md), taking the peak from the clip's whole range, not the visible columns, so the scale holds while scrolling. |

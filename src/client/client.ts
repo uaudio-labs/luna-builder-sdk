@@ -13,10 +13,12 @@ import { Presets } from '../model/presets';
 import { Workspace } from '../model/workspace';
 import { Devices, Drivers, Jobs, Preferences, Renders, type AudioInput } from '../model/system';
 import { Gui } from '../model/gui';
+import { Secrets } from './secrets';
 import type { WasmEngine } from '../engine/loader';
 import { WasmPort } from '../wire/wasm-port';
 import { MockPort, type MockEngine } from '../wire/mock-port';
 
+/** @hidden */
 export type Engine = 'luna' | 'wasm' | 'mock';
 
 export class Client {
@@ -24,7 +26,7 @@ export class Client {
   readonly raw: Port;
   /** The path-keyed mirror the domain objects read from. */
   readonly store: Store;
-  /** Which engine this client is talking to. */
+  /** Which engine this client is talking to: `'luna'` or `'mock'`. */
   readonly engine: Engine;
   /** Connection status as a {@link Prop}. */
   readonly status: Prop<PortStatus>;
@@ -43,6 +45,8 @@ export class Client {
   readonly jobs: Jobs;
   /** LUNA's host surface (dialogs, pages, Add Ons). Only present inside LUNA. */
   readonly gui: Gui;
+  /** API keys and tokens in the OS credential store, scoped to this Add On (page memory outside LUNA). */
+  readonly secrets: Secrets;
 
   private readonly statusCell: Cell<PortStatus>;
   private readonly statusUnsub: Unsubscribe;
@@ -66,6 +70,7 @@ export class Client {
     this.renders = new Renders(this);
     this.jobs = new Jobs(this);
     this.gui = new Gui(this);
+    this.secrets = new Secrets();
   }
 
   /**
@@ -129,7 +134,11 @@ export class Client {
     return this.raw instanceof MockPort ? this.raw.engine : undefined;
   }
 
-  /** The in-page wasm engine (audio, persistence, health) when `engine === 'wasm'`. */
+  /**
+   * The in-page wasm engine (audio, persistence, health) when `engine === 'wasm'`.
+   *
+   * @hidden
+   */
   get wasm(): WasmEngine | undefined {
     return this.raw instanceof WasmPort ? this.raw.engine : undefined;
   }

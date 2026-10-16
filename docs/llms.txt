@@ -1,6 +1,6 @@
 # @uaudio/luna-builder-sdk
 
-> TypeScript/JavaScript SDK for LUNA Add Ons. One `Luna` namespace. Props (`.value`, `.onChange`, `.set`), Collections (`.items`, `.byId`, `.onChange`). Runs inside LUNA (WebSocket, `?port=` on the page URL) or on the wasm engine.
+> TypeScript/JavaScript SDK for LUNA Add Ons. One `Luna` namespace. Props (`.value`, `.onChange`, `.set`), Collections (`.items`, `.byId`, `.onChange`). Runs inside LUNA (WebSocket, `?port=` on the page URL) or in a browser talking to LUNA on localhost.
 
 Not supported: streaming audio or MIDI. The SDK edits the session (MIDI clips and notes, audio
 clips, parameters, transport); it has no live audio or MIDI stream in or out. Do not build a
@@ -15,7 +15,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 - [Quickstart](QUICKSTART.md): connect, session, props, tracks, controls, clips, effects, markers, chords, workspace, gui, errors, testing.
 - [Files](FILES.md): getting a user's file into an Add On. File route (`<input type="file">`, HTML drop, `uploadFile`) vs path route (`chooseFiles`, `onPathDrop`, `importPath`); never mix them.
 - [Recipes](RECIPES.md): eleven Add Ons to ask an agent for, and the SDK each one leans on.
-- [Manifest](MANIFEST.md): `manifest.json` fields (`target`, `floating`, `show_with_session`, ...), Add Ons folder, how LUNA loads a page.
+- [Manifest](MANIFEST.md): `manifest.json` fields (`target`, `floating`, `show_with_session`, ...), Add Ons folder, how LUNA loads a page, secrets (`luna.secrets`).
 - [Protocol](PROTOCOL.md): verbs, paths, correlation, pushes, error codes, where things live.
 - [Evidence](EVIDENCE.md): numbered measured facts about engine behaviour; cite as "fact N".
 - [Tree snapshot](tree/luna-3.0.0.15776.json): the shape of the nodes the SDK builds on, for one LUNA build. `ua-builder tree <path>` prints any node's shape; `ua-builder tree --out file.json` snapshots the running build.
@@ -30,11 +30,10 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 - skills/add-feature: wrap an engine path the SDK does not type yet.
 - skills/test-add-on: MockEngine fixtures, settled(), live lane rules.
 - skills/debug-connection: nothing connects, no pushes, wrong port, reconnect.
-- skills/port-to-wasm: run the Add On on the in-page wasm engine; hosting, audio gesture, engine limits.
 - skills/verify-add-on: prove an Add On against a running LUNA from a second client, and check the undo queue.
 
-These six ship as the `ua-luna-builder` plugin (`plugins/ua-luna-builder/`), which also
-carries the SDK builds, the `ua-builder` CLI, the add-on-basic template, the examples and
+These five ship as the `ua-luna-builder` plugin (`plugins/ua-luna-builder/`), which also
+carries the SDK builds, the `ua-builder` CLI, the add-on-basic and add-on-typescript templates, the examples and
 QUICKSTART/FILES/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run the CLI as
 `node <plugin-root>/sdk/cli.js <command>` instead of `npx ua-builder <command>`.
 
@@ -44,12 +43,14 @@ QUICKSTART/FILES/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run 
 - Nodes outside a session (`luna.gui.main`, `luna.preferences`) need `node.watch()` to follow pushes.
 - Touch every control a user edits (fact 78): clicks are one-shot `set()`/`toggle()`, bracketed for you; drags use `Luna.bindRange(input, control)` for `<input type="range">` or `Luna.bindDrag(element, control)` for a div/canvas knob (touch, writes, release, following LUNA except mid-drag); `Luna.bindGesture` is the touch-and-release part alone for your own pointer code.
 - DOM that is rebuilt (mixer strips): collect its listeners and bindings in a `Luna.Bindings` (`on`, `add`, `{ bindings }`), `clear()` it at the start of each rebuild, and schedule rebuilds with `whenIdle(render)` so none runs mid-drag.
-- Keyboard: call `Luna.bindShortcuts(luna)` after connecting; LUNA's undo, redo, play and record keys then work for any key the page does not `preventDefault()` (facts 79-80).
+- Keyboard: inside LUNA, any key the page does not `preventDefault()` goes on to LUNA's own shortcuts (fact 81). Call `Luna.bindShortcuts(luna)` after connecting so undo, redo, play and record also work outside LUNA; inside LUNA it installs nothing (facts 79-81).
 - Timeline = ticks (96e9 per beat); source offsets = nanoseconds. No conversion in the SDK.
 - Effect bypass is `slot.setIn(bool)`, not the `enabled` property.
 - MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addNotes` (many notes, one undo step)/`addMidi`. These are clip edits, not a live stream: live MIDI input comes from Web MIDI, not the SDK.
+- TypeScript, React or any bundler: `ua-builder new <name> --template add-on-typescript`. It builds `src/` into one classic IIFE script (`dist/main.js`; Windows blocks module scripts under `file://`), types the `Luna` global through tsconfig `"types": ["@uaudio/luna-builder-sdk/global"]` (do not import the SDK in `src/`), and `npm run pack` builds then packs without sources, source maps, configs or `.env`. `ua-builder pack` refuses a page whose scripts are missing.
 - Files (FILES.md): if the page needs the audio, use `<input type="file">` or an HTML `drop`, which give `File`s in LUNA and a browser alike, then `session.uploadFile({ bytes: file })`. `luna.gui.chooseFiles()` and `Luna.onPathDrop()` give **paths the page cannot read**; they only feed `session.importPath(path)` (a source) or `session.importFile(path)` (LUNA's import, with a clip), an optimization that skips copying through the page. Never `chooseFiles` and then try to `fetch` the path. In LUNA 3.1.0.4589 and earlier (macOS) `<input type="file">` opens nothing (its `cancel` fires at once) and path drops stop after the Add On window is reopened (facts 104-105): always offer an HTML drop zone, and `chooseFiles` + `importPath` for paths.
-- `/gui` is absent on headless and wasm engines: check `luna.gui.available()`; without it every `luna.gui` command and `importFile` reject with `Luna.Unsupported`.
+- Secrets (MANIFEST.md, "Secrets"): API keys and tokens go in `luna.secrets.get/set/delete(name)`, which inside LUNA uses the OS keychain scoped to the Add On's `id`; never `localStorage`, IndexedDB, cookies or a file in the Add On. Outside LUNA (`luna.secrets.storage === 'memory'`) values last until reload.
+- `/gui` is absent on a headless engine: check `luna.gui.available()`; without it every `luna.gui` command and `importFile` reject with `Luna.Unsupported`.
 - Sends are outputs: `channel.outputs.byId('send_0')`, with `assign`/`unassign`/`retarget`/`moveTo`. Assign appends, so use `retarget` to replace (fact 43). Read `send.destinations` (each has the assignment `uid` that `unassign` takes, `busUid`, `name`, `error`), not the raw `assignments` rows (fact 83).
 - Pan is `pan` on a mono channel and `pan_left`/`pan_right` on a stereo one (fact 84): use `output.pans` (or `panLeft`/`panRight`); `output.pan` is the left one on stereo.
 - Automation values go on the wire as float literals (`Luna.float`), because LUNA stores a bare whole number as 0 (fact 82). `lane.insert`/`setValue`/`move`/`clear` resolve once the lane shows the edit.
@@ -62,11 +63,11 @@ QUICKSTART/FILES/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run 
 - `Luna.settle(predicate, what, { refresh })` is how to wait for an edit: LUNA answers `null` whether or not it happened (fact 71).
 - Timeline conversions: `tickAtBar`, `tickAt({bar,beat,tick})`, `barBeat(tick)`, `seconds(tick)`, `tickAtSeconds(s)`, `formatBarBeat(tick)`; `timeline.onChange` fires on tempo or meter edits. `barBeat().tick` is engine ticks: pass it to `Luna.formatBarBeat` unconverted. `marker.barBeat` / `marker.seconds` are derived props that follow the marker and the tempo map.
 - Folders outside a session (`/renders`, `/jobs`, `/plugins`) need `collection.watch()` before they follow pushes (fact 34).
-- Wasm: `Luna.connect({ engine: 'wasm' })` or `?engine=wasm`; no session at boot; `luna.wasm.resumeAudio()` after a click; no `/gui` (`luna.gui.available()` is false) and no path route: use `File`s and `uploadFile`.
 - Tests: `Luna.MockEngine`, `await engine.settled()`, `await luna.settled()`.
 
 ## SDK feedback
 
 When a workflow was harder than the SDK should make it, end your reply with the line
-`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
-support the improved workflow.
+`LUNA BUILDER SDK FEEDBACK: <version>` (the version from `ua-builder doctor`, or
+`Luna.VERSION`) followed by a prompt that can be used to update the SDK to support the
+improved workflow.

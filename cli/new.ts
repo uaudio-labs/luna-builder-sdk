@@ -55,7 +55,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
@@ -68,11 +68,14 @@ export async function newAddOn(args: Args): Promise<number> {
     console.error(`unknown --target "${target}"; use window, app, browser or editor`);
     return 2;
   }
-  const template = join(packageRoot(), 'templates', flagString(args, 'template') ?? 'add-on-basic');
+  const templates = join(packageRoot(), 'templates');
+  const template = join(templates, flagString(args, 'template') ?? 'add-on-basic');
   if (!existsSync(template)) {
-    console.error(`template not found: ${template}`);
+    console.error(`template not found: ${template}\navailable: ${readdirSync(templates).filter((t) => !t.startsWith('.')).join(', ')}`);
     return 1;
   }
+  // A template with a tsconfig.json builds src/ into dist/ before the page can load.
+  const typescript = existsSync(join(template, 'tsconfig.json'));
   const id = flagString(args, 'id') ?? `com.example.${slug(name)}`;
   // --title is the flag's old spelling, kept as an alias.
   const displayName = flagString(args, 'name') ?? flagString(args, 'title') ?? titleCase(name);
@@ -109,6 +112,22 @@ export async function newAddOn(args: Args): Promise<number> {
     writeFileSync(dest, text);
   }
   vendorBundle(dir);
+  if (typescript) {
+    console.log(`Created ${dir}
+
+Next:
+  cd ${name}
+  npm install                 # TypeScript, Vite, vitest and the SDK
+  npm test                    # runs against Luna.MockEngine, no LUNA needed
+  npm run build               # src/ -> dist/main.js, the classic script index.html loads
+  npx ua-builder serve        # http://localhost:8790/ (LUNA must be running for live data)
+  npx ua-builder install      # link into LUNA's Add Ons folder; it appears under ${menuFor(target)}
+  npm run pack                # build, then a .lunaaddon without sources or source maps
+
+Edit src/main.ts for the UI and src/logic.ts for the parts tests exercise; run npm run dev to
+rebuild on save. See docs/QUICKSTART.md.`);
+    return 0;
+  }
   console.log(`Created ${dir}
 
 Next:

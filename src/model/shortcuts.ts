@@ -1,13 +1,14 @@
 /**
- * LUNA's standard keyboard shortcuts for an Add On: the fallback for keys the Add On's own GUI
- * does not handle.
+ * LUNA's standard keyboard shortcuts for a page: the fallback for keys its own GUI does not
+ * handle.
  *
- * An Add On page has the keyboard focus while it is in front, so without this LUNA's own
- * shortcuts (Space to play, Cmd+Z to undo) stop working the moment the user clicks into it.
- * {@link bindShortcuts} restores them: it listens on the window, and a key the page has not
- * already claimed (`event.defaultPrevented`) and that is not typed into a text field runs the
- * matching command on the focused session. Bindings follow LUNA's default map (fact 79) and
- * each command does what LUNA's does (fact 80).
+ * Inside LUNA there is nothing to do: LUNA receives every key an Add On page does not
+ * `preventDefault()` and runs it through its own shortcut table, the user's remappings
+ * included (fact 81), so {@link bindShortcuts} installs nothing there. Outside LUNA (a browser,
+ * the wasm engine) it listens on the window, and a key the page has not already claimed
+ * (`event.defaultPrevented`) and that is not typed into a text field runs the matching command
+ * on the focused session. Bindings follow LUNA's default map (fact 79) and each command does
+ * what LUNA's does (fact 80).
  *
  * To take a key over, handle it in the page and call `preventDefault()`; to drop or change a
  * binding, pass `bindings`.
@@ -23,6 +24,7 @@
  * Luna.bindShortcuts(luna, { bindings: { togglePlayback: [], toggleRecord: [] } });
  */
 import type { Client } from '../client/client';
+import { hasNativeBridge } from '../client/detect';
 import type { Session } from './session';
 
 /** The commands the standard shortcuts cover. */
@@ -229,15 +231,21 @@ function warn(error: unknown, command: ShortcutCommand): void {
 /** The listeners {@link bindShortcuts} installed. */
 export interface ShortcutsBinding {
   readonly shortcuts: Shortcuts;
+  /** False inside LUNA, which handles the page's unclaimed keys itself (fact 81). */
+  readonly installed: boolean;
   /** Remove the listeners. */
   dispose(): void;
 }
 
 /**
- * Give an Add On LUNA's standard shortcuts for undo, redo, play and record, as a fallback
- * behind its own key handling.
+ * Give a page LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind
+ * its own key handling, when LUNA is not there to handle them.
  *
- * Listens for `keydown` in the bubble phase on `options.target` (default the window), so
+ * Inside LUNA (its native bridge is present) this installs nothing: LUNA already runs every
+ * key the page does not `preventDefault()` through its own shortcut table (fact 81), which
+ * covers every command and follows the user's remapping; claiming four keys here would
+ * override that. Elsewhere it
+ * listens for `keydown` in the bubble phase on `options.target` (default the window), so
  * handlers on the page's elements and document run first; any of them that calls
  * `preventDefault()` keeps the key. Keys typed into text inputs, textareas, selects and
  * editable elements are left alone. Commands act on the focused session at the keypress,
@@ -251,6 +259,7 @@ export interface ShortcutsBinding {
  */
 export function bindShortcuts(client: Client, options: ShortcutsOptions & { target?: EventTarget } = {}): ShortcutsBinding {
   const shortcuts = new Shortcuts(client, options);
+  if (hasNativeBridge()) return { shortcuts, installed: false, dispose: () => {} };
   const target = options.target ?? (globalThis as { window?: EventTarget }).window;
   const onDown = (e: Event): void => {
     shortcuts.handle(e as KeyboardEvent);
@@ -260,6 +269,7 @@ export function bindShortcuts(client: Client, options: ShortcutsOptions & { targ
   target?.addEventListener('keyup', onUp);
   return {
     shortcuts,
+    installed: true,
     dispose: () => {
       target?.removeEventListener('keydown', onDown);
       target?.removeEventListener('keyup', onUp);

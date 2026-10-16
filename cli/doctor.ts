@@ -2,7 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveEngineDir } from './serve';
 import { addOnsFolder, bundlePath, ensureExecutable, sdkVersion, type Args } from './util';
 
 function probe(port: number, host = '127.0.0.1', timeoutMs = 800): Promise<boolean> {
@@ -42,11 +41,8 @@ export async function doctor(_args: Args): Promise<number> {
       rows.push(['project CLI', state === 'ok' ? `${target} (executable)` : state === 'fixed' ? `${target} (executable bit restored)` : `${target} is NOT executable and read-only; run: chmod +x "${target}"`]);
     }
   }
-  const engineDir = resolveEngineDir(undefined);
-  rows.push(['wasm engine build', engineDir ?? 'not found (set UA_WASM_ENGINE or pass --engine to serve)']);
-  const [luna, wasmBridge] = await Promise.all([probe(4718), probe(4749)]);
+  const luna = await probe(4718);
   rows.push(['LUNA engine :4718', luna ? 'listening' : 'not listening (is LUNA running?)']);
-  rows.push(['wasm bridge :4749', wasmBridge ? 'listening' : 'not listening (only with the luna_connects_to_wasm feature key)']);
   try {
     const folder = addOnsFolder();
     let note = '';

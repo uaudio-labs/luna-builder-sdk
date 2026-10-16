@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readManifest } from '../../cli/util';
+import { addOnClashes, readManifest } from '../../cli/util';
 
 const dirs: string[] = [];
 
@@ -11,7 +11,7 @@ function addOn(entry: Record<string, unknown>, omit: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), 'ua-manifest-'));
   dirs.push(dir);
   writeFileSync(join(dir, 'index.html'), '<!doctype html>');
-  const manifest: Record<string, unknown> = { id: 'com.example.a', name: 'A', html: 'index.html', width: 400, height: 300, ...entry };
+  const manifest: Record<string, unknown> = { id: 'com.example.a', title: 'A', html: 'index.html', width: 400, height: 300, ...entry };
   for (const k of omit) delete manifest[k];
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
   return dir;
@@ -23,22 +23,47 @@ afterEach(() => {
 });
 
 describe('readManifest', () => {
-  it('requires a non-empty string name', () => {
-    expect(() => readManifest(addOn({}, ['name']))).toThrow(/"name" must be a non-empty string/);
-    expect(() => readManifest(addOn({ name: '' }))).toThrow(/"name" must be a non-empty string/);
-    expect(() => readManifest(addOn({ name: 7 }))).toThrow(/"name" must be a non-empty string/);
+  it('requires a non-empty string title', () => {
+    expect(() => readManifest(addOn({}, ['title']))).toThrow(/"title" must be a non-empty string/);
+    expect(() => readManifest(addOn({ title: '' }))).toThrow(/"title" must be a non-empty string/);
+    expect(() => readManifest(addOn({ title: 7 }))).toThrow(/"title" must be a non-empty string/);
   });
 
-  it('accepts the deprecated title in place of name, as LUNA does, with a warning', () => {
+  it('reads title as the entry name without a warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(readManifest(addOn({ title: 'Old' }, ['name'])).entries[0]!.name).toBe('Old');
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/"title" is deprecated; rename it to "name"/));
+    expect(readManifest(addOn({ title: 'Old' })).entries[0]!.name).toBe('Old');
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  it('prefers name over title, as LUNA does, and warns that title is ignored', () => {
+  it('accepts name, which newer LUNA releases read, and checks it in place of title', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(readManifest(addOn({ name: 'New' }, ['title'])).entries[0]!.name).toBe('New');
+    expect(() => readManifest(addOn({ name: '' }, ['title']))).toThrow(/"name" must be a non-empty string/);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('accepts a title matching name without a warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(readManifest(addOn({ name: 'A', title: 'A' })).entries[0]!.name).toBe('A');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('prefers name over title, as LUNA does, and warns when they differ', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(readManifest(addOn({ name: 'New', title: 'Old' })).entries[0]!.name).toBe('New');
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/"title" is ignored when "name" is present/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/"title" differs from "name"/));
+  });
+
+  it('warns about an id with capitals, which LUNA reads in lowercase', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(readManifest(addOn({ id: 'com.Example.A' })).entries[0]!.id).toBe('com.Example.A');
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/LUNA reads "id" as "com.example.a"; write it in lowercase/));
+  });
+
+  it('does not warn about a lowercase id', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    readManifest(addOn({}));
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('accepts every target LUNA shows, and rejects one it would turn into "window"', () => {
@@ -93,5 +118,19 @@ describe('readManifest', () => {
 
   it('still rejects a width or height that is present but not a number', () => {
     expect(() => readManifest(addOn({ target: 'browser', width: '300' }))).toThrow(/"width" must be a number when present/);
+  });
+});
+
+describe('addOnClashes', () => {
+  const installed = [{ id: 'com.example.a', name: 'A', entry: '/Add Ons/A' }];
+
+  it('treats ids that differ only in case as the same Add On, as LUNA does', () => {
+    expect(addOnClashes([{ id: 'com.Example.A', name: 'Other' }], installed)).toEqual([
+      'id "com.Example.A" is already used by "A" in /Add Ons/A',
+    ]);
+  });
+
+  it('leaves a different id and name alone', () => {
+    expect(addOnClashes([{ id: 'com.example.b', name: 'B' }], installed)).toEqual([]);
   });
 });

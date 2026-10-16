@@ -194,11 +194,14 @@ Conventions applied during the port (from `uanet-clients/docs/api-codeability-re
   and `Luna.bindGesture(element, controls)` pairs them with pointer down and every way a drag
   ends. Automatable controls and switches are bracketed; a non-automatable continuous
   control is not. Transactions: `session.transaction(name, fn)`.
-- Keyboard (facts 79-81): `Luna.bindShortcuts(luna)` is the fallback behind an Add On's own
-  keys. It runs LUNA's default undo, redo, toggle-playback and toggle-record bindings through
-  the model (`session.undo()`, `transport.toggle()`, `transport.toggleRecord()`), not
-  through LUNA's rack command ids, so it works the same on the wasm engine. A key the page
-  claims with `preventDefault()` or types into a text field is left alone.
+- Keyboard (facts 79-81): inside LUNA the host forwards every key an Add On page does not
+  `preventDefault()` to its own shortcut table (fact 81), so `Luna.bindShortcuts(luna)` installs
+  nothing when the native bridge is present: claiming four keys in the page would override
+  LUNA's own table, which covers every command and follows the user's remapping. Outside LUNA it is the fallback behind the page's own keys: LUNA's
+  default undo, redo, toggle-playback and toggle-record bindings, run through the model
+  (`session.undo()`, `transport.toggle()`, `transport.toggleRecord()`), not LUNA's rack
+  command ids, so it works the same on the wasm engine. A key the page claims with
+  `preventDefault()` or types into a text field is left alone.
 - Every public class and method has a JSDoc `@example` that is copied into
   `tests/doc-examples.ts` so `tsc` fails when a documented signature drifts.
 - Internals are `@internal` and stripped from `.d.ts`.
@@ -320,8 +323,8 @@ What lowers tokens, in order of impact:
 
 ## Repository layout
 
-The SDK is its own repo, `uaudio/luna-builder-sdk` on GitHub (in an HB tree,
-`<tree>/github-repos/luna-builder-sdk`). It is not a pac target. `design/PLATFORM.md` maps it
+The SDK lives at `packages/sdk/luna/builder/sdk` in the `sdk-luna` repo, next to the
+installer and examples that consume it. It is not a pac target. `design/PLATFORM.md` maps it
 against the rest of the platform.
 
 ```
@@ -351,8 +354,9 @@ luna-builder-sdk/
   scripts/                sync-plugin.mjs, check-plugin.mjs
 ```
 
-The `sdk-luna` Stash repo keeps `LUNA SDK` and the two tree targets that consume this
-checkout: `sdk/luna/builder/installer` and `sdk/luna/builder/examples/studiolo`.
+The `sdk-luna` Stash repo keeps `LUNA SDK` and the installer tree target that consumes this
+checkout, `sdk/luna/builder/installer`. The StudioLo example Add On, which also consumes it,
+is the `add-ons/studiolo` target in the `add-ons` repo.
 
 ## Risks and dependencies
 

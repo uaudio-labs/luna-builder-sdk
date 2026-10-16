@@ -6,12 +6,14 @@
 import { describe, expect, it } from 'vitest';
 import { Luna } from '../../src/index';
 
-async function connected() {
+async function connected(wrap?: (port: Luna.MockPort) => void) {
   const engine = new Luna.MockEngine();
   engine.addSession('abc', { tracks: ['Drums', 'Bass'], name: 'Demo' });
   engine.addBus('abc', 'fx', { name: 'FX', busType: 'aux', stemFormat: 'stereo' });
   await engine.settled();
-  const luna = await Luna.connect({ port_: engine.port() });
+  const port = engine.port();
+  wrap?.(port);
+  const luna = await Luna.connect({ port_: port });
   const session = await luna.session();
   await session.ready();
   const drums = session.tracks.byId('Drums')!;
@@ -186,6 +188,20 @@ describe('Session.newBus', () => {
     const send = drums.outputs.byId('send_0')!;
     await send.assign(bus);
     expect(send.busUid.value).toBe(bus.id);
+  });
+
+  it('resolves with the bus properties loaded, even when they arrive after the bus is listed (fact 7)', async () => {
+    // Native LUNA's `added` push carries no properties, so the collection lists the bus first
+    // and reads its properties after. Hold that read back so the order is always that one.
+    const { session } = await connected((port) => {
+      const get = port.get.bind(port);
+      port.get = async (path, options) => {
+        if (/\/buses\/(?!fx$)[^/]+$/.test(path)) await new Promise((r) => setTimeout(r, 20));
+        return get(path, options);
+      };
+    });
+    const bus = await session.newBus({ name: 'Reverb' });
+    expect([bus.name.value, bus.busType.value, bus.stemFormat.value]).toEqual(['Reverb', 'aux', 'stereo']);
   });
 
   it('defaults the name to Bus and takes a mono stem format', async () => {

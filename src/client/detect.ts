@@ -4,13 +4,14 @@
  * between "inside LUNA" and "a plain web page".
  */
 import { DEFAULT_LUNA_PORT } from '../wire/websocket-port';
+import type { Engine } from './client';
 
 export interface LocationOptions {
   host?: string;
   port?: number;
-  /** `?engine=wasm` asks for the in-page engine; `?engine=mock` for an in-memory {@link MockEngine}. */
-  engine?: 'wasm' | 'luna' | 'mock';
-  /** `?engine_url=/path/` overrides where the wasm engine is loaded from. */
+  /** `?engine=mock` asks for an in-memory {@link MockEngine}; `?engine=luna` for LUNA. */
+  engine?: Engine;
+  /** @hidden */
   engineUrl?: string;
 }
 

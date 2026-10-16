@@ -1,12 +1,11 @@
 # @uaudio/luna-builder-sdk
 
 SDK for building LUNA Add Ons that run inside LUNA or, unchanged, in a browser
-page driving the WebAssembly LUNA engine. TypeScript, zero runtime dependencies,
+page talking to LUNA on the same machine. TypeScript, zero runtime dependencies,
 everything under one `Luna` namespace.
 
 Status: alpha. Sessions, transport, tracks, controls, buses, playlists, clips, MIDI,
-automation, renders and recording are implemented and tested against a live LUNA, and the
-same Add On runs inside LUNA or, with `?engine=wasm`, on the in-page engine. See
+automation, renders and recording are implemented and tested against a live LUNA. See
 [CHANGELOG.md](CHANGELOG.md).
 
 Not supported: streaming audio or MIDI. The SDK controls and edits a session (clips, notes,
@@ -22,9 +21,7 @@ With Node.js 24 or newer (Node 22 works for the SDK itself, but its npm 10 fails
 `npm install` a scaffolded Add On — npm 11 is needed for that):
 
 ```sh
-git clone git@github.com:uaudio-labs/luna-builder-sdk.git
-cd luna-builder-sdk
-npm ci        # the prepare script builds dist/ (the SDK and its CLI) and the agent plugin
+npm ci        # in the SDK folder; the prepare script builds dist/ (the SDK and its CLI) and the agent plugin
 ```
 
 That makes `npx ua-builder` work from this folder and from any Add On it scaffolds.
@@ -41,6 +38,7 @@ testing and debugging Add Ons. From this folder:
 
 ```sh
 npx ua-builder new my-add-on --name "My Add On"   # scaffold: manifest, page, logic, tests, vendored SDK
+                                                    # --template add-on-typescript: TypeScript, built by Vite
 cd my-add-on && npm install && npm test             # tests run against Luna.MockEngine, no LUNA
 npx ua-builder serve                                # http://localhost:8790/
 npx ua-builder probe http://localhost:8790/         # read the served page's live DOM as JSON
@@ -51,7 +49,7 @@ npx ua-builder doctor                               # what is reachable from her
 
 ## Install for an agent
 
-The same six skills ship as an agent plugin, [ua-luna-builder](plugin/README.md),
+The same five skills ship as an agent plugin, [ua-luna-builder](plugin/README.md),
 which also carries the SDK builds, its CLI, the scaffold template, the examples and the
 consumer docs. An agent holding only the plugin can build, test and install an Add On with
 no checkout, no npm install and no network.
@@ -63,8 +61,8 @@ claude plugin marketplace add <path to this folder>
 claude plugin install ua-luna-builder@luna-builder-sdk
 ```
 
-`.claude-plugin/marketplace.json` points at `./plugins/ua-luna-builder` in this repo, so a
-marketplace added from a clone resolves the plugin without a release tag. To try the
+`.claude-plugin/marketplace.json` points at `./plugins/ua-luna-builder` in this folder, so a
+marketplace added from this folder resolves the plugin without a release tag. To try the
 plugin without a marketplace:
 
 ```bash
@@ -91,7 +89,7 @@ from "Get set up" creates it, as does `npm run build`; distributed SDK packages
 already include it.
 
 The plugin carries both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
-Installing from a clone is not a release: the package is not published to npm, and nothing
+Installing from this folder is not a release: the package is not published to npm, and nothing
 here is listed in either host's public directory.
 
 ## Use
@@ -101,7 +99,7 @@ import { Luna } from '@uaudio/luna-builder-sdk';
 
 const luna = await Luna.connect();               // inside LUNA (?port= on the URL) or LUNA on localhost
 const session = await luna.session();          // focused session, subscribed and loaded
-Luna.bindShortcuts(luna);                        // LUNA's undo/redo/play/record keys, behind the page's own
+Luna.bindShortcuts(luna);                        // undo/redo/play/record keys outside LUNA (LUNA has its own)
 
 session.transport.location.onChange(() => {
   counter.textContent = Luna.formatBarBeat(session.transport.location.value?.bar_beat);
@@ -154,9 +152,9 @@ const luna = await Luna.connect({ port_: engine.port() });
 ```
 src/          the SDK source; everything public is exported from src/luna.ts as Luna.<Name>
 cli/          ua-builder new/serve/install/pack/doctor, built to dist/cli.js
-tests/        vitest: unit (Luna.MockEngine), live (a running LUNA), engine (wasm in Chrome)
+tests/        vitest: unit (Luna.MockEngine), live (a running LUNA)
 docs/         QUICKSTART.md, FILES.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
-skills/       create-add-on, add-feature, test-add-on, debug-connection, port-to-wasm, verify-add-on
+skills/       create-add-on, add-feature, test-add-on, debug-connection, verify-add-on
 templates/    add-on-basic scaffold
 examples/     addon (master mute), mixer, inserts, ruler, sends, tracks (raw wire), plus
               check-*.mjs probes
@@ -167,7 +165,7 @@ plugins/      generated: ua-luna-builder, the skills, SDK builds, CLI, template,
               docs as an agent plugin; catalogs in .claude-plugin/ and .agents/plugins/
 ```
 
-What ships -- an `npm pack` of this repo -- is the package.json `files` list: the docs,
+What ships -- an `npm pack` of this folder -- is the package.json `files` list: the docs,
 skills, templates, examples and the generated `dist/` and `plugins/`. See `DEVELOPING.md`
 to work on the SDK itself.
 

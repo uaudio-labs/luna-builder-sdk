@@ -192,7 +192,7 @@ async function start() {
     luna = await Luna.connect();
     Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
     if (!(await luna.gui.available())) {
-      status('This engine has no /gui (a headless or wasm engine), so there is no folder listing.', true);
+      status('This engine has no /gui (a headless engine), so there is no folder listing.', true);
       return;
     }
     for (const id of ['open', 'choose']) $(id).disabled = false;

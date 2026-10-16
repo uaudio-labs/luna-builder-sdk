@@ -8,7 +8,7 @@
 
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
-| <a id="addonid"></a> `addOnId` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="addonid"></a> `addOnId` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The manifest's `id`, in lowercase: LUNA compares ids without case. | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="floating"></a> `floating` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. | - |
 | <a id="icon"></a> `icon` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | Absolute file path of the icon, or `''`. | - |

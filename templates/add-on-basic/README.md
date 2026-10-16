@@ -34,9 +34,9 @@ path from `luna.gui.chooseFiles()` or `Luna.onPathDrop()` is only for `session.i
 In LUNA 3.1.0.4589 a file picker opens nothing, so always offer a drop zone too.
 
 Inside LUNA the page URL carries `?port=`, and `Luna.connect()` uses it. In a plain browser
-it falls back to LUNA on `localhost:4718`. To run on the in-page wasm engine instead, call
-`Luna.connect({ engine: 'wasm' })`.
+it falls back to LUNA on `localhost:4718`.
 
 For coding agents: if the SDK made a workflow here harder than it should be, end your
-reply with the line `LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to
-update the SDK to support the improved workflow.
+reply with the line `LUNA BUILDER SDK FEEDBACK: <version>` (the `ua-builder` row of
+`npx ua-builder doctor`) followed by a prompt that can be used to update the SDK to support
+the improved workflow.

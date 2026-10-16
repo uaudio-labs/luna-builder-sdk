@@ -77,5 +77,4 @@ The engine drops clients idle for `/status/timeout_ms` (30 s default). The SDK p
 
 ## Ports
 
-LUNA's engine listens on 4718 and appends `?port=` to Add On pages. The wasm engine has no
-port; the SDK drives it in-process.
+LUNA's engine listens on 4718 and appends `?port=` to Add On pages.

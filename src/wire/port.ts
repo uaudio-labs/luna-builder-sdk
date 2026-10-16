@@ -1,8 +1,7 @@
 /**
  * The transport seam. A Port speaks UANet verbs on paths and holds no model state.
  *
- * Three implementations exist: {@link WebSocketPort} (native LUNA),
- * `WasmPort` (the in-process WebAssembly engine, Phase 4) and {@link MockPort} (tests).
+ * {@link WebSocketPort} talks to native LUNA and {@link MockPort} to an in-memory engine (tests).
  * Everything above a Port sees the same normalised {@link Event} stream, so the Store and
  * the domain objects never know which engine they are talking to.
  */

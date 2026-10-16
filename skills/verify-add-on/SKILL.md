@@ -81,6 +81,13 @@ const q = await luna.raw.get(`${session.path}/undo_queues`, { children: true, le
 - An edit whose entry is missing did not happen, whatever the reply said (fact 71).
 - Undo from LUNA (Cmd+Z) and check the page shows the value going back.
 
+## Secrets
+
+Search the Add On for `localStorage`, `sessionStorage`, `indexedDB` and `document.cookie`;
+any API key, token or password stored there, or written into the manifest or a shipped file,
+fails the check: move it to `luna.secrets` (docs/MANIFEST.md, "Secrets"). Inside LUNA, save a
+key, close and reopen the Add On, and confirm it is still there.
+
 ## 4. Leave the session as you found it
 
 Restore every value the checks changed and remove anything they created. Undo entries stay;
@@ -96,6 +103,7 @@ entries seen, and anything restored. A check you could not run is a gap, not a p
 
 If part of this workflow was harder than the SDK should make it — a missing API, an
 awkward idiom, boilerplate the SDK could absorb — end your reply with the line
-`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
-support the improved workflow: what you were doing, what was awkward, and the API you
-wished for.
+`LUNA BUILDER SDK FEEDBACK: <version>`, where `<version>` is the `ua-builder` row of
+`ua-builder doctor` (for example `LUNA BUILDER SDK FEEDBACK: 0.1.0.1234`), followed by a
+prompt that can be used to update the SDK to support the improved workflow: what you were
+doing, what was awkward, and the API you wished for.

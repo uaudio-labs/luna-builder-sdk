@@ -113,9 +113,12 @@ export interface Manifest {
 
 export interface ManifestEntry {
   id: string;
-  /** The Add On's display name: its menu item and panel header. */
+  /**
+   * The Add On's display name: its menu item and panel header. Filled in from `title` by
+   * `readManifest()`; newer LUNA releases accept it in a manifest, older ones do not.
+   */
   name: string;
-  /** @deprecated The old key for `name`. LUNA still reads it when `name` is absent. */
+  /** The display name as a manifest writes it: every LUNA release reads it. */
   title?: string;
   html?: string;
   url?: string;
@@ -146,7 +149,7 @@ export function menuFor(target: string | undefined): string {
 }
 
 /**
- * An entry's display name as LUNA reads it: `name`, else the deprecated `title`. Undefined
+ * An entry's display name as LUNA reads it: `name`, else `title`. Undefined
  * when neither is a string.
  */
 export function entryName(e: { [k: string]: unknown }): string | undefined {
@@ -197,7 +200,8 @@ export function installedAddOns(folder?: string): InstalledAddOn[] {
 /**
  * The installed Add Ons whose `id` or `name` an Add On would collide with. LUNA needs both
  * unique across everything installed; a duplicate name collapses into one menu item. Names
- * compare without case or surrounding whitespace, since they read the same in the menu.
+ * compare without case or surrounding whitespace, since they read the same in the menu; ids
+ * without case, since LUNA treats ids that differ only in case as the same Add On.
  * Entries in `except` (the Add On's own install, being replaced) are left out.
  */
 export function addOnClashes(wanted: { id: string; name: string }[], installed: InstalledAddOn[], except: string[] = []): string[] {
@@ -207,7 +211,7 @@ export function addOnClashes(wanted: { id: string; name: string }[], installed: 
   for (const w of wanted) {
     for (const i of installed) {
       if (skip.has(resolve(i.entry))) continue;
-      if (i.id === w.id) problems.push(`id "${w.id}" is already used by "${i.name}" in ${i.entry}`);
+      if (i.id.toLowerCase() === w.id.toLowerCase()) problems.push(`id "${w.id}" is already used by "${i.name}" in ${i.entry}`);
       else if (nameKey(i.name) === nameKey(w.name)) problems.push(`name "${w.name}" is already used by ${i.id} in ${i.entry}`);
     }
   }
@@ -216,8 +220,9 @@ export function addOnClashes(wanted: { id: string; name: string }[], installed: 
 
 /**
  * Read and validate `manifest.json` in `dir`. Throws with a readable message on problems.
- * An entry that still uses the deprecated `title` is accepted with a warning, and its
- * returned entry has `name` filled in from it.
+ * The display name is read as LUNA reads it, `name` else `title`, and the returned entry has
+ * `name` filled in. An entry with both warns when they differ, since LUNA releases that
+ * predate `name` show `title`.
  */
 export function readManifest(dir: string): { manifest: Manifest; entries: ManifestEntry[] } {
   const path = join(dir, 'manifest.json');
@@ -236,13 +241,14 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
   for (const [i, e] of entries.entries()) {
     const where = `entry ${i} (${e.id ?? 'no id'})`;
     if (typeof e.id !== 'string' || !e.id) problems.push(`${where}: "id" must be a non-empty string`);
-    if (e.name === undefined && e.title !== undefined) {
-      console.warn(`manifest.json ${where}: "title" is deprecated; rename it to "name"`);
+    else if (e.id !== e.id.toLowerCase()) console.warn(`manifest.json ${where}: LUNA reads "id" as "${e.id.toLowerCase()}"; write it in lowercase`);
+    const nameKey = e.name === undefined ? 'title' : 'name';
+    if (nameKey === 'title') {
       if (typeof e.title === 'string') e.name = e.title;
-    } else if (e.title !== undefined) {
-      console.warn(`manifest.json ${where}: "title" is ignored when "name" is present; remove it`);
+    } else if (e.title !== undefined && e.title !== e.name) {
+      console.warn(`manifest.json ${where}: "title" differs from "name"; LUNA shows "name" but older LUNA releases show "title". Make them match`);
     }
-    if (typeof e.name !== 'string' || !e.name) problems.push(`${where}: "name" must be a non-empty string`);
+    if (typeof e.name !== 'string' || !e.name) problems.push(`${where}: "${nameKey}" must be a non-empty string`);
     for (const k of ['width', 'height'] as const) {
       if (e[k] === undefined ? isWindow(e.target) : typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number${isWindow(e.target) ? '' : ' when present'}`);
     }
@@ -260,12 +266,13 @@ export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
   ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--target window|app|browser|editor]
-                        [--no-floating] [--show-with-session] [--width 900 --height 600] [--dir path]
+                        [--no-floating] [--show-with-session] [--width 900 --height 600]
+                        [--template add-on-basic|add-on-typescript] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
   ua-builder test [dir] [--live]
   ua-builder probe <url> [--expr <js>] [--wait <js>] [--timeout <ms>]   read a served page's live DOM
   ua-builder install [dir] [--name "Link Name"]
-  ua-builder pack [dir] [--out Name.lunaaddon]
+  ua-builder pack [dir] [--out Name.lunaaddon] [--source-maps]
   ua-builder doctor
   ua-builder tree [path] [--levels 1] [--out tree.json]   the shape of LUNA's tree (read-only)
 

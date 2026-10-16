@@ -72,7 +72,7 @@ Put engine logic in a DOM-free file (`logic.js`) and test that. Test DOM code on
 on a mock with no LUNA (the fixture sets `globalThis.LunaMockSetup = (engine) => { ... }`). A test that needs `document` is a sign logic leaked into
 `main.js`.
 
-Files: `new Luna.MockEngine({ gui: false })` is an engine without `/gui` (headless, wasm); test
+Files: `new Luna.MockEngine({ gui: false })` is an engine without `/gui` (headless); test
 that the page falls back. In a probe, `LunaProbe.dropFiles(['loop.wav'], '#zone')` and
 `LunaProbe.chooseFiles('#file', ['loop.wav'])` hand the page real `File`s; `--luna-bridge`
 adds `LunaProbe.dropPaths(paths)` for `Luna.onPathDrop` (docs/FILES.md, Testing).
@@ -81,6 +81,7 @@ adds `LunaProbe.dropPaths(paths)` for `Luna.onPathDrop` (docs/FILES.md, Testing)
 
 If part of this workflow was harder than the SDK should make it — a missing API, an
 awkward idiom, boilerplate the SDK could absorb — end your reply with the line
-`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
-support the improved workflow: what you were doing, what was awkward, and the API you
-wished for.
+`LUNA BUILDER SDK FEEDBACK: <version>`, where `<version>` is the `ua-builder` row of
+`ua-builder doctor` (for example `LUNA BUILDER SDK FEEDBACK: 0.1.0.1234`), followed by a
+prompt that can be used to update the SDK to support the improved workflow: what you were
+doing, what was awkward, and the API you wished for.

@@ -22,9 +22,8 @@ import type { Location } from './ticks';
 export interface TransportLocation extends Location {
   /**
    * The playhead as LUNA's own MIN:SEC counter shows it: whole `minutes`, and `seconds`
-   * within the minute (fact 96). Present on the engine's `location` pushes. On the wasm
-   * engine `seconds` is fractional (a push read `0.52625`); native LUNA's precision is not
-   * yet re-measured, so floor it for display (`Luna.formatMinSec` does). For wall-clock
+   * within the minute (fact 96). Present on the engine's `location` pushes. `seconds`
+   * can be fractional, so floor it for display (`Luna.formatMinSec` does). For wall-clock
    * seconds derived from the tick, use {@link Transport.seconds}.
    */
   min_sec?: { minutes: number; seconds: number };

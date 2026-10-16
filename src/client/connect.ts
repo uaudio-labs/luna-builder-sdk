@@ -5,14 +5,12 @@
  * 1. `port_` — use this transport as-is (tests, custom transports).
  * 2. `engine: 'mock'` (or `?engine=mock`) — an in-memory {@link MockEngine}, filled by `setup`,
  *    else by a page-defined `globalThis.LunaMockSetup`, else with {@link MockEngine.demo}.
- * 3. `engine: 'wasm'` (or `?engine=wasm` on the page URL) — boot the in-page WebAssembly engine.
- * 4. `url` / `host` / `port` — explicit WebSocket target.
- * 5. `?host=` / `?port=` on the page URL — set by LUNA when it opens an Add On.
- * 6. `ws://localhost:4718` — LUNA's engine on this machine.
+ * 3. `url` / `host` / `port` — explicit WebSocket target.
+ * 4. `?host=` / `?port=` on the page URL — set by LUNA when it opens an Add On.
+ * 5. `ws://localhost:4718` — LUNA's engine on this machine.
  *
  * @example
  * const luna = await Luna.connect();                    // inside LUNA, or LUNA on localhost
- * const luna = await Luna.connect({ engine: 'wasm' });  // plain web page, wasm engine
  * const luna = await Luna.connect({ port_: engine.port() }); // tests
  * const luna = await Luna.connect({ engine: 'mock', setup: (e) => e.addSession('s', { tracks: ['Vox'] }) });
  */
@@ -25,7 +23,7 @@ import { Client, type Engine } from './client';
 import { locationOptions } from './detect';
 
 export interface ConnectOptions {
-  /** Which engine to reach. Default: infer from the other options and the page URL. */
+  /** Which engine to reach: `'luna'` or `'mock'`. Default: infer from the other options and the page URL. */
   engine?: Engine;
   url?: string;
   host?: string;
@@ -36,7 +34,7 @@ export interface ConnectOptions {
   WebSocket?: SocketConstructor;
   /** Use this transport instead of opening one. Its status is taken as-is. */
   port_?: Port;
-  /** Directory URL of `devicedwasm.js`/`.wasm` for `engine: 'wasm'`. Default `/__engine/` (the `ua-builder serve` mount). */
+  /** @hidden */
   engineUrl?: string;
   /**
    * For `engine: 'mock'`: fill the engine before the client connects. Without it the page's
@@ -47,7 +45,7 @@ export interface ConnectOptions {
    * await Luna.connect({ engine: 'mock', setup: (engine) => engine.addSession('s', { tracks: ['Vox', 'Bass'] }) });
    */
   setup?: (engine: MockEngine) => void | Promise<void>;
-  /** Extra wasm boot options (persistence, logging, timeout). */
+  /** @hidden */
   wasm?: Omit<BootOptions, 'engineUrl'>;
   /**
    * Where the connection reports status changes, reconnects, timeouts and listener errors.

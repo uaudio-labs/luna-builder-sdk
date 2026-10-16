@@ -1,12 +1,12 @@
 /**
  * ua-builder: scaffold, serve, test, install and pack LUNA Add Ons.
  *
- *   ua-builder new <name> [--id com.x.y] [--name "..."] [--manufacturer "..."] [--target window|app] [--width N --height N] [--dir path]
+ *   ua-builder new <name> [--id com.x.y] [--name "..."] [--manufacturer "..."] [--target window|app] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]
  *   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
  *   ua-builder test [dir] [--live]
  *   ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--luna-bridge] [--screenshot <file.png>] [--chrome <path>]
  *   ua-builder install [dir] [--name "Link Name"]
- *   ua-builder pack [dir] [--out Name.lunaaddon]
+ *   ua-builder pack [dir] [--out Name.lunaaddon] [--source-maps]
  *   ua-builder doctor
  *   ua-builder tree [path] [--levels N] [--out file.json]
  */

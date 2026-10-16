@@ -9,7 +9,7 @@ LUNA's dialog cannot be read by the page, and a `File` cannot be handed to LUNA 
 | Drop | HTML `drop` event, `event.dataTransfer.files` | `Luna.onPathDrop(...)` |
 | The page gets | `File` objects: decode, play, slice, analyse | absolute paths, which the page cannot `fetch` |
 | Into the session | `session.uploadFile({ bytes: file })` | `session.importPath(path)`, or `session.importFile(path)` for LUNA's own import with a clip |
-| Works in | LUNA, a browser, the wasm engine, `MockEngine` | LUNA only: needs `/gui` for the dialog and drops, and a native engine that can see the file |
+| Works in | LUNA, a browser, `MockEngine` | LUNA only: needs `/gui` for the dialog and drops, and a native engine that can see the file |
 
 **Use the File route when the page needs the audio**: a sampler, slicer, analyzer or
 reference-track player. Use it too when in doubt; it is the one that works everywhere.
@@ -81,7 +81,7 @@ if (Luna.canDropPaths()) {
 ```
 
 - `chooseFiles`, `chooseFolders`, `listFiles`, `chooseSavePath`, `importFile` and every other `luna.gui` command reject
-  with `Luna.Unsupported` when the engine has no `/gui` (a headless or wasm engine; fact 103).
+  with `Luna.Unsupported` when the engine has no `/gui` (a headless engine; fact 103).
   Check `luna.gui.available()`, not `Luna.isEmbeddedInLuna()`.
 - `importPath` needs no `/gui`, but the engine must be able to open the path.
 - `listFiles` reads the disk as LUNA sees it, one level deep; recurse into `isDirectory`

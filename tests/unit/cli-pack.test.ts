@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { newAddOn } from '../../cli/new';
-import { isJunk, pack } from '../../cli/pack';
+import { isBuildOnly, isJunk, pack } from '../../cli/pack';
 import { bundlePath, parseArgs } from '../../cli/util';
 import { crc32, createZip } from '../../cli/zip';
 
@@ -38,20 +38,33 @@ function readZip(zip: Buffer): Map<string, Buffer | null> {
   return out;
 }
 
-async function scaffold(): Promise<{ parent: string; dir: string }> {
+async function scaffold(...argv: string[]): Promise<{ parent: string; dir: string }> {
   const parent = mkdtempSync(join(tmpdir(), 'ua-pack-'));
   dirs.push(parent);
-  await quietly(() => newAddOn(parseArgs(['demo', '--dir', parent])));
+  await quietly(() => newAddOn(parseArgs(['demo', '--dir', parent, ...argv])));
   return { parent, dir: join(parent, 'demo') };
+}
+
+/** A TypeScript scaffold with the files `npm run build` would write, without running it. */
+async function builtTypeScript(): Promise<{ parent: string; dir: string }> {
+  const scaffolded = await scaffold('--template', 'add-on-typescript');
+  mkdirSync(join(scaffolded.dir, 'dist'));
+  writeFileSync(join(scaffolded.dir, 'dist', 'main.js'), '(function(){})();\n//# sourceMappingURL=main.js.map');
+  writeFileSync(join(scaffolded.dir, 'dist', 'main.js.map'), '{}');
+  return scaffolded;
 }
 
 async function quietly<T>(run: () => Promise<T>): Promise<{ result: T; out: string }> {
   const lines: string[] = [];
   const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
+  const warn = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
+  const error = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
   try {
     return { result: await run(), out: lines.join('\n') };
   } finally {
     log.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
   }
 }
 
@@ -71,6 +84,92 @@ describe('ua-builder pack', () => {
     for (const name of ['index.html', 'main.js', 'vendor', 'Icon.png', 'thumbs.png', 'manifest.json']) {
       expect(isJunk(name), name).toBe(false);
     }
+  });
+
+  it('names sources, source maps and build configs as build-only', () => {
+    for (const name of ['main.ts', 'types.d.ts', 'App.tsx', 'App.jsx', 'x.mts', 'x.cts', 'main.js.map', 'main.css.map']) {
+      expect(isBuildOnly(name), name).toBe(true);
+    }
+    // Configs and src/ are build-only at the top level alone.
+    for (const name of ['main.js', 'main.css', 'index.html', 'tsconfig.json', 'webpack.config.js', 'src']) {
+      expect(isBuildOnly(name), name).toBe(false);
+    }
+    for (const name of ['tsconfig.json', 'tsconfig.app.json', 'vite.config.ts', 'vite.config.mjs', 'webpack.config.js', 'rollup.config.mjs', 'esbuild.config.js']) {
+      expect(isBuildOnly(name, { isRoot: true }), name).toBe(true);
+    }
+    expect(isBuildOnly('main.js.map', { keepMaps: true })).toBe(false);
+    expect(isBuildOnly('src', { isRoot: true })).toBe(false);
+    expect(isBuildOnly('src', { isRoot: true, buildStep: true })).toBe(true);
+    expect(isBuildOnly('src', { buildStep: true }), 'only the top-level src/').toBe(false);
+  });
+
+  it('packs a TypeScript Add On as its built page: no sources, maps, configs or src/', async () => {
+    const { parent, dir } = await builtTypeScript();
+    writeFileSync(join(dir, '.env'), 'API_KEY=x');
+    const out = join(parent, 'demo.lunaaddon');
+    const { result: code, out: log } = await quietly(() => pack(parseArgs([dir, '--out', out])));
+
+    expect(code, log).toBe(0);
+    const names = [...readZip(readFileSync(out)).keys()];
+    for (const rel of ['manifest.json', 'index.html', 'dist/main.js', 'vendor/luna.global.js']) expect(names, rel).toContain(`demo/${rel}`);
+    for (const rel of ['src/', 'src/main.ts', 'tsconfig.json', 'vite.config.ts', 'dist/main.js.map', 'vendor/luna.global.js.map', '.env', 'tests/']) {
+      expect(names, rel).not.toContain(`demo/${rel}`);
+    }
+    expect(names.some((n) => /\.(ts|map)$/.test(n))).toBe(false);
+    expect(log).toMatch(/Left out sources, source maps and build configs: .*src.*\(--source-maps keeps the maps\)/);
+  });
+
+  it('keeps source maps with --source-maps', async () => {
+    const { parent, dir } = await builtTypeScript();
+    const out = join(parent, 'demo.lunaaddon');
+    await quietly(() => pack(parseArgs([dir, '--out', out, '--source-maps'])));
+    const zip = readZip(readFileSync(out));
+    expect(zip.has('demo/dist/main.js.map')).toBe(true);
+    expect(zip.has('demo/src/main.ts')).toBe(false);
+  });
+
+  it('refuses to pack a page whose bundle has not been built', async () => {
+    const { parent } = await builtTypeScript();
+    const dir = join(parent, 'demo');
+    rmSync(join(dir, 'dist'), { recursive: true });
+    const out = join(parent, 'demo.lunaaddon');
+    const { result: code, out: log } = await quietly(() => pack(parseArgs([dir, '--out', out])));
+    expect(code).toBe(1);
+    expect(log).toContain('index.html loads dist/main.js, which does not exist. Run the build first (npm run build).');
+    expect(() => statSync(out)).toThrow();
+  });
+
+  it('refuses to pack a page that loads a file the pack leaves out', async () => {
+    const { parent, dir } = await builtTypeScript();
+    const html = join(dir, 'index.html');
+    writeFileSync(html, readFileSync(html, 'utf8').replace('dist/main.js', 'src/main.ts'));
+    const { result: code, out: log } = await quietly(() => pack(parseArgs([dir, '--out', join(parent, 'demo.lunaaddon')])));
+    expect(code).toBe(1);
+    expect(log).toContain('index.html loads src/main.ts, which the pack leaves out');
+  });
+
+  it('warns about a module script, and ignores remote and commented-out references', async () => {
+    const { parent, dir } = await scaffold();
+    const html = join(dir, 'index.html');
+    writeFileSync(
+      html,
+      readFileSync(html, 'utf8').replace(
+        '<script src="main.js"></script>',
+        '<script type="module" src="main.js"></script><script src="https://cdn.example.com/x.js"></script><!-- <script src="gone.js"></script> -->',
+      ),
+    );
+    const { result: code, out: log } = await quietly(() => pack(parseArgs([dir, '--out', join(parent, 'demo.lunaaddon')])));
+    expect(code, log).toBe(0);
+    expect(log).toMatch(/warning: index.html: <script type="module" src="main.js"> is a module script, which LUNA on Windows will not run/);
+    expect(log).not.toContain('gone.js');
+  });
+
+  it('ships src/ when the Add On has no build step', async () => {
+    const { parent, dir } = await scaffold();
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'helper.js'), 'x');
+    await quietly(() => pack(parseArgs([dir, '--out', join(parent, 'demo.lunaaddon')])));
+    expect(readZip(readFileSync(join(parent, 'demo.lunaaddon'))).has('demo/src/helper.js')).toBe(true);
   });
 
   it('writes a zip holding the Add On folder, leaving junk out at every depth', async () => {

@@ -2,9 +2,9 @@
  * LUNA's host surface: `/gui`. Lets an Add On ask LUNA to open dialogs, switch pages, show
  * other Add Ons, open URLs and report progress.
  *
- * `/gui` is LUNA's own UI, so it is absent on a headless engine and on the wasm engine
- * (fact 103). Check {@link Gui.available} rather than inferring it from
- * `Luna.isEmbeddedInLuna()`; without it every command rejects with `Luna.Unsupported`.
+ * `/gui` is LUNA's own UI, so it is absent on a headless engine (fact 103). Check
+ * {@link Gui.available} rather than inferring it from `Luna.isEmbeddedInLuna()`; without it
+ * every command rejects with `Luna.Unsupported`.
  *
  * @example
  * if (await luna.gui.available()) await luna.gui.setPage('mixer');
@@ -23,6 +23,7 @@ export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'l
 export type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
 
 export class AddOn extends Node {
+  /** The manifest's `id`, in lowercase: LUNA compares ids without case. */
   readonly addOnId: Prop<string>;
   /** The manifest's `name`: its menu item and panel header. */
   readonly name: Prop<string>;
@@ -83,7 +84,7 @@ export interface ProgressTask {
 }
 
 export class Gui extends Node {
-  /** Installed Add Ons, by manifest id. */
+  /** Installed Add Ons, by manifest id in lowercase (`byId('com.example.foo')`). */
   readonly addOns: Collection<AddOn>;
   /** Windows by context type; `main` is the arrangement window. */
   readonly windows: Collection<GuiWindow>;
@@ -128,7 +129,7 @@ export class Gui extends Node {
 
   /** Commands go to `/gui`, so refuse at once, not after a timeout, when it is absent. */
   protected override async post<R = unknown>(command: string, payload?: unknown): Promise<R> {
-    if (!(await this.available())) throw new Unsupported(`luna.gui.${command}: this engine has no /gui (a headless or wasm engine). Check luna.gui.available() first.`);
+    if (!(await this.available())) throw new Unsupported(`luna.gui.${command}: this engine has no /gui (a headless engine). Check luna.gui.available() first.`);
     return super.post<R>(command, payload);
   }
 

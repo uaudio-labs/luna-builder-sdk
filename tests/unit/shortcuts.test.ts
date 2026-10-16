@@ -113,6 +113,22 @@ describe('Luna.bindShortcuts', () => {
     expect(posted(engine, 'undo')[0]?.data).toMatchObject({ session_uid: 'abc', count: 1 });
   });
 
+  it('installs nothing inside LUNA, which runs unclaimed keys itself (fact 81)', async () => {
+    const { engine, luna } = await connected();
+    const w = window as { lunaAPI?: unknown };
+    w.lunaAPI = { setAcceptsFileDrops: () => {} };
+    try {
+      const b = bind(luna);
+      const e = press(document.body, { ...Z, metaKey: true });
+      await engine.settled();
+      expect(b.installed).toBe(false);
+      expect(e.defaultPrevented).toBe(false);
+      expect(posted(engine, 'undo')).toHaveLength(0);
+    } finally {
+      delete w.lunaAPI;
+    }
+  });
+
   it('toggles playback with Space', async () => {
     const { engine, luna } = await connected();
     bind(luna);

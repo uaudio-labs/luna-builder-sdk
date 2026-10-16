@@ -11,14 +11,14 @@ description: Diagnose a LUNA Add On that cannot connect, sees no updates, gets t
 npx ua-builder doctor
 ```
 
-It reports LUNA on 4718, the wasm bridge on 4749, Node version and the
+It reports LUNA on 4718, Node version and the
 Add Ons folder. No engine: start LUNA and open a session. `Luna.NotRunning` means the socket
 never opened.
 
 ## 2. Which engine did the page reach?
 
 Inside LUNA the URL has `?port=<n>`; `Luna.locationOptions()` shows it and `luna.engine`
-reports `luna | wasm | mock`. In a browser with no `?port=`, the SDK uses
+reports `luna | mock`. In a browser with no `?port=`, the SDK uses
 `localhost:4718`. From another machine, run `ua-builder serve --luna` and open the printed
 `?host=...&port=...` URL.
 
@@ -73,13 +73,14 @@ Works in a browser, nothing inside LUNA? See docs/FILES.md, "Inside LUNA today".
   as HTML drops then; handle both.
 - `fetch` of a `chooseFiles` path fails: by design. Pass it to `session.importPath()`.
 - `uploadFile` resolved to an older source: the bytes were already in the session (fact 42).
-- `chooseFiles` or `importFile` rejects `unsupported`: no `/gui` (headless or wasm engine).
+- `chooseFiles` or `importFile` rejects `unsupported`: no `/gui` (a headless engine).
   `chooseFolders` and `listFiles` also reject it on a LUNA older than those commands (fact 106).
 
 ## SDK feedback
 
 If part of this workflow was harder than the SDK should make it — a missing API, an
 awkward idiom, boilerplate the SDK could absorb — end your reply with the line
-`LUNA BUILDER SDK FEEDBACK:` followed by a prompt that can be used to update the SDK to
-support the improved workflow: what you were doing, what was awkward, and the API you
-wished for.
+`LUNA BUILDER SDK FEEDBACK: <version>`, where `<version>` is the `ua-builder` row of
+`ua-builder doctor` (for example `LUNA BUILDER SDK FEEDBACK: 0.1.0.1234`), followed by a
+prompt that can be used to update the SDK to support the improved workflow: what you were
+doing, what was awkward, and the API you wished for.
