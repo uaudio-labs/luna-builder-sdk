@@ -2,10 +2,10 @@
 
 > TypeScript/JavaScript SDK for LUNA Add Ons. One `Luna` namespace. Props (`.value`, `.onChange`, `.set`), Collections (`.items`, `.byId`, `.onChange`). Runs inside LUNA (WebSocket, `?port=` on the page URL) or in a browser talking to LUNA on localhost.
 
-Not supported: streaming audio or MIDI. The SDK edits the session (MIDI clips and notes, audio
-clips, parameters, transport); it has no live audio or MIDI stream in or out. Do not build a
-live MIDI or audio path on it. For live MIDI input, use Web MIDI (`navigator.requestMIDIAccess()`)
-in the page; sending MIDI is up to the Add On.
+Not supported: streaming audio, or live MIDI input. The SDK edits the session (MIDI clips and
+notes, audio clips, parameters, transport) and can play live MIDI messages on a track
+(`Luna.SendMidi`, `Luna.QwertyMidi`); it has no audio stream in or out and does not receive
+live MIDI. For live MIDI input, use Web MIDI (`navigator.requestMIDIAccess()`) in the page.
 
 Start with QUICKSTART, then the API page for the object you are using. Use EVIDENCE when
 the engine does something the docs do not say. Use PROTOCOL only for the raw escape hatch.
@@ -46,7 +46,7 @@ QUICKSTART/FILES/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin, run 
 - Keyboard: inside LUNA, any key the page does not `preventDefault()` goes on to LUNA's own shortcuts (fact 81). Call `Luna.bindShortcuts(luna)` after connecting so undo, redo, play and record also work outside LUNA; inside LUNA it installs nothing (facts 79-81).
 - Timeline = ticks (96e9 per beat); source offsets = nanoseconds. No conversion in the SDK.
 - Effect bypass is `slot.setIn(bool)`, not the `enabled` property.
-- MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addNotes` (many notes, one undo step)/`addMidi`. These are clip edits, not a live stream: live MIDI input comes from Web MIDI, not the SDK.
+- MIDI: `clip.midi.ready()`, then `clip.midi.notes` / `.events` are live lists in clip-relative ticks. Write with `clip.addNote`/`addNotes` (many notes, one undo step)/`addMidi`. These are clip edits. To play notes live, `const midi = new Luna.SendMidi(luna)`: `sendMidiNote(sessionUid, trackUid, note, velocity, noteOn)`, `sendMidi` (raw 3 bytes), `sendController`, `sendProgramChange`, `sendNoteToTracks`, `sendDeviceNote`, `sendAllNotesOff` (facts 108-109). `new Luna.QwertyMidi(midi)` maps A-; and W-P to notes (Z/X octave, C/V velocity) from `handleKeyDown(e, sessionUid, trackUid)` / `handleKeyUp(e)`; call `releaseAll()` on blur. Live MIDI input comes from Web MIDI, not the SDK.
 - TypeScript, React or any bundler: `ua-builder new <name> --template add-on-typescript`. It builds `src/` into one classic IIFE script (`dist/main.js`; Windows blocks module scripts under `file://`), types the `Luna` global through tsconfig `"types": ["@uaudio/luna-builder-sdk/global"]` (do not import the SDK in `src/`), and `npm run pack` builds then packs without sources, source maps, configs or `.env`. `ua-builder pack` refuses a page whose scripts are missing.
 - Files (FILES.md): if the page needs the audio, use `<input type="file">` or an HTML `drop`, which give `File`s in LUNA and a browser alike, then `session.uploadFile({ bytes: file })`. `luna.gui.chooseFiles()` and `Luna.onPathDrop()` give **paths the page cannot read**; they only feed `session.importPath(path)` (a source) or `session.importFile(path)` (LUNA's import, with a clip), an optimization that skips copying through the page. Never `chooseFiles` and then try to `fetch` the path. In LUNA 3.1.0.4589 and earlier (macOS) `<input type="file">` opens nothing (its `cancel` fires at once) and path drops stop after the Add On window is reopened (facts 104-105): always offer an HTML drop zone, and `chooseFiles` + `importPath` for paths.
 - Secrets (MANIFEST.md, "Secrets"): API keys and tokens go in `luna.secrets.get/set/delete(name)`, which inside LUNA uses the OS keychain scoped to the Add On's `id`; never `localStorage`, IndexedDB, cookies or a file in the Add On. Outside LUNA (`luna.secrets.storage === 'memory'`) values last until reload.

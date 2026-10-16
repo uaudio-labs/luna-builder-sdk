@@ -32,7 +32,7 @@ export type { WasmPortOptions } from './wire/wasm-port';
 export { WasmEngine, bootWasmEngine } from './engine/loader';
 /** @hidden */
 export type { WasmState, BootOptions, AudioHealth, WasmModule, WasmHooks, ModuleFactory } from './engine/loader';
-export type { MockNodeSpec, CommandHandler, MockMidiRow, MockEngineOptions } from './wire/mock-port';
+export type { MockNodeSpec, CommandHandler, MockMidiRow, MockMidiSent, MockEngineOptions } from './wire/mock-port';
 export { expandMulti } from './wire/multi';
 export { encodeRequest, decodeMessage, encodePayload, float, FloatLiteral } from './wire/codec';
 

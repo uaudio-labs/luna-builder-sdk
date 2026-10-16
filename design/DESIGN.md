@@ -48,7 +48,7 @@ Goals, in priority order:
 | 9 | Manifest | Add `version`, `sdk_version`, `min_luna_version`, `engines` to `manifest.json` (v1). |
 | 10 | Dev tooling | `docs/EVIDENCE.md` records measured daemon behaviours. A `serve` command hosts pages with COOP/COEP, with an optional proxy to native LUNA. |
 | 11 | Not in v1 | Capability detection object. The `WasmD_Bridge` change (see Risks) is tracked as a separate hbsystem request, not a builder task. |
-| 12 | Streaming | No audio or MIDI streaming. The SDK edits the session; it carries no live audio or MIDI. An Add On receives live MIDI with Web MIDI, and sending MIDI is the Add On's own business. |
+| 12 | Streaming | No audio streaming and no live MIDI input: an Add On receives live MIDI with Web MIDI. Live MIDI *out* is in scope as one message per call through LUNA's `send_midi` (`Luna.SendMidi`, `Luna.QwertyMidi`, ported from uanet-clients' `UASSendMidi`/`UASQwertyMidi` with their method names). (Revised from "sending MIDI is the Add On's own business", NEXT-2380.) |
 
 ## The Luna namespace
 

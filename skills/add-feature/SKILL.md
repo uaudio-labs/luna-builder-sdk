@@ -73,8 +73,9 @@ await Luna.settle(() => thing.value.value === expected, 'some edit', { refresh: 
 - Array fields (`track_uid`, `inserts`, `tracks`) stay arrays even for one item.
 - Optional fields are omitted, never sent as `null`.
 - A `get` on a missing path answers `{}` with no error; do not treat `{}` as data.
-- Streaming audio or MIDI is out of scope: do not wrap a path to fake one. Live MIDI input
-  belongs in the Add On, through Web MIDI (`navigator.requestMIDIAccess()`).
+- Streaming audio is out of scope: do not wrap a path to fake one. Live MIDI out is
+  `Luna.SendMidi` (one message per call); live MIDI input belongs in the Add On, through
+  Web MIDI (`navigator.requestMIDIAccess()`).
 
 ## SDK feedback
 

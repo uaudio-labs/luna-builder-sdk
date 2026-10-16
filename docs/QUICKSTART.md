@@ -1,7 +1,7 @@
 # Quickstart
 
 Build a LUNA Add On with `@uaudio/luna-builder-sdk`, all under `Luna`. Read once; then use the headings.
-No audio or MIDI streaming: live MIDI input is Web MIDI (`navigator.requestMIDIAccess()`); sending is the Add On's.
+No audio streaming. Live MIDI out is `Luna.SendMidi` and `Luna.QwertyMidi` (section 10); live MIDI input is Web MIDI (`navigator.requestMIDIAccess()`).
 
 ## 1. Create and run
 
@@ -213,7 +213,7 @@ await Luna.settle(() => !pl.clips.byId(uid), 'delete clip', { refresh: () => pl.
 ## 10. MIDI edits and recording
 
 Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps
-in its own and restores yours, so they cannot run inside a `transaction()`. Clip edits, not a live MIDI stream.
+in its own and restores yours, so they cannot run inside a `transaction()`. To play a note live instead, `new Luna.SendMidi(luna).sendMidiNote(session.uid, track.id, 60, 100, true)`; `Luna.QwertyMidi` plays from the keyboard.
 
 ```js
 await clip.midi.ready();

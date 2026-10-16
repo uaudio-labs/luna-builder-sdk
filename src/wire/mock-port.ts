@@ -71,7 +71,19 @@ export interface MockMidiRow {
   enabled?: boolean;
 }
 
-const EMPTY_MIDI_TABLE = (): Record<string, unknown> => ({ operation: 'update', row_ids: [], enabled: [], midi_data: [], tick: [] });
+/** One live MIDI message the mock delivered, in {@link MockEngine.midiSent}. */
+export interface MockMidiSent {
+  sessionUid?: string;
+  trackUid?: string;
+  midiInputSource?: string;
+  /** `send_midi_all_notes_off`, recorded as CC 123. */
+  allNotesOff?: true;
+  bytes: [number, number, number];
+  /** Also handed to LUNA's record input. */
+  recordEnabled: boolean;
+}
+
+const EMPTY_MIDI_TABLE =(): Record<string, unknown> => ({ operation: 'update', row_ids: [], enabled: [], midi_data: [], tick: [] });
 
 /** Pack rows the way the engine's column table does (fact 39). */
 function encodeMidiTable(operation: string, rows: readonly Required<MockMidiRow>[]): Record<string, unknown> {
@@ -181,6 +193,8 @@ export class MockEngine {
   readonly touches: string[] = [];
   /** Transaction commands seen: `begin`, `commit`, `abort`. */
   readonly transactions: string[] = [];
+  /** Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. */
+  readonly midiSent: MockMidiSent[] = [];
 
   constructor(options: MockEngineOptions = {}) {
     this.nodes.set('/', { properties: new Map(), readOnly: new Set(), commands: new Map(), children: [] });
@@ -218,6 +232,38 @@ export class MockEngine {
         close_session: (data, engine) => {
           const body = (data ?? {}) as { session_uid?: string };
           if (body.session_uid) engine.removeNode(`/sessions/${body.session_uid}`);
+          return null;
+        },
+        // Facts 108 and 109, after deviced's Edit_SendMidi.
+        send_midi: (data, engine) => {
+          const body = (data ?? {}) as { session_uid?: string; track_uid?: string; tracks?: { track_uid?: string; record_enabled?: boolean }[]; midi_input_source?: string; record_enabled?: boolean; byte_0?: number; byte_1?: number; byte_2?: number };
+          const invalid = (): UAError => new UAError('uasrv.invalid_property', 'post /sessions/send_midi: uasrv.invalid_property', { cmd: 'post', path: '/sessions/send_midi' });
+          const { byte_0, byte_1, byte_2 } = body;
+          if (typeof byte_0 !== 'number' || typeof byte_1 !== 'number' || typeof byte_2 !== 'number') throw invalid();
+          const bytes = [byte_0, byte_1, byte_2] as [number, number, number];
+          const live = (uid: string | undefined): uid is string => !!uid && engine.has(`/sessions/${uid}`);
+          if (body.session_uid !== undefined && body.track_uid !== undefined) {
+            if (!live(body.session_uid) || !body.track_uid) throw invalid();
+            engine.midiSent.push({ sessionUid: body.session_uid, trackUid: body.track_uid, bytes, recordEnabled: body.record_enabled === true });
+            return null;
+          }
+          if (body.session_uid !== undefined && Array.isArray(body.tracks)) {
+            // Delivers each entry that carries record_enabled, then answers invalid_property anyway.
+            if (live(body.session_uid)) {
+              for (const t of body.tracks) {
+                if (t.track_uid && typeof t.record_enabled === 'boolean') engine.midiSent.push({ sessionUid: body.session_uid, trackUid: t.track_uid, bytes, recordEnabled: t.record_enabled });
+              }
+            }
+            throw invalid();
+          }
+          if (body.midi_input_source !== undefined) {
+            engine.midiSent.push({ midiInputSource: body.midi_input_source, bytes, recordEnabled: false });
+            return null;
+          }
+          throw invalid();
+        },
+        send_midi_all_notes_off: (_data, engine) => {
+          engine.midiSent.push({ allNotesOff: true, bytes: [0xb0, 123, 0], recordEnabled: false });
           return null;
         },
       },

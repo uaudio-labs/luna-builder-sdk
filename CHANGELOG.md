@@ -2,6 +2,22 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## Unreleased
+
+Added
+- `Luna.SendMidi`: plays MIDI on a track live, the way a keyboard would, without writing to a
+  clip (fact 108): `sendMidiNote`, `sendMidi` (any 3 bytes), `sendController`, `sendProgramChange` (with bank
+  select), `sendNoteToTracks`, `sendDeviceNote` and `sendAllNotesOff`. A value out of range
+  rejects with `out_of_range` before anything is sent. `sendNoteToTracks` sends one message per
+  track, because LUNA's multi-track form reports an error even when it worked (fact 109).
+- `Luna.QwertyMidi`: the computer keyboard as a MIDI keyboard (A-; and W-P play notes, Z/X
+  step the octave, C/V the velocity). `octave` and `velocity` are
+  props; handled keys are claimed with `preventDefault()` so LUNA does not also act on them;
+  keys pressed with Cmd, Ctrl or Alt, or typed into a text field, are left alone; `releaseAll()`
+  sends the note-offs a lost focus swallows.
+- `Luna.MockEngine` accepts `send_midi` and `send_midi_all_notes_off`, and records what it
+  delivered in `engine.midiSent`.
+
 ## 0.1.1
 
 Added

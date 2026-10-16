@@ -49,11 +49,13 @@
 | [Plugins](classes/Plugins.md) | An observable ordered collection with id lookup. |
 | [Preferences](classes/Preferences.md) | `/preferences`: engine preferences as writable properties by name. |
 | [Presets](classes/Presets.md) | - |
+| [QwertyMidi](classes/QwertyMidi.md) | - |
 | [Render](classes/Render.md) | `/renders/<uid>`: a bounce or an export. `state` runs `created` -> `running` -> `completed` | `aborted`, and LUNA drops the node shortly after it settles, so latch anything you still need rather than reading it later (fact 44). |
 | [Renders](classes/Renders.md) | An observable ordered collection with id lookup. |
 | [RequestTimeout](classes/RequestTimeout.md) | The engine did not answer a request within the port's timeout. |
 | [Scheduler](classes/Scheduler.md) | Coalesces change notifications. In a browser it flushes on the next animation frame with a timer fallback (hidden tabs suspend rAF); elsewhere on a macrotask. Tests call `flush()`. |
 | [Secrets](classes/Secrets.md) | Per-Add-On secrets, at `luna.secrets`. Values are strings; names are 1 to 128 characters from `A-Z a-z 0-9 . _ -`. |
+| [SendMidi](classes/SendMidi.md) | - |
 | [Session](classes/Session.md) | - |
 | [SessionPackage](classes/SessionPackage.md) | One session package as a live node. |
 | [Sessions](classes/Sessions.md) | - |
@@ -106,6 +108,7 @@
 | [MidiRowData](interfaces/MidiRowData.md) | The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). |
 | [MockEngineOptions](interfaces/MockEngineOptions.md) | - |
 | [MockMidiRow](interfaces/MockMidiRow.md) | A row for [MockEngine.midiEdit](classes/MockEngine.md#midiedit). |
+| [MockMidiSent](interfaces/MockMidiSent.md) | One live MIDI message the mock delivered, in [MockEngine.midiSent](classes/MockEngine.md#midisent). |
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
 | [NewBusOptions](interfaces/NewBusOptions.md) | - |
 | [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute, as LUNA's verb takes them. |
@@ -131,6 +134,7 @@
 | [SeekOptions](interfaces/SeekOptions.md) | - |
 | [SelectedNotes](interfaces/SelectedNotes.md) | One playlist's selected notes as LUNA stores them: `[pitch, start, stop, rowid]` in absolute ticks. |
 | [SelectionSnapshot](interfaces/SelectionSnapshot.md) | The six selection properties as LUNA holds them, for [Context.restore](classes/Context.md#restore). |
+| [SendMidiTrackTarget](interfaces/SendMidiTrackTarget.md) | A track entry for [SendMidi.sendNoteToTracks](classes/SendMidi.md#sendnotetotracks). |
 | [SessionPackageRow](interfaces/SessionPackageRow.md) | - |
 | [SettleOptions](interfaces/SettleOptions.md) | - |
 | [ShortcutsBinding](interfaces/ShortcutsBinding.md) | The listeners [bindShortcuts](functions/bindShortcuts.md) installed. |
@@ -173,6 +177,7 @@
 | [Operation](type-aliases/Operation.md) | Structural change carried by an [Event](interfaces/Event.md). Absent for a property value change. |
 | [OverviewKind](type-aliases/OverviewKind.md) | `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. |
 | [PortStatus](type-aliases/PortStatus.md) | Connection state as reported by [Port.onStatus](interfaces/Port.md#onstatus). |
+| [QwertyKeyEvent](type-aliases/QwertyKeyEvent.md) | The parts of a `KeyboardEvent` the keyboard reads. |
 | [RecPlayMode](type-aliases/RecPlayMode.md) | - |
 | [Releasable](type-aliases/Releasable.md) | Something [Bindings](classes/Bindings.md) can release: an unsubscribe function or an object with `dispose()`. |
 | [SecretStorage](type-aliases/SecretStorage.md) | Where [Secrets](classes/Secrets.md) keeps values: the OS credential store, or page memory. |
