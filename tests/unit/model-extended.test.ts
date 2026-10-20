@@ -160,6 +160,50 @@ describe('Luna.Musical', () => {
     expect(posts).toEqual(expect.arrayContaining(['set_tempo', 'set_time_signature', 'set_key_signature', 'set_bar_one']));
   });
 
+  it('sets a key signature, replacing the one at its tick, and reads the key in effect (fact 113)', async () => {
+    const { engine, session } = await connected();
+    const m = session.musical;
+    await m.ready();
+    const bar = Luna.WHOLE_NOTE;
+
+    const cMinor = await m.setKeySignature(-3, true);
+    expect([cMinor.tick.value, cMinor.sharpsAndFlats.value, cMinor.isMinor.value]).toEqual([0, -3, true]);
+    const dMajor = await m.setKeySignature(2, false, 4 * bar);
+    const eMinor = await m.setKeySignature(1, true, 4 * bar);
+    await engine.settled();
+    expect(eMinor).toBe(dMajor);   // the same row, rewritten
+
+    expect(m.keySignatures.items.map((k) => [k.tick.value, k.sharpsAndFlats.value, k.isMinor.value]).sort((a, b) => (a[0] as number) - (b[0] as number))).toEqual([
+      [0, -3, true],
+      [4 * bar, 1, true],
+    ]);
+    expect(m.keySignatureAt(0)).toBe(cMinor);
+    expect(m.keySignatureAt(4 * bar - 1)).toBe(cMinor);
+    expect(m.keySignatureAt(9 * bar)).toBe(eMinor);
+  });
+
+  it('keySignatureAt is undefined before the first key signature', async () => {
+    const { engine, session } = await connected();
+    const m = session.musical;
+    await m.ready();
+    expect(m.keySignatureAt(0)).toBeUndefined();
+    await m.setKeySignature(1, false, Luna.WHOLE_NOTE);
+    await engine.settled();
+    expect(m.keySignatureAt(0)).toBeUndefined();
+    expect(m.keySignatureAt(Luna.WHOLE_NOTE)?.sharpsAndFlats.value).toBe(1);
+  });
+
+  it('refuses a key signature out of range before the wire', async () => {
+    const { engine, session } = await connected();
+    const before = engine.requests.length;
+    await expect(session.musical.setKeySignature(8, false)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(session.musical.setKeySignature(-8, true)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(session.musical.setKeySignature(1.5, false)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(session.musical.setKeySignature(1, 'minor' as unknown as boolean)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(session.musical.setKeySignature(1, false, 0.5)).rejects.toMatchObject({ code: 'out_of_range' });
+    expect(engine.requests.length).toBe(before);
+  });
+
   it('changes the tempo in effect at a tick by writing that event (fact 95)', async () => {
     const { engine, session } = await connected();
     const m = session.musical;
@@ -359,12 +403,19 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     await expect(track.gain.automation.insert([{ tick: 0.5, value: -6 }])).rejects.toMatchObject({ code: 'out_of_range' });
   });
 
+  it('refuses a MIDI insertClip with no source, as LUNA does (fact 112)', async () => {
+    const { engine, session } = await connected(['Keys']);
+    await expect(session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'midi' })).rejects.toMatchObject({ code: 'uasrv.invalid_property' });
+    await engine.settled();
+    expect(engine.children(`/sessions/abc/playlists/${session.playlistFor(session.tracks.byId('Keys')!)!.id}/clips`)).toEqual([]);
+  });
+
   it('adds MIDI notes to a clip', async () => {
     const { engine, session } = await connected(['Keys']);
     const track = session.tracks.byId('Keys')!;
     const pl = session.playlistFor(track)!;
     pl.clips.onChange(() => undefined);
-    const reply = (await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'midi' })) as { uid: string };
+    const reply = { uid: engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: Luna.WHOLE_NOTE }) };
     await engine.settled();
     const clip = pl.clips.byId(reply.uid)!;
     await clip.addNote(60, 0, Luna.QUARTER_NOTE, 90);
@@ -379,7 +430,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     const track = session.tracks.byId('Keys')!;
     const pl = session.playlistFor(track)!;
     pl.clips.onChange(() => undefined);
-    const reply = (await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'midi' })) as { uid: string };
+    const reply = { uid: engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: Luna.WHOLE_NOTE }) };
     await engine.settled();
     const clip = pl.clips.byId(reply.uid)!;
     const before = engine.requests.length;
@@ -407,7 +458,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     const track = session.tracks.byId('Keys')!;
     const pl = session.playlistFor(track)!;
     pl.clips.onChange(() => undefined);
-    const reply = (await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'midi' })) as { uid: string };
+    const reply = { uid: engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: Luna.WHOLE_NOTE }) };
     await engine.settled();
     const clip = pl.clips.byId(reply.uid)!;
     const before = engine.requests.length;
@@ -484,6 +535,41 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(await code(luna.gui.listFiles('/Nope'))).toBe('uasrv.filesystem_error');
     expect(await code(luna.gui.listFiles('/Samples/kick.wav'))).toBe('uasrv.invalid_value');
     expect(await code(luna.gui.listFiles('Samples'))).toBe('uasrv.invalid_value');
+  });
+
+  it('serves a media file to an Add On as a URL on its own origin (fact 114)', async () => {
+    const { engine, luna } = await connected();
+    engine.mediaFiles['/Movies/My Cut #1.mov'] = true;
+    engine.mediaFiles['/Movies/latest.mov'] = '/Movies/My Cut #1.mov';
+    expect(await luna.gui.serveMediaFile('com.example.demo', '/Movies/My Cut #1.mov')).toBe('ua-content://com.example.demo/Movies/My%20Cut%20%231.mov');
+    // A link is served under the file it leads to; the id is matched without case.
+    expect(await luna.gui.serveMediaFile('COM.Example.Demo', '/Movies/latest.mov')).toBe('ua-content://com.example.demo/Movies/My%20Cut%20%231.mov');
+    expect(engine.mediaServed).toEqual([
+      { addOnId: 'com.example.demo', path: '/Movies/My Cut #1.mov' },
+      { addOnId: 'com.example.demo', path: '/Movies/My Cut #1.mov' },
+    ]);
+  });
+
+  it('rejects serveMediaFile with the engine codes LUNA answers (fact 114)', async () => {
+    const { engine, luna } = await connected();
+    engine.mediaFiles['/Movies/cut.mov'] = true;
+    engine.mediaFiles['/Movies/notes.mp4'] = null;
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Movies/notes.mp4'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.serveMediaFile('com.example.demo', 'Movies/cut.mov'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Movies/gone.mov'))).toBe('uasrv.filesystem_error');
+    expect(await code(luna.gui.serveMediaFile('com.example.not-installed', '/Movies/cut.mov'))).toBe('uasrv.not_installed');
+    expect(engine.mediaServed).toEqual([]);
+  });
+
+  it('reports a LUNA without serve_media_file as Luna.Unsupported', async () => {
+    const { engine, luna } = await connected();
+    engine.fail('/gui/serve_media_file', 'uasrv.invalid_object');
+    await expect(luna.gui.serveMediaFile('com.example.demo', '/Movies/cut.mov')).rejects.toBeInstanceOf(Luna.Unsupported);
+    const headless = new Luna.MockEngine({ gui: false });
+    const bare = await Luna.connect({ port_: headless.port() });
+    await expect(bare.gui.serveMediaFile('com.example.demo', '/Movies/cut.mov')).rejects.toBeInstanceOf(Luna.Unsupported);
+    await bare.close();
   });
 
   it('reports a LUNA without list_files or show_folder_dialog as Luna.Unsupported', async () => {

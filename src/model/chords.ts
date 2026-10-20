@@ -27,7 +27,17 @@ export interface ParsedChord {
   bass: string | null;
 }
 
-const CHORD_NAME = /^([A-G](?:#|b)?)([^/]*)(?:\/([A-G](?:#|b)?))?$/;
+const CHORD_NAME = /^([A-Ga-g](?:#|b)?)([^/]*?)\s*(?:\/\s*([A-Ga-g](?:#|b)?))?$/;
+
+/**
+ * What may follow a lowercase root. The ruler takes free text, and words such as `bridge`,
+ * `chorus` and `end` start with a note letter, so a lowercase root counts only before a
+ * chord quality or extension.
+ */
+const QUALITY_START = /^(?:maj|min|m|dim|aug|sus|add|[0-9+\-o°ø^Δ(])/i;
+
+/** A note name with its letter upper-cased: `bb` is B flat, `f#` is F sharp. */
+const noteName = (name: string): string => name[0]!.toUpperCase() + name.slice(1);
 
 /**
  * LUNA stores `♭` and `♯` as ASCII `b` and `#` (fact 100); the SDK compares names the same way.
@@ -40,17 +50,23 @@ export function normalizeChordName(name: string): string {
 
 /**
  * Split a chord name into root, type and bass. `undefined` when it does not start with a
- * note letter, since the ruler accepts any text (`N.C.`, `riff`).
+ * note letter, since the ruler accepts any text (`N.C.`, `riff`). A lowercase root or bass
+ * is read as the note (`am7` is A minor 7, `bb` is B flat) and returned upper-cased, but only
+ * when what follows the root is empty or starts like a chord quality, so `bridge` and
+ * `chorus` stay text. Spaces around the slash are ignored.
  *
  * @example
  * Luna.parseChord('C');       // { root: 'C', type: '', bass: null }
  * Luna.parseChord('F#m7b5');  // { root: 'F#', type: 'm7b5', bass: null }
  * Luna.parseChord('C/E');     // { root: 'C', type: '', bass: 'E' }
+ * Luna.parseChord('am7 / g'); // { root: 'A', type: 'm7', bass: 'G' }
  */
 export function parseChord(name: string): ParsedChord | undefined {
   const match = CHORD_NAME.exec(normalizeChordName(name.trim()));
   if (!match) return undefined;
-  return { root: match[1]!, type: match[2]!, bass: match[3] ?? null };
+  const lowercase = match[1]![0] !== match[1]![0]!.toUpperCase();
+  if (lowercase && match[2] !== '' && !QUALITY_START.test(match[2]!)) return undefined;
+  return { root: noteName(match[1]!), type: match[2]!, bass: match[3] === undefined ? null : noteName(match[3]) };
 }
 
 /** A chord to write with `musical.setChords`. */

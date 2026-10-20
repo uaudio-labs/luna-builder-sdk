@@ -469,6 +469,52 @@ Reveal a file or folder in Finder / Explorer.
 
 ***
 
+### serveMediaFile()
+
+```ts
+serveMediaFile(addOnId, path): Promise<string>;
+```
+
+The URL your Add On's page loads a local audio or video file from, given its absolute
+`path` (from [chooseFiles](#choosefiles), `Luna.onPathDrop()`, or a path you saved, say in
+`session.preferences`). Set it as a `<video>` or `<audio>` `src`, or read the bytes with
+XMLHttpRequest (fact 114). This is how a page plays or reads a file it knows only by path.
+
+`addOnId` is your manifest's `id`: the file is served to that Add On's pages only. On
+macOS the URL is `ua-content://<your Add On>/<path>` and supports byte ranges, so media
+seeks without reading the whole file; on Windows it is a `file:///` URL, which media
+elements and XMLHttpRequest load but `fetch()` refuses. Ask again
+after every reload: LUNA forgets the files it served when it quits.
+
+Only real media is served. LUNA follows links and checks the file they lead to: it needs
+an audio or video extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`, `aiff`,
+`mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`) and that format's signature in its first
+bytes. Rejects with a `Luna.Error` whose `code` is `uasrv.invalid_value` for a relative
+path, a folder, or a file that is not audio or video; `uasrv.filesystem_error` when
+nothing is at `path` (a session opened on another computer, a file moved) or it cannot
+be read; `uasrv.not_installed` when `addOnId` names no installed Add On with a local
+page. A LUNA without the command rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `addOnId` | `string` |
+| `path` | `string` |
+
+#### Returns
+
+`Promise`\<`string`\>
+
+#### Example
+
+```ts
+const [path] = await luna.gui.chooseFiles({ filters: ['*.mov;*.mp4'] });
+if (path) video.src = await luna.gui.serveMediaFile('com.example.my-add-on', path);
+```
+
+***
+
 ### setPage()
 
 ```ts

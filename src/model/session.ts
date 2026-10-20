@@ -20,6 +20,7 @@ import { Bus } from './bus';
 import { Collection } from './collection';
 import { Context } from './context';
 import { Markers } from './markers';
+import { SessionPreferences } from './preferences';
 import { Musical } from './musical';
 import { Node } from './node';
 import type { Clip } from './clip';
@@ -117,9 +118,20 @@ export interface NewBusOptions {
 }
 
 export interface TransactionOptions {
-  /** Only the last command is recorded in the undo queue; notifications still fire per command. */
+  /**
+   * A live gesture (a drag, a slider, a preview being regenerated) instead of a batch. Each
+   * command first undoes the one before it, so only the last command's effect is kept and
+   * recorded; write every step relative to where things were when the transaction began,
+   * never as a change from the previous step. Pushes arrive per command (fact 115).
+   */
   continuous?: boolean;
 }
+
+/**
+ * Which kind of {@link Session.transaction} is open: `'batch'` holds every command for one
+ * undo step and holds pushes until the commit; `'continuous'` keeps only the last command.
+ */
+export type TransactionMode = 'batch' | 'continuous';
 
 export class Session extends Node {
   readonly uid: string;
@@ -144,6 +156,8 @@ export class Session extends Node {
   /** Tempo map, time and key signatures, and tick/bar/seconds conversion. */
   readonly musical: Musical;
   readonly markers: Markers;
+  /** Settings Add Ons keep with this session, by reverse-DNS context (fact 110). */
+  readonly preferences: SessionPreferences;
   /** Edit contexts (`main`, `editor`, `alt_<n>`). */
   readonly contexts: Collection<Context>;
   /** The `main` edit context: selection, zoom and the context edit commands. */
@@ -162,7 +176,7 @@ export class Session extends Node {
   readonly focusedTrack: Prop<Track>;
   private sourcesCollection: Collection<AudioSource> | undefined;
   private sourcesRelease: Unsubscribe | undefined;
-  private batchDepth = 0;
+  private openTransaction: TransactionMode | undefined;
 
   private watchRelease: Unsubscribe | undefined;
   private readyPromise: Promise<void> | undefined;
@@ -186,9 +200,10 @@ export class Session extends Node {
     this.transport = new Transport(client, this.path, () => this.musical);
     this.tracks = new Collection<Track>(client, `${this.path}/tracks`, (p) => new Track(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.buses = new Collection<Bus>(client, `${this.path}/buses`, (p) => new Bus(client, p, uid), { levels: 2, commands: false, flatvalue: true });
-    this.playlists = new Collection<Playlist>(client, `${this.path}/playlists`, (p) => new Playlist(client, p, uid, () => this.batching), { levels: 2, commands: false, flatvalue: true });
+    this.playlists = new Collection<Playlist>(client, `${this.path}/playlists`, (p) => new Playlist(client, p, uid, () => this.transactionMode), { levels: 2, commands: false, flatvalue: true });
     this.musical = new Musical(client, this.path, uid, (name, fn) => this.transaction(name, fn));
     this.markers = new Markers(client, this.path, uid, () => this.musical.timeline);
+    this.preferences = new SessionPreferences(client, this.path);
     this.contexts = new Collection<Context>(client, `${this.path}/contexts`, (p) => new Context(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.context = new Context(client, `${this.path}/contexts/main`, uid);
     const focusedId = derived([this.context.lastSelectedTrack, this.context.selectionTracks, this.tracks], () => this.focusedTrackId(), { distinct: true });
@@ -318,41 +333,65 @@ export class Session extends Node {
 
   /**
    * Run `fn` as one undoable step. Aborts (discarding pending changes) if `fn` throws.
-   * Called while a batch is already open, `fn` runs inside that batch: wrappers that batch
+   * Called while a transaction is already open, `fn` runs inside that one: wrappers that batch
    * their own steps (`Output.retarget`) then join the caller's undo entry instead of nesting.
+   *
+   * A batch (the default) holds LUNA's pushes until the commit, so the model shows the edits
+   * only once this resolves. With `continuous`, every command replaces the one before it
+   * (see {@link TransactionOptions.continuous}).
    *
    * @example
    * await session.transaction('Rename all', async () => {
    *   for (const t of session.tracks.items) await t.name.set(`${t.name.value} (mix)`);
    * });
+   *
+   * @example
+   * // Rewrite a clip's notes as one undo step: delete the old ones, write the new ones.
+   * await session.transaction('Humanize', async () => {
+   *   const old = clip.midi.notes.items;
+   *   await clip.midi.deleteNotes(old);
+   *   await clip.addNotes(old.map((n) => ({ pitch: n.pitch, tick: Math.max(0, n.startTick + Math.round((Math.random() - 0.5) * 40)), lengthTicks: n.stopTick! - n.startTick, velocity: n.velocity })));
+   * });
+   * await clip.midi.refresh();
    */
   async transaction<T>(name: string, fn: () => Promise<T>, options: TransactionOptions = {}): Promise<T> {
-    if (this.batching) return fn();
-    await this.post('begin_transaction', { session_uid: this.uid, name, is_continuous: options.continuous ?? false });
-    this.batchDepth++;
+    if (this.openTransaction) return fn();
+    const continuous = options.continuous ?? false;
+    // Without sends_undo_notifications, the undo that replaces each continuous step is silent:
+    // rows it deletes stay in LUNA's served tables, for every client (fact 115).
+    const payload: Record<string, unknown> = { session_uid: this.uid, name, is_continuous: continuous };
+    if (continuous) payload['sends_undo_notifications'] = true;
+    await this.post('begin_transaction', payload);
+    this.openTransaction = continuous ? 'continuous' : 'batch';
     try {
       const result = await fn();
-      this.batchDepth--;
+      this.openTransaction = undefined;
       await this.post('commit_transaction', { session_uid: this.uid });
       return result;
     } catch (err) {
-      this.batchDepth--;
+      this.openTransaction = undefined;
       await this.post('abort_transaction', { session_uid: this.uid }).catch(() => undefined);
       throw err;
     }
   }
 
-  /**
-   * True while a {@link transaction} batch is open. LUNA holds selection writes and MIDI
-   * deltas until the commit, so the selection-based verbs refuse to run inside one.
-   */
+  /** True while a {@link transaction} is open, of either kind. */
   get batching(): boolean {
-    return this.batchDepth > 0;
+    return this.openTransaction !== undefined;
+  }
+
+  /** The kind of {@link transaction} open now, or `undefined` outside one. */
+  get transactionMode(): TransactionMode | undefined {
+    return this.openTransaction;
   }
 
   /**
    * Insert a clip from a source file onto a track's active playlist. Timeline position is in
    * ticks; source offsets are nanoseconds (fact 16).
+   *
+   * `sourceUid` is required for every clip type, MIDI included: LUNA answers
+   * `uasrv.invalid_property` without one (fact 112). To start a MIDI clip of your own, write
+   * its notes with {@link Playlist.createNotes}, which makes the clip.
    */
   insertClip(options: {
     trackUid?: string;
@@ -787,6 +826,7 @@ export class Session extends Node {
     this.playlists.dispose();
     this.musical.dispose();
     this.markers.dispose();
+    this.preferences.dispose();
     this.contexts.dispose();
     this.sourcesCollection?.dispose();
     this.sourcesRelease?.();

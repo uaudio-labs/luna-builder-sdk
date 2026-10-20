@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { BUILDS, DOCS, GLOBAL_DTS, PLUGIN, SHELL, VERSIONED_SHELL, repointExample, withCliNote, withVersion } from './sync-plugin.mjs';
 
@@ -123,7 +123,8 @@ try {
   ]) {
     for (const entry of await readdir(join(root, from), { withFileTypes: true, recursive: true })) {
       if (!entry.isFile() || entry.name === '.DS_Store') continue;
-      const relative = join(entry.parentPath.slice(join(root, from).length + 1), entry.name);
+      // With / on Windows too, so it matches VERSIONED_SHELL's entries.
+      const relative = join(entry.parentPath.slice(join(root, from).length + 1), entry.name).replaceAll('\\', '/');
       assert.equal(await read(join(into, relative)), rewrite(await read(join(from, relative)), relative), stale(join(into, relative)));
     }
   }
@@ -136,7 +137,7 @@ try {
     for (const [, spec] of text.matchAll(/from\s+'([^']+)'/g)) {
       if (!spec.startsWith('.')) continue;
       assert.ok(!spec.includes('dist/'), `${entry.name}: imports "${spec}", which points outside the plugin`);
-      const resolved = new URL(spec, `file://${join(entry.parentPath, entry.name)}`).pathname;
+      const resolved = fileURLToPath(new URL(spec, pathToFileURL(join(entry.parentPath, entry.name))));
       await stat(resolved).catch(() => {
         throw new Error(`${entry.name}: imports "${spec}", which does not resolve inside the plugin`);
       });
@@ -150,7 +151,7 @@ try {
     for (const [, src] of text.matchAll(/<script src="([^"]+)"/g)) {
       assert.ok(!src.includes('dist/'), `${entry.name}: script src "${src}" points outside the plugin`);
       if (src.includes('luna.global.js')) {
-        const resolved = new URL(src, `file://${join(entry.parentPath, entry.name)}`).pathname;
+        const resolved = fileURLToPath(new URL(src, pathToFileURL(join(entry.parentPath, entry.name))));
         await stat(resolved).catch(() => {
           throw new Error(`${entry.name}: script src "${src}" does not resolve inside the plugin`);
         });
@@ -175,7 +176,7 @@ try {
   const esm = JSON.parse(
     execFileSync(
       process.execPath,
-      ['--input-type=module', '-e', `import { Luna } from ${JSON.stringify(new URL(`file://${join(relocated, 'sdk/index.js')}`).href)}; console.log(JSON.stringify({ VERSION: Luna.VERSION, connect: typeof Luna.connect }));`],
+      ['--input-type=module', '-e', `import { Luna } from ${JSON.stringify(pathToFileURL(join(relocated, 'sdk/index.js')).href)}; console.log(JSON.stringify({ VERSION: Luna.VERSION, connect: typeof Luna.connect }));`],
       { cwd: temporary, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     ),
   );

@@ -80,6 +80,34 @@ deleteTempo(tick): Promise<unknown>;
 
 ***
 
+### keySignatureAt()
+
+```ts
+keySignatureAt(tick): KeySignature | undefined;
+```
+
+The key signature in effect at `tick`: the last one at or before it. `undefined` when
+none is, or the list is not loaded (`await musical.ready()` first).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tick` | `number` |
+
+#### Returns
+
+[`KeySignature`](KeySignature.md) \| `undefined`
+
+#### Example
+
+```ts
+const key = session.musical.keySignatureAt(session.transport.tick);
+key && `${key.sharpsAndFlats.value} ${key.isMinor.value ? 'minor' : 'major'}`;
+```
+
+***
+
 ### ready()
 
 ```ts
@@ -157,10 +185,14 @@ await session.musical.setChords(
 setKeySignature(
    sharpsAndFlats, 
    isMinor, 
-tick): Promise<unknown>;
+tick): Promise<KeySignature>;
 ```
 
-`sharpsAndFlats`: 1..7 sharps, -1..-7 flats, 0 for C / A minor.
+Set the key from `tick` (default: the session start) and resolve to its row once it is in
+[keySignatures](#keysignatures). LUNA keeps one key signature per tick, so one already at `tick` is
+rewritten in place (the same row), not joined by a second (fact 113). One undo entry. `sharpsAndFlats` is 1..7 sharps, -1..-7
+flats, 0 for C major or A minor. Rejects with `out_of_range` before anything is sent for a
+value outside those, a non-boolean `isMinor` or a non-integer tick.
 
 #### Parameters
 
@@ -172,7 +204,15 @@ tick): Promise<unknown>;
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<[`KeySignature`](KeySignature.md)\>
+
+#### Example
+
+```ts
+await session.musical.ready();
+await session.musical.setKeySignature(-3, true);   // C minor from the start
+session.musical.keySignatureAt(session.transport.tick)?.sharpsAndFlats.value;   // -3
+```
 
 ***
 

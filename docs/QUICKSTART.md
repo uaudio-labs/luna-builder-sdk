@@ -59,7 +59,7 @@ Writes resolve on acknowledgement; `.value` holds them at once, echoed or not (f
 const session = await luna.session();   // focused session, subscribed and loaded
 session.name.value; session.canUndo.value; session.changeCount.value;
 await session.undo(); await session.redo(); await session.save({ label: 'v2' });
-await session.transaction('Rename all', async () => { /* many writes -> one undo step */ });
+await session.transaction('Rename all', async () => { /* many writes -> one undo step */ }); // { continuous: true } for a drag: each command replaces the last
 ```
 
 `luna.sessions` lists open sessions (`items`, `focused`, `focusedUid`; follow `focused.onChange`)
@@ -212,15 +212,15 @@ await Luna.settle(() => !pl.clips.byId(uid), 'delete clip', { refresh: () => pl.
 
 ## 10. MIDI edits and recording
 
-Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps
-in its own and restores yours, so they cannot run inside a `transaction()`. To play a note live instead, `new Luna.SendMidi(luna).sendMidiNote(session.uid, track.id, 60, 100, true)`; `Luna.QwertyMidi` plays from the keyboard.
+Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps in its own and restores yours. In a batch `transaction()` the lists catch up at the commit; `lane.createNotes` needs a continuous one, where each call replaces the last take (fact 115). To play a note live instead, `new Luna.SendMidi(luna).sendMidiNote(session.uid, track.id, 60, 100, true)`; `Luna.QwertyMidi` plays from the keyboard.
 
 ```js
 await clip.midi.ready();
-clip.midi.notes.items;                                   // live, follows edits made in LUNA
+clip.midi.notes.items;                                   // live; startTick/stopTick count from the clip's start
 await clip.midi.setVelocities(clip.midi.notes.items.map((n) => ({ note: n, velocity: Math.round(n.velocity * 0.8) })));
 await clip.midi.setMuted(quietNotes, true);              // one "Mute Notes" entry
 await clip.midi.deleteNotes([note]);                     // one entry, selection restored
+await session.transaction('Up an octave', async () => { await clip.midi.deleteNotes(old); await clip.addNotes(raised); }); // one undo step
 ```
 
 One call records a pass (arm, count in, punch, stop, disarm) and resolves to a drawable take (fact 75):

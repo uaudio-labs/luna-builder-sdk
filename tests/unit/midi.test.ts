@@ -18,7 +18,7 @@ async function midiClip(rows: Luna.MockMidiRow[] = []) {
   await session.ready();
   const track = session.tracks.byId('Keys')!;
   const playlist = session.playlistFor(track)!;
-  await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: 4 * BEAT, clipType: 'midi' });
+  engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 4 * BEAT });
   await engine.settled();
   await playlist.clips.load();
   const clip = playlist.clips.items[0]!;

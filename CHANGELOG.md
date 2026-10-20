@@ -5,6 +5,8 @@ Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carri
 ## Unreleased
 
 Added
+- `session.transactionMode`: `'batch'`, `'continuous'`, or `undefined` outside a transaction;
+  the `Luna.TransactionMode` type.
 - `Luna.SendMidi`: plays MIDI on a track live, the way a keyboard would, without writing to a
   clip (fact 108): `sendMidiNote`, `sendMidi` (any 3 bytes), `sendController`, `sendProgramChange` (with bank
   select), `sendNoteToTracks`, `sendDeviceNote` and `sendAllNotesOff`. A value out of range
@@ -17,6 +19,63 @@ Added
   sends the note-offs a lost focus swallows.
 - `Luna.MockEngine` accepts `send_midi` and `send_midi_all_notes_off`, and records what it
   delivered in `engine.midiSent`.
+- `luna.gui.serveMediaFile(addOnId, path)`: the URL your Add On's page plays or reads a
+  local audio or video file from, given its path from `chooseFiles`, a path drop, or a path
+  saved in `session.preferences` (fact 114). Only real media is served, to that Add On only;
+  on macOS the URL supports byte ranges, so video seeks without reading the whole file.
+  `Luna.MockEngine` models it with `engine.mediaFiles` and records `engine.mediaServed`.
+- `session.preferences`: settings an Add On keeps with the session, so they come back when it
+  is opened again (fact 110). `session.preferences.context('com.example.my-add-on')` gives a
+  `Luna.PreferenceContext` with `add`, `set`, `remove`, `clear` and `value(preference,
+  property)`, a live prop of any JSON value. Edits stay out of the undo history unless
+  `{ undoable: true }`. `Luna.MockEngine` models the three commands.
+- `session.musical.keySignatureAt(tick)`: the key signature in effect at a tick.
+- `Luna.MockEngine.addMidiClip(sessionUid, trackUid, { startTick, stopTick })`: an empty MIDI
+  clip for tests, since `insertClip` cannot make one.
+
+Changed
+- `midi.deleteNotes`, `midi.setMuted` and `midi.setVelocities` run inside a batch
+  `session.transaction()` instead of refusing with `busy`, so rewriting a clip's notes
+  (`deleteNotes` then `clip.addNotes`) is one undo step (fact 74). LUNA holds a batch's pushes
+  until the commit, so they no longer wait for the lists to change inside one.
+- A continuous `session.transaction(name, fn, { continuous: true })` now asks LUNA to notify
+  the undo that replaces each step. Without it, rows a step's undo deleted stayed visible to
+  every client, so repeated `createNotes` left every take behind (fact 115).
+- `lane.createNotes` runs inside a continuous transaction, where each call replaces the last
+  take: one undo step for a regenerated preview. Inside a batch it still refuses, now naming
+  `clip.addNotes` as the alternative.
+- `session.musical.setKeySignature` checks its arguments (`out_of_range` for a value outside
+  -7..7, a non-boolean `isMinor` or a non-integer tick) and resolves to the key signature once
+  LUNA lists it, instead of to the raw reply. One already at that tick is rewritten in place
+  (fact 113).
+- `Luna.parseChord` reads a lowercase root or bass as the note (`am7`, `f#m/c#`) and ignores
+  spaces around the slash (`C / E`). Words such as `bridge` and `chorus` are still text.
+
+Fixed
+- `Luna.MockEngine` now follows LUNA's `create_note` (fact 111): it takes session ticks,
+  writes each note into the clip under its note-on rather than the lane's first MIDI clip,
+  makes a bar-aligned clip named after the track when there is none, and puts session ticks
+  in the selection. MIDI row ids are unique across a session's clips, as in LUNA.
+- `Luna.MockEngine` refuses an `insert_clip` with no `source_uid` with
+  `uasrv.invalid_property`, as LUNA does (fact 112); before, a sourceless MIDI clip succeeded
+  on the mock only. `set_key_signature` now writes a row instead of doing nothing.
+- Docs: `createNotes` writes every note on channel 0 (LUNA's `create_note` has no channel; use
+  `clip.addNotes` with `channel`), and rejects with `no_effect` when its notes land in two
+  clips. `insertClip` needs a source for every clip type.
+- `npm install` in a scaffolded Add On no longer runs the installed SDK's `prepare` script or
+  resolves its dev dependencies: the distributed SDK's `package.json` ships without `scripts`
+  and `devDependencies`. Before, the install failed building sources that do not ship (`tsup`
+  not found), and npm 10 crashed even with `--ignore-scripts`.
+- Scaffolds install with npm 10 (Node.js 22's): `ua-builder new` writes an `.npmrc` with
+  `legacy-peer-deps=true`, which avoids npm 10's crash on vitest's peer dependencies
+  (`Cannot read properties of null (reading 'edgesOut')`). npm 11 is no longer needed.
+- `ua-builder new` writes the template's `.gitignore` again: `npm pack` left it, and an
+  `.npmrc`, out of the package, so the templates now store them as `gitignore` and `npmrc`.
+- Windows: `ua-builder test` runs the Add On's vitest with node instead of spawning
+  `npx.cmd`, which Node.js refuses without a shell (`EINVAL`). `ua-builder doctor` no longer
+  prints Node's DEP0190 warning.
+- Windows: `npm run build` generates the plugin (`sync-plugin.mjs` never ran its main there),
+  and `check:plugin` and the examples test handle Windows paths.
 
 ## 0.1.1
 

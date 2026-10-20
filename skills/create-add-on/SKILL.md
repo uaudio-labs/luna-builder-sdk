@@ -77,7 +77,9 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 - Call `Luna.bindShortcuts(luna)` once after connecting, so undo, redo, play and record work
   outside LUNA too; inside LUNA, unclaimed keys already go to LUNA (QUICKSTART section 2). A
   key the page wants for itself: handle it and call `preventDefault()`.
-- Group related writes in `session.transaction(name, fn)` so they undo as one step.
+- Group related writes in `session.transaction(name, fn)` so they undo as one step. For a
+  drag or a regenerated preview use `{ continuous: true }`, where each command replaces the
+  last; write each step from the starting state, not as a change from the previous one.
 - Keep every unsubscribe function and call it when the session changes.
 - Use `luna.raw` only when no typed method exists, and then consider adding one
   (see the add-feature skill).

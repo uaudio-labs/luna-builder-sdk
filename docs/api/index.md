@@ -47,6 +47,7 @@
 | [Playlist](classes/Playlist.md) | - |
 | [Plugin](classes/Plugin.md) | - |
 | [Plugins](classes/Plugins.md) | An observable ordered collection with id lookup. |
+| [PreferenceContext](classes/PreferenceContext.md) | `/sessions/<uid>/preferences/<context>`: one context's preferences. Get one with `session.preferences.context(name)`. |
 | [Preferences](classes/Preferences.md) | `/preferences`: engine preferences as writable properties by name. |
 | [Presets](classes/Presets.md) | - |
 | [QwertyMidi](classes/QwertyMidi.md) | - |
@@ -58,6 +59,7 @@
 | [SendMidi](classes/SendMidi.md) | - |
 | [Session](classes/Session.md) | - |
 | [SessionPackage](classes/SessionPackage.md) | One session package as a live node. |
+| [SessionPreferences](classes/SessionPreferences.md) | `/sessions/<uid>/preferences`: every Add On's session preferences, by context. |
 | [Sessions](classes/Sessions.md) | - |
 | [Shortcuts](classes/Shortcuts.md) | The standard shortcuts as an object: which command a key means, and running it. Most Add Ons only need [bindShortcuts](functions/bindShortcuts.md); use this directly to route keys from a listener the page already has, or to run a command from a menu. |
 | [Store](classes/Store.md) | - |
@@ -111,7 +113,7 @@
 | [MockMidiSent](interfaces/MockMidiSent.md) | One live MIDI message the mock delivered, in [MockEngine.midiSent](classes/MockEngine.md#midisent). |
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
 | [NewBusOptions](interfaces/NewBusOptions.md) | - |
-| [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute, as LUNA's verb takes them. |
+| [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute (session ticks), as LUNA's verb takes them, unlike the clip-relative ticks of the [Note](interfaces/Note.md)s it returns. There is no channel: LUNA's `create_note` writes every note on channel 0 (fact 111). For another channel, add the notes to a clip with [Clip.addNotes](classes/Clip.md#addnotes), which takes one. |
 | [NewTrackOptions](interfaces/NewTrackOptions.md) | - |
 | [Note](interfaces/Note.md) | A note-on row paired with the note-off that ends it. |
 | [OutputAssignment](interfaces/OutputAssignment.md) | One row of an output's `assignments` property, as LUNA publishes it. |
@@ -124,6 +126,7 @@
 | [PathDropHandlers](interfaces/PathDropHandlers.md) | - |
 | [PluginManifest](interfaces/PluginManifest.md) | - |
 | [Port](interfaces/Port.md) | A connection to one engine. |
+| [PreferenceEditOptions](interfaces/PreferenceEditOptions.md) | Options for an edit of a session preference. |
 | [PresetQueryOptions](interfaces/PresetQueryOptions.md) | - |
 | [PresetRow](interfaces/PresetRow.md) | - |
 | [ProgressTask](interfaces/ProgressTask.md) | - |
@@ -192,6 +195,7 @@
 | [StatusListener](type-aliases/StatusListener.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [StemFormat](type-aliases/StemFormat.md) | - |
 | [TrackType](type-aliases/TrackType.md) | - |
+| [TransactionMode](type-aliases/TransactionMode.md) | Which kind of [Session.transaction](classes/Session.md#transaction) is open: `'batch'` holds every command for one undo step and holds pushes until the commit; `'continuous'` keeps only the last command. |
 | [Unsubscribe](type-aliases/Unsubscribe.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [Verb](type-aliases/Verb.md) | UANet verbs. |
 
@@ -267,7 +271,7 @@
 | [pairNotes](functions/pairNotes.md) | Pair note-on rows with the next note-off of the same channel and pitch, in tick order. Pure, and exported because a page that draws its own lanes often wants it directly. |
 | [pairNs](functions/pairNs.md) | Nanoseconds one pair of this analysis covers. |
 | [pairRange](functions/pairRange.md) | The overview pairs covering `[startNs, stopNs)` of a source. Both are file offsets, never timeline ticks. |
-| [parseChord](functions/parseChord.md) | Split a chord name into root, type and bass. `undefined` when it does not start with a note letter, since the ruler accepts any text (`N.C.`, `riff`). |
+| [parseChord](functions/parseChord.md) | Split a chord name into root, type and bass. `undefined` when it does not start with a note letter, since the ruler accepts any text (`N.C.`, `riff`). A lowercase root or bass is read as the note (`am7` is A minor 7, `bb` is B flat) and returned upper-cased, but only when what follows the root is empty or starts like a chord quality, so `bridge` and `chorus` stay text. Spaces around the slash are ignored. |
 | [propertyValue](functions/propertyValue.md) | Unwrap a property reply. A `get` on a property answers `{ value: X }` unless `flatvalue` was requested, in which case it answers `X` directly. |
 | [requireTick](functions/requireTick.md) | Reject a non-integer tick before it reaches the wire: LUNA stores whatever it is given (fact 12). |
 | [secondsToTicks](functions/secondsToTicks.md) | Seconds to ticks at a constant tempo. |

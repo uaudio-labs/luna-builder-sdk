@@ -471,10 +471,10 @@ describe('examples/pianoroll.html', () => {
     const luna = await Luna.connect({ port_: engine.port() });
     const session = await luna.session();
     await session.ready();
-    await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT, clipType: 'midi' });
+    const clipUid = engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
     await engine.settled();
     const playlist = engine.children('/sessions/abc/playlists')[0]!;
-    const clipPath = `/sessions/abc/playlists/${playlist}/clips/clip1`;
+    const clipPath = `/sessions/abc/playlists/${playlist}/clips/${clipUid}`;
     engine.midiEdit(clipPath, 'added', [
       { rowid: 1, tick: 0, status: 0x90, data1: 60, data2: 100 },
       { rowid: 2, tick: Luna.TICKS_PER_BEAT, status: 0x80, data1: 60, data2: 0 },

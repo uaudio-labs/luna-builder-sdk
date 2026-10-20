@@ -16,8 +16,14 @@ import { Context } from './context';
 import type { Note } from './midi';
 import { Node } from './node';
 import { midiByte, requireTick, settle } from './settle';
+import type { TransactionMode } from './session';
 
-/** One note for {@link Playlist.createNotes}. Ticks are absolute, as LUNA's verb takes them. */
+/**
+ * One note for {@link Playlist.createNotes}. Ticks are absolute (session ticks), as LUNA's
+ * verb takes them, unlike the clip-relative ticks of the {@link Note}s it returns. There is no
+ * channel: LUNA's `create_note` writes every note on channel 0 (fact 111). For another
+ * channel, add the notes to a clip with {@link Clip.addNotes}, which takes one.
+ */
 export interface NewNote {
   pitch: number;
   startTick: number;
@@ -39,11 +45,11 @@ export class Playlist extends Node {
   readonly clips: Collection<Clip>;
 
   private readonly sessionUid: string;
-  private readonly batching: (() => boolean) | undefined;
+  private readonly transactionMode: (() => TransactionMode | undefined) | undefined;
   private contextView: Context | undefined;
 
   /** @internal */
-  constructor(client: Client, path: string, sessionUid: string, batching?: () => boolean) {
+  constructor(client: Client, path: string, sessionUid: string, transactionMode?: () => TransactionMode | undefined) {
 
     super(client, path);
     this.uid = this.prop<string>('uid');
@@ -52,9 +58,9 @@ export class Playlist extends Node {
     this.version = this.prop<number>('version');
     this.stemFormat = this.prop<string>('stem_format');
     this.frozen = this.prop<boolean>('frozen');
-    this.clips = new Collection<Clip>(client, `${path}/clips`, (p) => new Clip(client, p, sessionUid, batching), { levels: 2, commands: false, flatvalue: true });
+    this.clips = new Collection<Clip>(client, `${path}/clips`, (p) => new Clip(client, p, sessionUid, transactionMode), { levels: 2, commands: false, flatvalue: true });
     this.sessionUid = sessionUid;
-    this.batching = batching;
+    this.transactionMode = transactionMode;
   }
 
   /** The session's `main` edit context, which `create_note` both reads and overwrites. */
@@ -65,23 +71,50 @@ export class Playlist extends Node {
 
   /**
    * Write notes onto this lane, making the MIDI clip to hold them if there is none there
-   * (LUNA's `create_note`). One undo entry for the whole batch. Ticks are absolute.
+   * (LUNA's `create_note`). One undo entry for the whole batch. Ticks are absolute, and every
+   * note is on channel 0.
+   *
+   * A note goes into the clip its note-on falls in. When no clip on the lane is under the
+   * notes, LUNA makes one MIDI clip spanning the whole bars they cover, named after the track,
+   * and kept clear of the clips either side (fact 111). Notes whose note-ons fall in two
+   * different clips land in both, and the call then rejects with `no_effect`, since it resolves
+   * to a single clip: write to one clip per call.
+   *
+   * The returned `notes` are read back from the clip, so their ticks are clip-relative
+   * (fact 41): subtract `clip.start.value` from what you passed in to match them up.
    *
    * LUNA answers `null` and instead *selects* what it created, so the new row ids are read
-   * back out of the selection — which means this cannot run inside a `transaction()` batch,
-   * where LUNA holds selection writes until the commit. The user's selection is restored
-   * afterwards.
+   * back out of the selection, and the notes out of the clip. The user's selection is
+   * restored afterwards.
+   *
+   * Inside a continuous `session.transaction()` each call replaces the notes the previous
+   * call wrote, which is how an Add On previews a part it regenerates as the user adjusts
+   * it: one undo step, holding the last take (fact 115). A batch transaction holds the clip's
+   * notes back until its commit, so this refuses inside one; write into an existing clip
+   * there with {@link Clip.addNotes}.
    *
    * @example
    * const bar = session.musical.timeline.tickAt({ bar: 1 });
    * const { clip, notes } = await lane.createNotes(
    *   [60, 64, 67].map((pitch, i) => ({ pitch, startTick: bar + i * Luna.TICKS_PER_BEAT, stopTick: bar + (i + 1) * Luna.TICKS_PER_BEAT })),
    * );
+   *
+   * @example
+   * // Try three roots as one gesture: LUNA keeps only the last take, and one undo removes it.
+   * const bar = session.musical.timeline.tickAt({ bar: 2 });
+   * const take = (pitch) => [{ pitch, startTick: bar, stopTick: bar + Luna.TICKS_PER_BEAT }];
+   * await session.transaction('Pick a root', async () => {
+   *   for (const pitch of [60, 62, 64]) await lane.createNotes(take(pitch));
+   * }, { continuous: true });
    */
   async createNotes(notes: readonly NewNote[]): Promise<{ clip: Clip; notes: Note[] }> {
     if (!notes.length) throw new UAError('out_of_range', 'createNotes(): give at least one note', { path: this.path });
-    if (this.batching?.()) {
-      throw new UAError('busy', 'createNotes() reads the new row ids back out of LUNA\'s selection, which a transaction() batch holds until its commit: call it outside the batch', { path: this.path });
+    if (this.transactionMode?.() === 'batch') {
+      throw new UAError(
+        'busy',
+        'createNotes() reads the notes it made back out of the clip, which a batch transaction holds until its commit: write into an existing clip with clip.addNotes() inside the batch, or use a continuous transaction',
+        { path: this.path },
+      );
     }
     const body = notes.map((n) => {
       const start = requireTick(n.startTick, 'startTick');

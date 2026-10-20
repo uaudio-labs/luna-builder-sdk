@@ -1,6 +1,7 @@
 /**
  * Live lane for the editing surface added for the recipes: note velocity, mute and
- * deletion through LUNA's edit selection (fact 74), marker and Chord ruler verbs (fact 100),
+ * deletion through LUNA's edit selection (fact 74), note rewrites inside both kinds of
+ * transaction (facts 74, 115), marker and Chord ruler verbs (fact 100),
  * and the waveform placement that draws a clip (facts 72-73).
  *
  * Needs LUNA on 4718 with a session open and at least one track with an active playlist.
@@ -48,6 +49,57 @@ describe.skipIf(!live)('live: editing', () => {
     expect(clip.clipType.value).toBe('midi');
     expect(created.notes.map((n) => n.pitch).sort()).toEqual([60, 64, 67]);
     expect(clip.midi.notes.items.length).toBeGreaterThanOrEqual(3);
+    // Session ticks in, clip-relative ticks out, all on channel 0 (facts 41, 111).
+    const start = clip.start.value ?? 0;
+    expect(start).toBeLessThanOrEqual(base);
+    expect(created.notes.map((n) => [n.pitch, start + n.startTick, n.channel]).sort((a, b) => a[0]! - b[0]!)).toEqual([
+      [60, base, 0],
+      [64, base + B, 0],
+      [67, base + 2 * B, 0],
+    ]);
+  });
+
+  it('makes a second clip for notes past the first, named after the track (fact 111)', async () => {
+    const at = (clip!.stop.value ?? 0) + 8 * B + B / 2;
+    const created = await lane.createNotes([{ pitch: 62, startTick: at, stopTick: at + B }]);
+    try {
+      expect(created.clip.id).not.toBe(clip!.id);
+      const start = created.clip.start.value ?? 0;
+      expect(start).toBeLessThanOrEqual(at);
+      expect(start + created.notes[0]!.startTick).toBe(at);
+      expect(created.clip.stop.value ?? 0).toBeGreaterThanOrEqual(at + B);
+      expect(created.clip.name.value).toBe(session.tracks.byId(lane.trackUid.value ?? '')?.name.value);
+    } finally {
+      await created.clip.delete().catch(() => undefined);
+    }
+  });
+
+  it('refuses a MIDI insertClip with no source (fact 112)', async () => {
+    const before = lane.clips.items.length;
+    await expect(
+      session.insertClip({ playlistUid: lane.id, sourceUid: '', startTick: base + 64 * B, stopTick: base + 68 * B, clipType: 'midi' }),
+    ).rejects.toMatchObject({ code: 'uasrv.invalid_property' });
+    await sleep(300);
+    await lane.clips.reload();
+    expect(lane.clips.items.length).toBe(before);
+  });
+
+  it('rewrites the key signature at a tick in place, one undo entry each (fact 113)', async () => {
+    const m = session.musical;
+    const at = base + 32 * B;
+    const atTick = () => m.keySignatures.items.filter((k) => k.tick.value === at);
+    expect(atTick()).toHaveLength(0);
+    const first = await m.setKeySignature(2, false, at);
+    const second = await m.setKeySignature(-1, true, at);
+    try {
+      expect(second.id).toBe(first.id);
+      expect(atTick()).toHaveLength(1);
+      expect(m.keySignatureAt(at + B)?.sharpsAndFlats.value).toBe(-1);
+    } finally {
+      await session.undo();
+      await session.undo();
+      await Luna.settle(() => atTick().length === 0, 'undo key signatures', { refresh: () => m.keySignatures.reload() });
+    }
   });
 
   it('scales every velocity in one undo entry and leaves the selection alone', async () => {
@@ -97,12 +149,40 @@ describe.skipIf(!live)('live: editing', () => {
     await Luna.settle(() => midi.notes.items.length === was, 'undo delete', { refresh: () => midi.refresh() });
   });
 
-  it('refuses a selection-based verb inside a transaction', async () => {
-    await expect(
-      session.transaction('SDK live batch', async () => {
-        await clip!.midi.setMuted([clip!.midi.notes.items[0]!], true);
-      }),
-    ).rejects.toMatchObject({ code: 'busy' });
+  it('rewrites notes as one batch transaction: deleteNotes then addNotes, one undo (fact 74)', async () => {
+    const midi = clip!.midi;
+    await midi.refresh();
+    const pitches = () => midi.notes.items.map((n) => n.pitch).sort((x, y) => x - y);
+    const before = pitches();
+    const old = midi.notes.items;
+    await session.transaction('SDK live rewrite', async () => {
+      await midi.deleteNotes(old);
+      await clip!.addNotes(old.map((n) => ({ pitch: n.pitch + 12, tick: n.startTick, lengthTicks: (n.stopTick ?? n.startTick + B) - n.startTick })));
+    });
+    const raised = before.map((p) => p + 12);
+    await Luna.settle(() => JSON.stringify(pitches()) === JSON.stringify(raised), 'rewrite', { refresh: () => midi.refresh() });
+
+    await session.undo();
+    await Luna.settle(() => JSON.stringify(pitches()) === JSON.stringify(before), 'undo rewrite', { refresh: () => midi.refresh() });
+  });
+
+  it('keeps only the last createNotes of a continuous transaction, one undo (fact 115)', async () => {
+    const midi = clip!.midi;
+    await midi.refresh();
+    const pitches = () => midi.notes.items.map((n) => n.pitch).sort((x, y) => x - y);
+    const before = pitches();
+    const at = (clip!.start.value ?? 0) + B / 2; // inside the clip, so every take lands in it
+    await session.transaction('SDK live takes', async () => {
+      for (const pitch of [48, 50, 52]) {
+        const { clip: into } = await lane.createNotes([{ pitch, startTick: at, stopTick: at + B / 2 }]);
+        expect(into.id).toBe(clip!.id);
+      }
+    }, { continuous: true });
+    const last = [52, ...before].sort((x, y) => x - y);
+    await Luna.settle(() => JSON.stringify(pitches()) === JSON.stringify(last), 'last take only', { refresh: () => midi.refresh() });
+
+    await session.undo();
+    await Luna.settle(() => JSON.stringify(pitches()) === JSON.stringify(before), 'undo takes', { refresh: () => midi.refresh() });
   });
 
   it('adds several notes to a clip in one undo entry', async () => {

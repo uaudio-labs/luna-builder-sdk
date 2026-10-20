@@ -17,6 +17,7 @@ import { MidiClip } from './midi';
 import { Disposed, UAError } from '../wire/errors';
 import { Node } from './node';
 import { midiByte, requireTick, settle } from './settle';
+import type { TransactionMode } from './session';
 
 export type ClipType = 'audio' | 'video' | 'midi';
 
@@ -109,8 +110,8 @@ export class Clip extends Node {
     client: Client,
     path: string,
     private readonly sessionUid: string,
-    /** @internal Whether a `session.transaction()` batch is open; the note verbs refuse inside one. */
-    private readonly batching?: () => boolean,
+    /** @internal The kind of `session.transaction()` open, which decides how the note verbs settle. */
+    private readonly transactionMode?: () => TransactionMode | undefined,
   ) {
     super(client, path);
     this.uid = this.prop<string>('uid');
@@ -147,7 +148,7 @@ export class Clip extends Node {
       playlistUid: this.playlistUid,
       clipUid: this.id,
       startTick: () => this.start.value,
-      batching: this.batching,
+      transactionMode: this.transactionMode,
     });
     return this.midiClip;
   }

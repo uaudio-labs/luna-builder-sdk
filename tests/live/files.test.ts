@@ -1,5 +1,5 @@
 /**
- * Live lane for getting files in: `/gui` presence (fact 103), `listFiles` (fact 106) and the
+ * Live lane for getting files in: `/gui` presence (fact 103), `listFiles` (fact 106), `serveMediaFile` (fact 114) and the
  * path route's `importPath` (fact 42, `local_copy`). Needs LUNA on 4718 with a session open. It writes a
  * quarter-second WAV to the temp folder, imports it as a source and trashes the source again;
  * nothing is placed on the timeline.
@@ -7,7 +7,7 @@
  * The File route inside LUNA (picking and dropping a real file) needs a person: see
  * docs/FILES.md, Testing.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -54,6 +54,55 @@ describe.skipIf(!live)('live: listing a folder', () => {
     await expect(luna.gui.listFiles(join(folder, 'missing'))).rejects.toMatchObject({ code: 'uasrv.filesystem_error' });
     await expect(luna.gui.listFiles(join(folder, 'b.txt'))).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
     await expect(luna.gui.listFiles('relative/path')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+  });
+});
+
+// Needs no session, but an installed Add On with a local page to serve to: UA_LIVE_ADD_ON,
+// else Video Window. The test skips itself when that Add On is not installed.
+describe.skipIf(!live)('live: serving a media file', () => {
+  const addOnId = process.env['UA_LIVE_ADD_ON'] ?? 'com.uaudio.video_window';
+  let luna: Luna.Client;
+  let dir: string;
+  let installed = false;
+
+  beforeAll(async () => {
+    luna = await Luna.connect({ requestTimeoutMs: 8000 });
+    dir = mkdtempSync(join(tmpdir(), 'ua-live-serve-'));
+    await luna.gui.addOns.load();
+    installed = luna.gui.addOns.byId(addOnId.toLowerCase()) !== undefined;
+  });
+
+  afterAll(async () => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    await luna?.close();
+  });
+
+  it('fact 114: serveMediaFile serves real media only, judging a link by its target', async (ctx) => {
+    if (!installed) ctx.skip();
+    writeFileSync(join(dir, 'My Tone #1.wav'), wav());
+    writeFileSync(join(dir, 'notes.txt'), 'just some notes\n');
+    writeFileSync(join(dir, 'fake.mp4'), 'not a video at all\n');
+    // Making links needs a privilege Windows users rarely have.
+    const links = process.platform !== 'win32';
+    if (links) {
+      symlinkSync(join(dir, 'notes.txt'), join(dir, 'link.mp4'));
+      symlinkSync(join(dir, 'My Tone #1.wav'), join(dir, 'alias.wav'));
+    }
+    // The URL names the real file: temp folders are often links themselves (/var -> /private/var).
+    const real = realpathSync(join(dir, 'My Tone #1.wav'));
+    const url = await luna.gui.serveMediaFile(addOnId, join(dir, 'My Tone #1.wav'));
+    const expected = process.platform === 'win32' ? 'file:///' : `ua-content://${addOnId.toLowerCase().replaceAll('_', '__')}`;
+    expect(url.startsWith(expected)).toBe(true);
+    expect(url.endsWith('/My%20Tone%20%231.wav')).toBe(true);
+    expect(decodeURIComponent(url).endsWith(real.replaceAll('\\', '/'))).toBe(true);
+    if (links) expect(await luna.gui.serveMediaFile(addOnId, join(dir, 'alias.wav'))).toBe(url);
+    for (const name of ['notes.txt', 'fake.mp4', ...(links ? ['link.mp4'] : [])]) {
+      await expect(luna.gui.serveMediaFile(addOnId, join(dir, name))).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    }
+    await expect(luna.gui.serveMediaFile(addOnId, dir)).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.serveMediaFile(addOnId, 'relative/tone.wav')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.serveMediaFile(addOnId, join(dir, 'missing.wav'))).rejects.toMatchObject({ code: 'uasrv.filesystem_error' });
+    await expect(luna.gui.serveMediaFile('com.example.not-installed', join(dir, 'My Tone #1.wav'))).rejects.toMatchObject({ code: 'uasrv.not_installed' });
   });
 });
 

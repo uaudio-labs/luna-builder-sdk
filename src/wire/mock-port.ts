@@ -490,6 +490,23 @@ export class MockEngine {
             .map((e) => ({ name: e.name, path: `${dir === '/' ? '' : dir}/${e.name}`, is_directory: e.is_directory }));
           return { files };
         },
+        // Fact 114: serve_media_file's checks, codes and URL as LUNA's (macOS form).
+        serve_media_file: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `serve_media_file: ${why}`, { cmd: 'post', path: '/gui/serve_media_file' });
+          const body = typeof data === 'object' && data !== null ? (data as { add_on_id?: unknown; path?: unknown }) : {};
+          if (body.add_on_id === undefined || body.add_on_id === null || body.path === undefined || body.path === null) throw fail('uasrv.missing_field', 'add_on_id and path are required');
+          if (typeof body.add_on_id !== 'string' || typeof body.path !== 'string') throw fail('uasrv.invalid_type', 'add_on_id and path must be strings');
+          const path = body.path;
+          if (!/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
+          const file = engine.mediaFiles[path];
+          if (file === undefined) throw fail('uasrv.filesystem_error', 'no file at path');
+          if (file === null) throw fail('uasrv.invalid_value', 'not an audio or video file');
+          const id = body.add_on_id.toLowerCase();
+          if (!engine.has(`/gui/add_ons/${id}`)) throw fail('uasrv.not_installed', `no Add On ${id}`);
+          const target = file === true ? path : file;
+          engine.mediaServed.push({ addOnId: id, path: target });
+          return { url: `ua-content://${localContentHost(id)}${encodeMediaPath(target)}` };
+        },
         show_save_dialog: (_data, engine) => {
           const uid = `fc${engine.nextRow()}`;
           engine.addNode(`/gui/file_chooser/${uid}`, { properties: { status: 'pending', files: [] } });
@@ -511,6 +528,21 @@ export class MockEngine {
 
   /** What the next mock file dialog "selects"; empty means the user cancelled. */
   nextDialogFiles: string[] = [];
+
+  /**
+   * The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio or video
+   * file it serves, `null` for one it refuses (not media, or media in name only), or the
+   * path a link leads to, which is served under that path. A path not listed is missing.
+   *
+   * @example
+   * engine.mediaFiles['/Movies/cut.mov'] = true;
+   * engine.mediaFiles['/Movies/notes.mp4'] = null;
+   * engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';
+   */
+  mediaFiles: Record<string, true | null | string> = {};
+
+  /** Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. */
+  mediaServed: { addOnId: string; path: string }[] = [];
 
   /**
    * The disk `/gui/list_files` reads: each folder's absolute path to the names inside it,
@@ -664,6 +696,11 @@ export class MockEngine {
     this.push({ path: clean, operation: 'removed' }, undefined);
   }
 
+  /** @internal Drop a property; LUNA pushes nothing for it (fact 110). */
+  deleteValue(nodePath: string, property: string): void {
+    this.nodes.get(normalize(nodePath))?.properties.delete(property);
+  }
+
   /** Engine-side property change: updates the tree and pushes to every subscribed port. */
   setValue(nodePath: string, property: string, value: unknown): void {
     const clean = normalize(nodePath);
@@ -733,7 +770,7 @@ export class MockEngine {
    * while subscribers see only the delta.
    *
    * `added` and `changed` carry rows; `deleted` needs only their `rowid`s. Rows given
-   * without a `rowid` get the next free one. Ticks are table ticks.
+   * without a `rowid` get the next id free across the session's clips, as in LUNA. Ticks are table ticks.
    *
    * @example
    * engine.midiEdit(clipPath, 'added', [{ tick: 0, status: 0x90, data1: 60, data2: 100 }]);
@@ -743,7 +780,10 @@ export class MockEngine {
     const table = `${normalize(clipPath)}/midi/table`;
     if (!this.nodes.has(table)) this.addNode(table, { properties: { row_data: EMPTY_MIDI_TABLE() } });
     const stored = decodeMidiTable(this.value(table, 'row_data'));
-    let next = stored.length ? Math.max(...stored.map((r) => r.rowid)) + 1 : 1;
+    // LUNA keeps every clip's rows in one session table, so a new row id is unique across clips.
+    const session = table.split('/').slice(0, 3).join('/');
+    const used = [...this.nodes.keys()].filter((k) => k.startsWith(`${session}/`) && k.endsWith('/midi/table')).flatMap((k) => decodeMidiTable(this.value(k, 'row_data')).map((r) => r.rowid));
+    let next = used.length ? Math.max(...used) + 1 : 1;
     const applied: Required<MockMidiRow>[] = [];
     for (const row of rows) {
       const rowid = row.rowid ?? next++;
@@ -835,6 +875,11 @@ export class MockEngine {
 
   children(nodePath: string): string[] {
     return [...(this.nodes.get(normalize(nodePath))?.children ?? [])];
+  }
+
+  /** Names of a node's properties. */
+  propertyNames(nodePath: string): string[] {
+    return [...(this.nodes.get(normalize(nodePath))?.properties.keys() ?? [])];
   }
 
   /** @internal Uploads between `begin` and `end` (fact 42). */
@@ -951,6 +996,8 @@ export class MockEngine {
         const body = (data ?? {}) as { playlist_uid?: string; track_uid?: string; name?: string; start?: number; stop?: number; source_uid?: string; source_start?: number; source_stop?: number; clip_type?: number };
         const playlist = body.playlist_uid ?? (body.track_uid ? String(engine.value(`${base}/tracks/${body.track_uid}`, 'playlist_uid')) : undefined);
         if (!playlist) throw new UAError('uasrv.invalid_object', 'insert_clip: no playlist', { cmd: 'post', path: `${base}/insert_clip` });
+        // Every clip type needs a source; a MIDI clip of its own comes from create_note (fact 112).
+        if (!body.source_uid) throw new UAError('uasrv.invalid_property', 'insert_clip: source_uid is required', { cmd: 'post', path: `${base}/insert_clip` });
         const id = `clip${engine.children(`${base}/playlists/${playlist}/clips`).length + 1}`;
         engine.addNode(`${base}/playlists/${playlist}/clips/${id}`, {
           properties: { uid: id, name: body.name ?? 'Clip', start: body.start ?? 0, stop: body.stop ?? 0, source_uid: body.source_uid ?? '', source_start: body.source_start ?? 0, source_stop: body.source_stop ?? 0, clip_type: body.clip_type ?? 0, gain: 0, bypass: false, midi_source_start: 0, layer: 0, mute: false },
@@ -1038,7 +1085,22 @@ export class MockEngine {
         engine.addNode(`${base}/time_signatures/${id}`, { properties: { tick: 0, bar: body.bar ?? 1, partial: false, numerator: body.numerator ?? 4, denominator: body.denominator ?? 4 } });
         return null;
       },
-      set_key_signature: () => null,
+      /** One key signature per tick: setting one where a row already sits rewrites that row (fact 113). */
+      set_key_signature: (data, engine) => {
+        const body = (data ?? {}) as { tick?: number; sharps_and_flats?: number; is_minor?: boolean };
+        if (typeof body.tick !== 'number' || typeof body.sharps_and_flats !== 'number' || typeof body.is_minor !== 'boolean') {
+          throw new UAError('uasrv.invalid_property', 'set_key_signature: tick, sharps_and_flats and is_minor are required', { cmd: 'post', path: `${base}/set_key_signature` });
+        }
+        const existing = engine.children(`${base}/key_signatures`).find((row) => engine.value(`${base}/key_signatures/${row}`, 'tick') === body.tick);
+        if (existing !== undefined) {
+          engine.setValue(`${base}/key_signatures/${existing}`, 'sharps_and_flats', body.sharps_and_flats);
+          engine.setValue(`${base}/key_signatures/${existing}`, 'is_minor', body.is_minor);
+          return null;
+        }
+        const rowid = engine.nextRow();
+        engine.addNode(`${base}/key_signatures/${rowid}`, { properties: { rowid, tick: body.tick, sharps_and_flats: body.sharps_and_flats, is_minor: body.is_minor } });
+        return null;
+      },
       set_automode_on_tracks: (data, engine) => {
         const body = (data ?? {}) as { tracks?: string[]; automation_mode?: number };
         const names = ['off', 'read', 'write', 'touch', 'latch'];
@@ -1301,9 +1363,11 @@ export class MockEngine {
           return null;
         },
         /**
-         * Writes notes onto a playlist, making the MIDI clip to hold them if there is none
-         * there, and then **selects** what it made: that is where the caller reads the new
-         * row ids from (fact 74).
+         * Writes notes onto a playlist, as deviced's `Edit_CreateNote` does (fact 111): ticks
+         * are session ticks; each note goes into the clip under its note-on, else into one new
+         * MIDI clip spanning the bars the notes cover. Then LUNA **selects** what it made,
+         * which is where the caller reads the new row ids from (fact 74). No channel field:
+         * every note is on channel 0.
          */
         create_note: (data, engine) => {
           const body = (data ?? {}) as { playlist_uid?: string; notes?: { note?: number; start?: number; stop?: number; velocity?: number; velocity_on?: number; velocity_off?: number }[]; note?: number; start?: number; stop?: number; velocity?: number };
@@ -1312,35 +1376,58 @@ export class MockEngine {
           type MockNewNote = { note?: number | undefined; start?: number | undefined; stop?: number | undefined; velocity?: number | undefined; velocity_on?: number | undefined; velocity_off?: number | undefined };
           const notes: MockNewNote[] = body.notes ?? (body.note !== undefined ? [{ note: body.note, start: body.start, stop: body.stop, velocity: body.velocity }] : []);
           if (!notes.length) return null;
+          const clipsPath = `${base}/playlists/${playlist}/clips`;
+          // The playlist's clips in time order, of any type, as deviced's clip compiler lists them.
+          const clips = () =>
+            engine
+              .children(clipsPath)
+              .map((uid) => ({ uid, start: Number(engine.value(`${clipsPath}/${uid}`, 'start') ?? 0), stop: Number(engine.value(`${clipsPath}/${uid}`, 'stop') ?? 0) }))
+              .sort((a, b) => a.start - b.start);
+          // GetFirstClipWithinRange: a point hits a clip it falls in; a range, one it overlaps.
+          const firstClip = (from: number, to: number) => clips().find((c) => (from === to ? from >= c.start && from < c.stop : c.start < to && c.stop > from));
           const span = { start: Math.min(...notes.map((n) => n.start ?? 0)), stop: Math.max(...notes.map((n) => n.stop ?? 0)) };
-          let clipUid = engine.children(`${base}/playlists/${playlist}/clips`).find((uid) => engine.value(`${base}/playlists/${playlist}/clips/${uid}`, 'clip_type') === 2);
+          const onsets = { start: Math.min(...notes.map((n) => n.start ?? 0)), stop: Math.max(...notes.map((n) => n.start ?? 0)) };
+          let clipUid = firstClip(onsets.start, onsets.stop)?.uid;
           if (!clipUid) {
-            clipUid = `midi${engine.children(`${base}/playlists/${playlist}/clips`).length + 1}`;
-            engine.addNode(`${base}/playlists/${playlist}/clips/${clipUid}`, {
-              properties: { uid: clipUid, name: 'MIDI', start: span.start, stop: span.stop, source_uid: '', source_start: 0, source_stop: 0, clip_type: 2, gain: 0, bypass: false, render_source_uid: null, render_state: 'none', midi_source_start: 0 },
-            });
-            engine.addNode(`${base}/playlists/${playlist}/clips/${clipUid}/midi/table`, { properties: { row_data: EMPTY_MIDI_TABLE() } });
+            // CreateClipForRange without merging: whole bars, kept clear of the clips around it.
+            let start = engine.barLines(base, span.start).floor;
+            let stop = engine.barLines(base, span.stop).ceil;
+            for (const c of clips()) {
+              if (c.start < span.start && c.stop > start) start = Math.max(start, c.stop);
+              if (c.start < stop && c.stop > span.stop) stop = Math.min(stop, c.start);
+            }
+            const trackUid = String(engine.value(`${base}/playlists/${playlist}`, 'track_uid') ?? '');
+            const name = engine.value(`${base}/tracks/${trackUid}`, 'name');
+            clipUid = engine.addMidiClipToPlaylist(base, playlist, { startTick: start, stopTick: stop, name: typeof name === 'string' ? name : 'MIDI', midiSourceStart: start });
           }
-          const clipPath = `${base}/playlists/${playlist}/clips/${clipUid}`;
-          const origin = Number(engine.value(clipPath, 'midi_source_start') ?? 0);
-          const before = new Set(engine.midiRows(clipPath).map((r) => r.rowid));
-          engine.midiEdit(
-            clipPath,
-            'added',
-            notes.flatMap((n) => [
-              { tick: (n.start ?? 0) + origin, status: 0x90, data1: n.note ?? 60, data2: n.velocity_on ?? n.velocity ?? 100 },
-              { tick: (n.stop ?? 0) + origin, status: 0x80, data1: n.note ?? 60, data2: n.velocity_off ?? 0 },
-            ]),
-          );
-          // LUNA selects what it created; the note-on rows are what the caller wants.
-          const added = engine.midiRows(clipPath).filter((r) => !before.has(r.rowid) && (r.status & 0xf0) === 0x90 && r.data2 > 0);
+          // Table tick = session tick + midi_source_start - clip start (fact 41).
+          const offsetOf = (uid: string): number => Number(engine.value(`${clipsPath}/${uid}`, 'midi_source_start') ?? 0) - Number(engine.value(`${clipsPath}/${uid}`, 'start') ?? 0);
+          let offset = offsetOf(clipUid);
+          const selected: number[][] = [];
+          for (const n of notes) {
+            const start = n.start ?? 0;
+            const stop = n.stop ?? 0;
+            // A note whose note-on falls in another clip goes there instead.
+            const hit = firstClip(start, start);
+            if (hit) {
+              clipUid = hit.uid;
+              offset = offsetOf(clipUid);
+            }
+            const clipPath = `${clipsPath}/${clipUid}`;
+            const before = new Set(engine.midiRows(clipPath).map((r) => r.rowid));
+            engine.midiEdit(clipPath, 'added', [
+              { tick: start + offset, status: 0x90, data1: n.note ?? 60, data2: n.velocity_on ?? n.velocity ?? 100 },
+              { tick: stop + offset, status: 0x80, data1: n.note ?? 60, data2: n.velocity_off ?? n.velocity ?? 100 },
+            ]);
+            const on = engine.midiRows(clipPath).find((r) => !before.has(r.rowid) && (r.status & 0xf0) === 0x90);
+            if (on) selected.push([on.data1, start, stop, on.rowid]);
+          }
           engine.setValue(`${base}/contexts/main`, 'focus', 'notes');
           engine.setValue(`${base}/contexts/main`, 'selection_playlists', [playlist]);
           engine.setValue(`${base}/contexts/main`, 'selection_start', span.start);
           engine.setValue(`${base}/contexts/main`, 'selection_stop', span.stop);
-          engine.setValue(`${base}/contexts/main`, 'selection_notes', [
-            { playlist_uid: playlist, notes: added.map((r) => [r.data1, r.tick - origin, r.tick - origin, r.rowid]) },
-          ]);
+          // Selected notes carry the session ticks the caller sent (fact 74).
+          engine.setValue(`${base}/contexts/main`, 'selection_notes', [{ playlist_uid: playlist, notes: selected }]);
           return null;
         },
         /** Addresses rows by rowid, unlike the other two (fact 74). */
@@ -1368,6 +1455,7 @@ export class MockEngine {
     this.addNode(`${base}/key_signatures`);
     this.addNode(`${base}/markers`);
     this.addNode(`${base}/chords`);
+    this.addNode(`${base}/preferences`, { commands: preferenceCommands(`${base}/preferences`) });
     this.addPackage(pkg, { name: options.name ?? uid, lastOpened: Date.now() });
     // LUNA gives every session four cue buses before anything else (fact 83).
     for (let i = 0; i < 4; i++) this.addBus(uid, `cue${i + 1}_${uid}`, { name: `CUE ${i + 1}`, busType: `cue_${i}`, stemFormat: 'stereo' });
@@ -1488,6 +1576,50 @@ export class MockEngine {
       },
     });
     return clipUid;
+  }
+
+  /**
+   * Add an empty MIDI clip to a track's current playlist, the way LUNA makes one for notes
+   * drawn in place. `midiSourceStart` is the table tick at the clip's start (fact 41): 0 by
+   * default. `insert_clip` cannot make one: it needs a source (fact 112). Returns the clip uid.
+   *
+   * @example
+   * const clipUid = engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: Luna.WHOLE_NOTE });
+   */
+  addMidiClip(sessionUid: string, trackUid: string, options: { startTick?: number; stopTick?: number; name?: string; midiSourceStart?: number } = {}): string {
+    const base = `/sessions/${sessionUid}`;
+    return this.addMidiClipToPlaylist(base, String(this.value(`${base}/tracks/${trackUid}`, 'playlist_uid')), options);
+  }
+
+  /** @internal */
+  addMidiClipToPlaylist(sessionPath: string, playlistUid: string, options: { startTick?: number; stopTick?: number; name?: string; midiSourceStart?: number }): string {
+    const clips = `${sessionPath}/playlists/${playlistUid}/clips`;
+    let n = this.children(clips).length + 1;
+    while (this.has(`${clips}/midi${n}`)) n++;
+    const clipUid = `midi${n}`;
+    const start = options.startTick ?? 0;
+    const stop = options.stopTick ?? start + 96e9 * 4;
+    this.addNode(`${clips}/${clipUid}`, {
+      properties: { uid: clipUid, name: options.name ?? 'MIDI', start, stop, source_uid: '', source_start: start, source_stop: stop, clip_type: 2, gain: 0, bypass: false, render_source_uid: null, render_state: 'none', midi_source_start: options.midiSourceStart ?? 0, layer: 0, mute: false },
+    });
+    this.addNode(`${clips}/${clipUid}/midi/table`, { properties: { row_data: EMPTY_MIDI_TABLE() } });
+    return clipUid;
+  }
+
+  /**
+   * @internal The bar lines either side of `tick`: the one at or before it and the one at or
+   * after it, from the time signature in effect (deviced's `GetBarRangeForNoteEvents`).
+   */
+  barLines(sessionPath: string, tick: number): { floor: number; ceil: number } {
+    const beatTicks = 96_000_000_000;
+    const sigs = this.children(`${sessionPath}/time_signatures`)
+      .map((id) => this.nodes.get(`${sessionPath}/time_signatures/${id}`)!.properties)
+      .map((p) => ({ tick: Number(p.get('tick') ?? 0), n: Number(p.get('numerator') ?? 4), d: Number(p.get('denominator') ?? 4) }))
+      .sort((a, b) => a.tick - b.tick);
+    const sig = sigs.filter((x) => x.tick <= tick).at(-1) ?? sigs[0] ?? { tick: 0, n: 4, d: 4 };
+    const bar = ((beatTicks * 4) / sig.d) * sig.n;
+    const floor = sig.tick + Math.floor((tick - sig.tick) / bar) * bar;
+    return { floor, ceil: floor === tick ? tick : floor + bar };
   }
 
   /**
@@ -2039,6 +2171,31 @@ export class MockPort implements Port {
 }
 
 /**
+ * The host of an Add On's `ua-content://` URL, as LUNA builds it (fact 114): the lowercase
+ * id with `_` doubled and any other byte a host cannot carry written `_` plus two hex digits.
+ */
+function localContentHost(id: string): string {
+  let host = '';
+  for (const byte of new TextEncoder().encode(id)) {
+    const c = String.fromCharCode(byte);
+    if (/[a-z0-9.-]/.test(c)) host += c;
+    else if (c === '_') host += '__';
+    else host += `_${byte.toString(16).padStart(2, '0')}`;
+  }
+  return host || '_';
+}
+
+/** An absolute path percent-encoded as LUNA puts it in a URL: unreserved bytes and `/` kept. */
+function encodeMediaPath(path: string): string {
+  let out = '';
+  for (const byte of new TextEncoder().encode(path.replaceAll('\\', '/'))) {
+    const c = String.fromCharCode(byte);
+    out += /[A-Za-z0-9\-._~/]/.test(c) ? c : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+  return out.startsWith('/') ? out : `/${out}`;
+}
+
+/**
  * LUNA's `list_files` order (fact 106): JUCE's `String::compareNatural`, case-insensitive.
  * Whitespace runs count as one, digit runs compare by value (a run with a leading zero
  * digit by digit), A-Z fold case, and a character that is not an ASCII letter or digit
@@ -2109,4 +2266,65 @@ function naturalCompare(a: string, b: string): number {
       if (x[xi]! > y[yi]!) return 1;
     }
   }
+}
+
+/**
+ * `/sessions/<uid>/preferences` commands (fact 110). Names must be non-empty and free of
+ * `/`; a preference with no properties left, and a context with no preferences left, go
+ * away. `undoable` is accepted and ignored: the mock keeps no undo history.
+ */
+function preferenceCommands(root: string): Record<string, CommandHandler> {
+  const validName = (v: unknown): v is string => typeof v === 'string' && v !== '' && !v.includes('/');
+  type Body = { context?: unknown; preference?: unknown; property?: unknown; value?: unknown };
+  const target = (body: Body, verb: string) => {
+    if (body.context === undefined || body.preference === undefined || body.property === undefined) {
+      throw new UAError('uasrv.missing_field', `${verb}: uasrv.missing_field`, { cmd: 'post', path: `${root}/${verb}` });
+    }
+    if (!validName(body.context) || !validName(body.preference) || !validName(body.property)) {
+      throw new UAError('uasrv.invalid_value', `${verb}: uasrv.invalid_value`, { cmd: 'post', path: `${root}/${verb}` });
+    }
+    return { node: `${root}/${body.context}/${body.preference}`, property: body.property };
+  };
+  const prune = (engine: MockEngine, context: string) => {
+    for (const pref of engine.children(`${root}/${context}`)) {
+      const path = `${root}/${context}/${pref}`;
+      if (engine.propertyNames(path).length === 0) engine.removeNode(path);
+    }
+    if (engine.children(`${root}/${context}`).length === 0) engine.removeNode(`${root}/${context}`);
+  };
+  return {
+    add_preference: (data, engine) => {
+      const body = (data ?? {}) as Body;
+      const { node, property } = target(body, 'add_preference');
+      if (engine.has(node) && engine.propertyNames(node).includes(property)) return null;
+      if (!engine.has(node)) engine.addNode(node, { properties: { [property]: body.value ?? null } });
+      else engine.setValue(node, property, body.value ?? null);
+      return null;
+    },
+    set_preference: (data, engine) => {
+      const body = (data ?? {}) as Body;
+      if (body.value === undefined) throw new UAError('uasrv.missing_field', 'set_preference: uasrv.missing_field', { cmd: 'post', path: `${root}/set_preference` });
+      const { node, property } = target(body, 'set_preference');
+      if (!engine.has(node) || !engine.propertyNames(node).includes(property)) {
+        throw new UAError('uasrv.invalid_property', 'set_preference: uasrv.invalid_property', { cmd: 'post', path: `${root}/set_preference` });
+      }
+      engine.setValue(node, property, body.value);
+      return null;
+    },
+    remove_preference: (data, engine) => {
+      const body = (data ?? {}) as Body;
+      const path = `${root}/remove_preference`;
+      if (body.context === undefined) throw new UAError('uasrv.missing_field', 'remove_preference: uasrv.missing_field', { cmd: 'post', path });
+      const pref = body.preference ?? '';
+      const prop = body.property ?? '';
+      if (!validName(body.context) || (pref === '' && prop !== '')) throw new UAError('uasrv.invalid_value', 'remove_preference: uasrv.invalid_value', { cmd: 'post', path });
+      const contextPath = `${root}/${body.context}`;
+      if (!engine.has(contextPath)) return null;
+      if (pref === '') engine.removeNode(contextPath);
+      else if (prop === '') engine.removeNode(`${contextPath}/${String(pref)}`);
+      else engine.deleteValue(`${contextPath}/${String(pref)}`, String(prop));
+      prune(engine, body.context);
+      return null;
+    },
+  };
 }

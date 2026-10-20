@@ -24,12 +24,21 @@ export async function doctor(_args: Args): Promise<number> {
   rows.push(['node', process.version + (Number(process.versions.node.split('.')[0]) >= 22 ? '' : '  (need >= 22)')]);
   let npm = '';
   try {
-    npm = execFileSync('npm', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' }).trim();
+    // On Windows npm is npm.cmd, which needs a shell; one command string, because passing
+    // arguments with shell: true is deprecated (DEP0190).
+    npm = (process.platform === 'win32'
+      ? execFileSync('npm --version', { encoding: 'utf8', shell: true, stdio: ['ignore', 'pipe', 'ignore'] })
+      : execFileSync('npm', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    ).trim();
   } catch {
     /* not on PATH */
   }
-  // npm 10 (Node 22's) crashes in arborist on a scaffold's file: dependency; Node 24 ships npm 11.
-  rows.push(['npm', npm ? npm + (Number(npm.split('.')[0]) >= 11 ? '' : '  (need >= 11 to npm install a scaffold; comes with Node.js 24)') : 'not found']);
+  // npm 10 (Node 22's) crashes in arborist on vitest's peer dependencies unless the Add On's
+  // .npmrc sets legacy-peer-deps, which scaffolds from ua-builder new do.
+  const npmNote = npm && Number(npm.split('.')[0]) < 11 && !existsSync(join(process.cwd(), '.npmrc'))
+    ? '  (npm 10 needs legacy-peer-deps=true in the Add On\'s .npmrc to npm install it; or use Node.js 24)'
+    : '';
+  rows.push(['npm', npm ? npm + npmNote : 'not found']);
   rows.push(['SDK bundle', bundlePath() ?? 'missing: run npm run build']);
   // A zip-extracted or copied SDK can lose the CLI's executable bit, and then
   // `npx ua-builder` dies with "Permission denied". Heal it here.

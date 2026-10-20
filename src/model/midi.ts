@@ -13,6 +13,10 @@
  * {@link MidiClip.deleteNotes} save the user's selection, write their own, post, and put the
  * user's back. Each is one undo entry.
  *
+ * All of them run inside `session.transaction()` too. In a batch, LUNA holds the table's
+ * deltas until the commit (fact 74), so the verbs post without waiting and the lists catch up
+ * once the transaction resolves; call {@link MidiClip.refresh} then if they look behind.
+ *
  * @example
  * const midi = clip.midi;
  * await midi.ready();
@@ -27,6 +31,7 @@ import type { Unsubscribe } from '../wire/port';
 import { Context } from './context';
 import { Node } from './node';
 import { midiByte, settle } from './settle';
+import type { TransactionMode } from './session';
 
 /**
  * One row of a clip's MIDI table: a single MIDI message at a clip-relative tick.
@@ -49,7 +54,17 @@ export interface MidiRow {
   readonly enabled: boolean;
 }
 
-/** A note-on row paired with the note-off that ends it. */
+/**
+ * A note-on row paired with the note-off that ends it.
+ *
+ * `startTick` and `stopTick` are clip-relative: they count from the clip's start, not from
+ * the start of the session (fact 41). A note at the clip's downbeat has `startTick` 0
+ * wherever the clip sits, and moving the clip does not change it. For a position on the
+ * session timeline add the clip's start.
+ *
+ * @example
+ * const sessionTick = (clip.start.value ?? 0) + note.startTick;
+ */
 export interface Note {
   /** The note-on row id: the note's identity, and its `List.byId` key. */
   readonly rowid: number;
@@ -58,9 +73,9 @@ export interface Note {
   /** MIDI note number, 0-127. */
   readonly pitch: number;
   readonly channel: number;
-  /** Clip-relative ticks. */
+  /** Ticks from the clip's start, not the session's; add `clip.start.value` for a session tick. */
   readonly startTick: number;
-  /** Clip-relative ticks, `undefined` when no note-off follows. */
+  /** Ticks from the clip's start, like `startTick`; `undefined` when no note-off follows. */
   readonly stopTick: number | undefined;
   readonly velocity: number;
   readonly offVelocity: number | undefined;
@@ -148,8 +163,8 @@ export interface MidiHost {
   readonly clipUid: string;
   /** The clip's timeline start, ticks, or `undefined` before it loads. */
   readonly startTick: () => number | undefined;
-  /** True while a `session.transaction()` batch is open. */
-  readonly batching?: (() => boolean) | undefined;
+  /** The kind of `session.transaction()` open, if any. */
+  readonly transactionMode?: (() => TransactionMode | undefined) | undefined;
 }
 
 /** Derive a host from `/sessions/<uid>/playlists/<pl>/clips/<clip>` when the Clip did not supply one. */
@@ -312,7 +327,7 @@ export class MidiClip extends Node {
       expected.push({ rowid: note.rowid, velocity });
     }
     await this.wire.post(`${this.host.sessionPath}/contexts/main/commands/change_velocity`, { session_uid: this.host.sessionUid, velocity_on: options.off !== true, notes: rows });
-    await settle(() => expected.every((e) => (options.off ? this.notes.byId(String(e.rowid))?.offVelocity : this.notes.byId(String(e.rowid))?.velocity) === e.velocity), 'change velocities', this.settleOptions());
+    await this.settleEdit(() => expected.every((e) => (options.off ? this.notes.byId(String(e.rowid))?.offVelocity : this.notes.byId(String(e.rowid))?.velocity) === e.velocity), 'change velocities');
   }
 
   /** Set one note's velocity. `off` targets the note-off row. One "Change Velocities" undo entry. */
@@ -324,6 +339,8 @@ export class MidiClip extends Node {
    * Mute or unmute notes. LUNA's `mute_notes` is a toggle over the selection (fact 74), so
    * this selects only the notes whose state must change, posts once, and restores the user's
    * selection. Nothing is posted — and no undo entry made — when nothing needs changing.
+   * Which notes need changing is read from {@link notes}, which a batch transaction does not
+   * update until its commit: mute a note once per batch.
    *
    * @example
    * // Mute everything quieter than 40, as one undo entry.
@@ -334,13 +351,15 @@ export class MidiClip extends Node {
     if (!targets.length) return;
     await this.withSelection(targets, async () => {
       await this.wire.post(`${this.host.sessionPath}/contexts/main/commands/mute_notes`, { session_uid: this.host.sessionUid });
-      await settle(() => targets.every((t) => this.notes.byId(String(t.rowid))?.muted === muted), 'mute notes', this.settleOptions());
+      await this.settleEdit(() => targets.every((t) => this.notes.byId(String(t.rowid))?.muted === muted), 'mute notes');
     });
   }
 
   /**
    * Delete notes: `clear` over a selection of exactly these notes, one undo entry, with the
-   * user's selection restored afterwards.
+   * user's selection restored afterwards. Inside a `session.transaction()` batch it joins the
+   * batch's undo step, so deleting notes and writing their replacements with
+   * {@link Clip.addNotes} undoes as one.
    *
    * @example
    * await clip.midi.deleteNotes([clip.midi.notes.items[0]!]);
@@ -350,7 +369,7 @@ export class MidiClip extends Node {
     if (!targets.length) return;
     await this.withSelection(targets, async () => {
       await this.wire.post(`${this.host.sessionPath}/contexts/main/commands/clear`, { session_uid: this.host.sessionUid });
-      await settle(() => targets.every((t) => this.notes.byId(String(t.rowid)) === undefined), 'delete notes', this.settleOptions());
+      await this.settleEdit(() => targets.every((t) => this.notes.byId(String(t.rowid)) === undefined), 'delete notes');
     });
   }
 
@@ -367,13 +386,6 @@ export class MidiClip extends Node {
 
   /** Save the user's selection, select `targets` (absolute ticks), run `fn`, restore. */
   private async withSelection(targets: readonly Note[], fn: () => Promise<void>): Promise<void> {
-    if (this.host.batching?.()) {
-      throw new UAError(
-        'busy',
-        'setMuted()/deleteNotes() select the notes through LUNA\'s edit context, which a transaction() batch holds until its commit (the verb would then act on nothing): call them outside the batch',
-        { path: this.path },
-      );
-    }
     const base = this.host.startTick();
     if (base === undefined) throw new UAError('unavailable', 'the clip has no start tick yet', { path: this.path });
     const context = this.context;
@@ -388,6 +400,16 @@ export class MidiClip extends Node {
     } finally {
       await context.restore(saved).catch(() => {});
     }
+  }
+
+  /**
+   * Wait for an edit to show in the lists. Inside a batch transaction LUNA holds the deltas,
+   * and answers reads of the table from before the batch, until the commit (fact 74): there
+   * is nothing to wait for yet.
+   */
+  private async settleEdit(done: () => boolean, what: string): Promise<void> {
+    if (this.host.transactionMode?.() === 'batch') return;
+    await settle(done, what, this.settleOptions());
   }
 
   private settleOptions(): { path: string; disposed: () => boolean; refresh: () => Promise<unknown>; flush: () => void } {

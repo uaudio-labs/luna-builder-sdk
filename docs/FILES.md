@@ -1,7 +1,9 @@
 # Getting a user's file into an Add On
 
 There are two routes, and an Add On picks one per feature. **Do not mix them**: a path from
-LUNA's dialog cannot be read by the page, and a `File` cannot be handed to LUNA by path.
+LUNA's dialog cannot be read by the page, and a `File` cannot be handed to LUNA by path. The
+one bridge is for audio and video: `luna.gui.serveMediaFile()` turns a path into a URL the
+page can play and fetch (see "Playing a file you know by path").
 
 | | **File route** (default) | **Path route** (LUNA optimization) |
 |---|---|---|
@@ -29,6 +31,7 @@ page (fact 42). It is an optimization, not a way to read files.
 | `luna.gui.chooseFolders()` | LUNA's folder dialog | absolute folder paths, or `[]` if cancelled | `/gui` |
 | `luna.gui.listFiles(path)` | an absolute folder path | its entries `{ name, path, isDirectory }`, hidden ones left out, in natural order (`take2` before `take10`) | `/gui` |
 | `Luna.onPathDrop(handler)` | files dragged onto the page in LUNA | absolute paths with the drop's page `x`, `y` | LUNA's webview |
+| `luna.gui.serveMediaFile(addOnId, path)` | an audio or video file path | a URL your page loads it from (`<video src>`, XMLHttpRequest) | `/gui` |
 
 - Place a source with `session.insertClip({ sourceUid: source.id, ... })`.
 - A MIDI file: `importFile(path)` from a path, or parse a `File` in the page and write notes
@@ -98,6 +101,67 @@ if (Luna.canDropPaths()) {
   (page pixels): `document.elementFromPoint(x, y)?.closest('.zone')`.
 - Check the file type yourself on both routes: a picker's `accept` and `chooseFiles`'
   `filters` are hints, and a drop carries whatever the user dragged.
+
+## Playing a file you know by path
+
+A page cannot load a path, but LUNA can serve an audio or video file to your Add On's page
+and hand back a URL for it (fact 114) that `<video>`, `<audio>` and XMLHttpRequest load. That lets an Add On remember a file by path, for
+example a video kept in `session.preferences`, and load it again when the session reopens,
+with no `File` and no dialog.
+
+```js
+const ADD_ON_ID = 'com.example.my-add-on';   // your manifest's id
+const prefs = session.preferences.context(ADD_ON_ID);
+await prefs.load();
+await prefs.add('video', 'path', null);
+
+async function show(path) {
+  try {
+    video.src = await luna.gui.serveMediaFile(ADD_ON_ID, path);
+    await prefs.set('video', 'path', path);
+  } catch (e) {
+    // uasrv.filesystem_error: the file is gone or moved (a session from another computer).
+    // uasrv.invalid_value: not an audio or video file.
+    hint.textContent = `Cannot open ${path}: ${e.code}`;
+  }
+}
+
+// Pick or drop: both give paths inside LUNA.
+pickButton.onclick = async () => {
+  const [path] = await luna.gui.chooseFiles({ filters: ['*.mov;*.mp4;*.m4v;*.webm'] });
+  if (path) await show(path);
+};
+Luna.onPathDrop(({ paths }) => paths[0] && show(paths[0]));
+
+// The session reopened: load what it remembers.
+const saved = prefs.value('video', 'path').value;
+if (saved) await show(saved);
+
+// The bytes, when the page needs them (decode audio, read a header). XMLHttpRequest, not
+// fetch: on Windows the URL is file:///, which fetch() refuses.
+function readBytes(url) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = () => (xhr.response ? resolve(xhr.response) : reject(new Error(`cannot read ${url}`)));
+    xhr.onerror = () => reject(new Error(`cannot read ${url}`));
+    xhr.send();
+  });
+}
+const bytes = await readBytes(video.src);
+```
+
+- Only real media is served: LUNA follows links and checks the file they lead to, which needs
+  an audio or video extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`, `aiff`,
+  `mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`) and that format's signature in its first bytes.
+- The file is served to the Add On you name, and only to its pages. Ask again after every
+  reload: LUNA forgets the files it served when it quits, so keep the path, not the URL.
+- On macOS the URL is `ua-content://` and answers byte ranges, so a long video seeks without
+  being read whole. On Windows it is `file:///`: media elements and XMLHttpRequest load it,
+  `fetch()` does not.
+- Outside LUNA there are no paths: keep the File route (`<input type="file">`, HTML drop)
+  there, and check `luna.gui.available()` before offering paths.
 
 ## Inside LUNA today
 

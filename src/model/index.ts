@@ -36,6 +36,7 @@ export type { ClipAudio, ClipLike, PairRange, SourceLookup, TraceWaveformOptions
 export { Effect, PLUGIN_ERROR_MISSING } from './effect';
 export type { InsertSlot } from './effect';
 export { Marker, Markers } from './markers';
+export { SessionPreferences, PreferenceContext, type PreferenceEditOptions } from './preferences';
 export { Chord, Chords, parseChord, normalizeChordName } from './chords';
 export type { ChordSpec, ParsedChord } from './chords';
 export { Context, selectedNotes } from './context';
@@ -63,6 +64,6 @@ export type { SessionPackageRow, QueryOptions } from './workspace';
 export { Drivers, Device, Devices, Preferences, Render, Renders, Job, Jobs } from './system';
 export type { AudioDeviceInfo, AudioInput } from './system';
 export { Session, RECORD_LOOP_MARGIN_TICKS } from './session';
-export type { NewTrackOptions, NewBusOptions, TransactionOptions, SoloMode, UploadOptions, ImportPathOptions, BounceOptions, ExportOptions, RecordOptions } from './session';
+export type { NewTrackOptions, NewBusOptions, TransactionOptions, TransactionMode, SoloMode, UploadOptions, ImportPathOptions, BounceOptions, ExportOptions, RecordOptions } from './session';
 export { Sessions } from './sessions';
 export type { CreateSessionOptions } from './sessions';

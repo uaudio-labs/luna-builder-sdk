@@ -97,7 +97,9 @@ deleteNotes(notes): Promise<void>;
 ```
 
 Delete notes: `clear` over a selection of exactly these notes, one undo entry, with the
-user's selection restored afterwards.
+user's selection restored afterwards. Inside a `session.transaction()` batch it joins the
+batch's undo step, so deleting notes and writing their replacements with
+[Clip.addNotes](Clip.md#addnotes) undoes as one.
 
 #### Parameters
 
@@ -278,6 +280,8 @@ setMuted(notes, muted): Promise<void>;
 Mute or unmute notes. LUNA's `mute_notes` is a toggle over the selection (fact 74), so
 this selects only the notes whose state must change, posts once, and restores the user's
 selection. Nothing is posted — and no undo entry made — when nothing needs changing.
+Which notes need changing is read from [notes](#setmuted-1), which a batch transaction does not
+update until its commit: mute a note once per batch.
 
 #### Parameters
 

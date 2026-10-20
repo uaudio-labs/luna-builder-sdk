@@ -9,10 +9,11 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { Luna } from '../../src/index';
 
-const EXAMPLES = new URL('../../examples/', import.meta.url).pathname;
+const EXAMPLES = fileURLToPath(new URL('../../examples/', import.meta.url));
 
 function exampleFiles(dir = EXAMPLES): string[] {
   const out: string[] = [];
@@ -43,7 +44,7 @@ describe('examples', () => {
   // An Add On page has the keyboard focus while it is in front, so a page that connects
   // must hand the keys it does not use back to LUNA's standard shortcuts (facts 79, 81).
   // tracks.html is a raw-wire check that closes at once, not an Add On.
-  const pages = files.filter((f) => f.endsWith('.html') && /Luna\.connect\(/.test(readFileSync(f, 'utf8')) && !f.endsWith('/tracks.html'));
+  const pages = files.filter((f) => f.endsWith('.html') && /Luna\.connect\(/.test(readFileSync(f, 'utf8')) && !/[\\/]tracks\.html$/.test(f));
   it.each(pages.map((f) => [f.slice(EXAMPLES.length), f] as const))('%s binds the standard shortcuts', (_name, path) => {
     expect(readFileSync(path, 'utf8')).toMatch(/Luna\.bindShortcuts\(luna\b/);
   });

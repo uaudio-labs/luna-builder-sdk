@@ -17,15 +17,16 @@ Add On.
 ## Get set up
 
 This repo holds the SDK source; the builds (`dist/`, the agent plugin) are generated.
-With Node.js 24 or newer (Node 22 works for the SDK itself, but its npm 10 fails to
-`npm install` a scaffolded Add On — npm 11 is needed for that):
+With Node.js 22 or newer:
 
 ```sh
 npm ci        # in the SDK folder; the prepare script builds dist/ (the SDK and its CLI) and the agent plugin
 ```
 
 That makes `npx ua-builder` work from this folder and from any Add On it scaffolds.
-Distributed SDK packages arrive already built and skip this step.
+Distributed SDK packages arrive already built and skip this step: do not run `npm install`
+in one, only in the Add Ons you scaffold from it. A scaffold's `.npmrc` sets
+`legacy-peer-deps=true`, without which npm 10 (Node 22's) cannot install its test tools.
 
 ## Build an Add On
 

@@ -57,6 +57,13 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
   `__SLUG__`, `__ID__`, `__TITLE__`, `__TARGET__`, `__FLOATING__`, `__SHOW_WITH_SESSION__`, `__WIDTH__`, `__HEIGHT__`, `__SDK_VERSION__`,
   `__BUILDER_PATH__`. Run the scaffold's own tests after changing either (`npm install`, `npm
   test`; for TypeScript also `npm run typecheck` and `npm run pack`).
+- Template dotfiles are stored without the dot (`npmrc`, `gitignore`) and renamed by
+  `DOTFILES` in `cli/new.ts`: `npm pack` drops `.npmrc` and `.gitignore`, so they would never
+  reach the installed SDK. The `npmrc` (`legacy-peer-deps=true`) is what lets npm 10 install a
+  scaffold; keep it.
+- The installed SDK's `package.json` ships without `scripts` and `devDependencies`
+  (`DEV_ONLY_FIELDS` in the installer's `build-and-test.py`). A scaffold `file:`-depends on
+  it, and npm would otherwise run `prepare` there and resolve its dev dependencies.
 
 ## Updating the minimum LUNA version
 

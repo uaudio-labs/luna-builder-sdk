@@ -23,6 +23,8 @@ new MockEngine(options): MockEngine;
 | Property | Modifier | Type | Default value | Description |
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
+| <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio or video file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
+| <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
 | <a id="midisent"></a> `midiSent` | `readonly` | [`MockMidiSent`](../interfaces/MockMidiSent.md)[] | `[]` | Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. |
 | <a id="nextdialogfiles"></a> `nextDialogFiles` | `public` | `string`[] | `[]` | What the next mock file dialog "selects"; empty means the user cancelled. |
 | <a id="requests"></a> `requests` | `readonly` | `object`[] | `[]` | Every request any port made, oldest first. Useful for asserting what a model did. |
@@ -146,6 +148,43 @@ Add a hardware device with `inputs` named inputs, the shape `luna.audioInputs()`
 
 ```ts
 engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'] });
+```
+
+***
+
+### addMidiClip()
+
+```ts
+addMidiClip(
+   sessionUid, 
+   trackUid, 
+   options): string;
+```
+
+Add an empty MIDI clip to a track's current playlist, the way LUNA makes one for notes
+drawn in place. `midiSourceStart` is the table tick at the clip's start (fact 41): 0 by
+default. `insert_clip` cannot make one: it needs a source (fact 112). Returns the clip uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `sessionUid` | `string` |
+| `trackUid` | `string` |
+| `options` | \{ `midiSourceStart?`: `number`; `name?`: `string`; `startTick?`: `number`; `stopTick?`: `number`; \} |
+| `options.midiSourceStart?` | `number` |
+| `options.name?` | `string` |
+| `options.startTick?` | `number` |
+| `options.stopTick?` | `number` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+const clipUid = engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: Luna.WHOLE_NOTE });
 ```
 
 ***
@@ -519,7 +558,7 @@ LUNA does — the stored property stays the whole table, so a `get` answers the 
 while subscribers see only the delta.
 
 `added` and `changed` carry rows; `deleted` needs only their `rowid`s. Rows given
-without a `rowid` get the next free one. Ticks are table ticks.
+without a `rowid` get the next id free across the session's clips, as in LUNA. Ticks are table ticks.
 
 #### Parameters
 
@@ -581,6 +620,26 @@ A new client connection.
 #### Returns
 
 [`MockPort`](MockPort.md)
+
+***
+
+### propertyNames()
+
+```ts
+propertyNames(nodePath): string[];
+```
+
+Names of a node's properties.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `nodePath` | `string` |
+
+#### Returns
+
+`string`[]
 
 ***
 

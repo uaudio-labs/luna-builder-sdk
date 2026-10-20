@@ -102,12 +102,27 @@ createNotes(notes): Promise<{
 ```
 
 Write notes onto this lane, making the MIDI clip to hold them if there is none there
-(LUNA's `create_note`). One undo entry for the whole batch. Ticks are absolute.
+(LUNA's `create_note`). One undo entry for the whole batch. Ticks are absolute, and every
+note is on channel 0.
+
+A note goes into the clip its note-on falls in. When no clip on the lane is under the
+notes, LUNA makes one MIDI clip spanning the whole bars they cover, named after the track,
+and kept clear of the clips either side (fact 111). Notes whose note-ons fall in two
+different clips land in both, and the call then rejects with `no_effect`, since it resolves
+to a single clip: write to one clip per call.
+
+The returned `notes` are read back from the clip, so their ticks are clip-relative
+(fact 41): subtract `clip.start.value` from what you passed in to match them up.
 
 LUNA answers `null` and instead *selects* what it created, so the new row ids are read
-back out of the selection — which means this cannot run inside a `transaction()` batch,
-where LUNA holds selection writes until the commit. The user's selection is restored
-afterwards.
+back out of the selection, and the notes out of the clip. The user's selection is
+restored afterwards.
+
+Inside a continuous `session.transaction()` each call replaces the notes the previous
+call wrote, which is how an Add On previews a part it regenerates as the user adjusts
+it: one undo step, holding the last take (fact 115). A batch transaction holds the clip's
+notes back until its commit, so this refuses inside one; write into an existing clip
+there with [Clip.addNotes](Clip.md#addnotes).
 
 #### Parameters
 
@@ -122,13 +137,22 @@ afterwards.
   `notes`: [`Note`](../interfaces/Note.md)[];
 \}\>
 
-#### Example
+#### Examples
 
 ```ts
 const bar = session.musical.timeline.tickAt({ bar: 1 });
 const { clip, notes } = await lane.createNotes(
   [60, 64, 67].map((pitch, i) => ({ pitch, startTick: bar + i * Luna.TICKS_PER_BEAT, stopTick: bar + (i + 1) * Luna.TICKS_PER_BEAT })),
 );
+```
+
+```ts
+// Try three roots as one gesture: LUNA keeps only the last take, and one undo removes it.
+const bar = session.musical.timeline.tickAt({ bar: 2 });
+const take = (pitch) => [{ pitch, startTick: bar, stopTick: bar + Luna.TICKS_PER_BEAT }];
+await session.transaction('Pick a root', async () => {
+  for (const pitch of [60, 62, 64]) await lane.createNotes(take(pitch));
+}, { continuous: true });
 ```
 
 ***

@@ -12,6 +12,8 @@
 - [`AudioSource`](AudioSource.md)
 - [`Effect`](Effect.md)
 - [`Marker`](Marker.md)
+- [`SessionPreferences`](SessionPreferences.md)
+- [`PreferenceContext`](PreferenceContext.md)
 - [`Chord`](Chord.md)
 - [`Context`](Context.md)
 - [`BreakpointNode`](BreakpointNode.md)

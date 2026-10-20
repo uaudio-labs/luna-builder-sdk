@@ -1,7 +1,9 @@
 /**
  * The MIDI write layer: velocity, mute and deletion. All three go through LUNA's edit
  * context, which acts on the selection rather than on a clip (fact 74), so each one must
- * leave the user's selection exactly as it found it.
+ * leave the user's selection exactly as it found it. The mock applies a transaction's edits
+ * at once; holding pushes until the commit, and a continuous step replacing the one before,
+ * are checked by the live lane (`tests/live/editing.test.ts`).
  */
 import { describe, expect, it } from 'vitest';
 import { Luna } from '../../src/index';
@@ -20,7 +22,7 @@ async function midiClip(count = 3) {
   await session.ready();
   const track = session.tracks.byId('Keys')!;
   const playlist = session.playlistFor(track)!;
-  await session.insertClip({ trackUid: 'Keys', sourceUid: '', startTick: 0, stopTick: 8 * BEAT, clipType: 'midi' });
+  engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 8 * BEAT });
   await engine.settled();
   await playlist.clips.load();
   const clip = playlist.clips.items[0]!;
@@ -96,15 +98,17 @@ describe('MidiClip.setMuted', () => {
     await luna.close();
   });
 
-  it('refuses inside a transaction, which would hold the selection write until commit', async () => {
+  it('runs inside a batch transaction, which LUNA applies to the selection it was given (fact 74)', async () => {
     const { midi, session, engine, luna } = await midiClip();
-    await expect(
-      session.transaction('Mute', async () => {
-        await midi.setMuted([midi.notes.items[0]!], true);
-      }),
-    ).rejects.toMatchObject({ code: 'busy' });
+    await session.context.refreshSelection();
+    const saved = session.context.snapshot();
+    await session.transaction('Mute', async () => {
+      await midi.setMuted([midi.notes.items[0]!], true);
+    });
     await engine.settled();
-    expect(midi.notes.items.some((n) => n.muted)).toBe(false);
+    expect(engine.transactions).toEqual(['begin', 'commit']);
+    expect(midi.notes.items.map((n) => n.muted)).toEqual([true, false, false]);
+    expect(session.context.snapshot()).toEqual(saved);
     await luna.close();
   });
 });
@@ -124,6 +128,44 @@ describe('MidiClip.deleteNotes', () => {
     const before = engine.requests.length;
     await midi.deleteNotes([]);
     expect(engine.requests.length).toBe(before);
+    await luna.close();
+  });
+
+  it('rewrites notes with clip.addNotes as one batch transaction', async () => {
+    const { midi, clip, session, engine, luna } = await midiClip();
+    await session.transaction('Transpose', async () => {
+      const old = midi.notes.items;
+      await midi.deleteNotes(old);
+      await clip.addNotes(old.map((n) => ({ pitch: n.pitch + 12, tick: n.startTick, lengthTicks: n.stopTick! - n.startTick })));
+    });
+    await engine.settled();
+    await midi.refresh();
+    expect(engine.transactions).toEqual(['begin', 'commit']);
+    expect(engine.requests.filter((r) => r.verb === 'post' && /\/(clear|add_midi)$/.test(r.path)).map((r) => r.path.split('/').pop())).toEqual(['clear', 'add_midi']);
+    expect(midi.notes.items.map((n) => n.pitch)).toEqual([72, 73, 74]);
+    await luna.close();
+  });
+});
+
+describe('Session.transaction', () => {
+  it('reports its kind while open, and asks a continuous one for undo notifications (fact 115)', async () => {
+    const { session, engine, luna } = await midiClip();
+    const begins = () => engine.requests.filter((r) => r.verb === 'post' && r.path.endsWith('/begin_transaction')).map((r) => r.data);
+    const seen: unknown[] = [];
+    expect(session.transactionMode).toBeUndefined();
+    await session.transaction('Batch', async () => {
+      seen.push(session.transactionMode);
+    });
+    await session.transaction('Drag', async () => {
+      seen.push(session.transactionMode);
+      await session.transaction('Inner', async () => seen.push(session.transactionMode));
+    }, { continuous: true });
+    expect(seen).toEqual(['batch', 'continuous', 'continuous']);
+    expect(session.transactionMode).toBeUndefined();
+    expect(begins()).toEqual([
+      { session_uid: 'abc', name: 'Batch', is_continuous: false },
+      { session_uid: 'abc', name: 'Drag', is_continuous: true, sends_undo_notifications: true },
+    ]);
     await luna.close();
   });
 });
@@ -165,6 +207,60 @@ describe('Playlist.createNotes', () => {
     await luna.close();
   });
 
+  it('writes into the clip under the note-ons, and reads the notes back clip-relative (facts 41, 111)', async () => {
+    const { engine, luna, lane } = await instrumentLane();
+    engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 4 * BEAT });
+    const later = engine.addMidiClip('abc', 'Keys', { startTick: 8 * BEAT, stopTick: 12 * BEAT });
+    await engine.settled();
+
+    const { clip, notes } = await lane.createNotes([{ pitch: 64, startTick: 9 * BEAT, stopTick: 10 * BEAT }]);
+    expect(clip.id).toBe(later);
+    expect(notes[0]).toMatchObject({ pitch: 64, startTick: BEAT, stopTick: 2 * BEAT, channel: 0, velocity: 100 });
+    expect((clip.start.value ?? 0) + notes[0]!.startTick).toBe(9 * BEAT);
+    await luna.close();
+  });
+
+  it('makes a new clip over whole bars rather than reuse a MIDI clip elsewhere on the lane (fact 111)', async () => {
+    const { engine, luna, lane } = await instrumentLane();
+    const first = engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 4 * BEAT });
+    await engine.settled();
+
+    const { clip, notes } = await lane.createNotes([{ pitch: 60, startTick: 9 * BEAT + BEAT / 2, stopTick: 10 * BEAT }]);
+    expect(clip.id).not.toBe(first);
+    expect([clip.start.value, clip.stop.value]).toEqual([8 * BEAT, 12 * BEAT]);
+    expect(clip.name.value).toBe('Keys');
+    expect(notes[0]).toMatchObject({ startTick: 1.5 * BEAT, stopTick: 2 * BEAT });
+    expect(lane.clips.items.filter((c) => c.clipType.value === 'midi')).toHaveLength(2);
+    await luna.close();
+  });
+
+  it('keeps a new clip clear of the clips either side (fact 111)', async () => {
+    const { engine, luna, lane } = await instrumentLane();
+    engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 5 * BEAT });
+    engine.addMidiClip('abc', 'Keys', { startTick: 7 * BEAT, stopTick: 12 * BEAT });
+    await engine.settled();
+
+    const { clip, notes } = await lane.createNotes([{ pitch: 60, startTick: 5 * BEAT, stopTick: 6 * BEAT }]);
+    expect([clip.start.value, clip.stop.value]).toEqual([5 * BEAT, 7 * BEAT]);
+    expect(notes[0]).toMatchObject({ startTick: 0, stopTick: BEAT });
+    await luna.close();
+  });
+
+  it('rejects with no_effect when the notes land in two clips, since it resolves to one', async () => {
+    const { engine, luna, lane } = await instrumentLane();
+    engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: 4 * BEAT });
+    engine.addMidiClip('abc', 'Keys', { startTick: 4 * BEAT, stopTick: 8 * BEAT });
+    await engine.settled();
+
+    await expect(
+      lane.createNotes([
+        { pitch: 60, startTick: 0, stopTick: BEAT },
+        { pitch: 62, startTick: 4 * BEAT, stopTick: 5 * BEAT },
+      ]),
+    ).rejects.toMatchObject({ code: 'no_effect' });
+    await luna.close();
+  }, 10_000);
+
   it('restores the selection it had to read the new row ids out of', async () => {
     const { engine, luna, session, lane } = await instrumentLane();
     await session.context.select({ startTick: 0, stopTick: 4 * BEAT, trackUids: ['Keys'] });
@@ -175,6 +271,15 @@ describe('Playlist.createNotes', () => {
     await engine.settled();
 
     expect(session.context.snapshot()).toEqual(saved);
+    await luna.close();
+  });
+
+  it('runs inside a continuous transaction', async () => {
+    const { engine, luna, session, lane } = await instrumentLane();
+    const { notes } = await session.transaction('Pick', () => lane.createNotes([{ pitch: 62, startTick: 0, stopTick: BEAT }]), { continuous: true });
+    await engine.settled();
+    expect(notes.map((n) => n.pitch)).toEqual([62]);
+    expect(engine.transactions).toEqual(['begin', 'commit']);
     await luna.close();
   });
 

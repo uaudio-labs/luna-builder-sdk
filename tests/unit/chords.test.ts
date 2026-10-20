@@ -28,6 +28,24 @@ describe('parseChord', () => {
     expect(Luna.parseChord('B♭maj7/D')).toEqual({ root: 'Bb', type: 'maj7', bass: 'D' });
     expect(Luna.parseChord('N.C.')).toBeUndefined();
   });
+
+  it('reads a lowercase root or bass as the note, upper-cased', () => {
+    expect(Luna.parseChord('am7')).toEqual({ root: 'A', type: 'm7', bass: null });
+    expect(Luna.parseChord('bb')).toEqual({ root: 'Bb', type: '', bass: null });
+    expect(Luna.parseChord('f#m/c#')).toEqual({ root: 'F#', type: 'm', bass: 'C#' });
+    expect(Luna.parseChord('e')).toEqual({ root: 'E', type: '', bass: null });
+    expect(Luna.parseChord('cmaj7')).toEqual({ root: 'C', type: 'maj7', bass: null });
+  });
+
+  it('leaves ordinary words starting with a note letter as text', () => {
+    for (const word of ['bridge', 'chorus', 'end', 'fill', 'drop', 'break', 'add', 'fade']) expect(Luna.parseChord(word)).toBeUndefined();
+  });
+
+  it('ignores spaces around the slash', () => {
+    expect(Luna.parseChord('C / E')).toEqual({ root: 'C', type: '', bass: 'E' });
+    expect(Luna.parseChord('Am7/ G')).toEqual({ root: 'A', type: 'm7', bass: 'G' });
+    expect(Luna.parseChord('Dsus4 /A')).toEqual({ root: 'D', type: 'sus4', bass: 'A' });
+  });
 });
 
 describe('session.musical.chords', () => {

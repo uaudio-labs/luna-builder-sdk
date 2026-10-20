@@ -2,6 +2,12 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, wri
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { addOnClashes, bundlePath, flagNumber, flagString, installedAddOns, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
 
+/**
+ * Template files stored without their leading dot, because `npm pack` leaves `.npmrc` and
+ * `.gitignore` out of the package: an SDK installed from a package would scaffold without them.
+ */
+const DOTFILES: Record<string, string> = { npmrc: '.npmrc', gitignore: '.gitignore' };
+
 /** Manifest fields only a `"window"` uses; a browser, app or editor scaffold leaves them out. */
 const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'width', 'height'];
 
@@ -101,7 +107,7 @@ export async function newAddOn(args: Args): Promise<number> {
   };
   for (const file of walk(template)) {
     const rel = file.slice(template.length + 1);
-    const dest = join(dir, rel);
+    const dest = join(dir, DOTFILES[rel] ?? rel);
     mkdirSync(join(dest, '..'), { recursive: true });
     let text = readFileSync(file, 'utf8');
     for (const [k, v] of Object.entries(replacements)) text = text.replaceAll(k, v);

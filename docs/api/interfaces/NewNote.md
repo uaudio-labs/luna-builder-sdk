@@ -1,6 +1,9 @@
 # Interface: NewNote
 
-One note for [Playlist.createNotes](../classes/Playlist.md#createnotes). Ticks are absolute, as LUNA's verb takes them.
+One note for [Playlist.createNotes](../classes/Playlist.md#createnotes). Ticks are absolute (session ticks), as LUNA's
+verb takes them, unlike the clip-relative ticks of the [Note](Note.md)s it returns. There is no
+channel: LUNA's `create_note` writes every note on channel 0 (fact 111). For another
+channel, add the notes to a clip with [Clip.addNotes](../classes/Clip.md#addnotes), which takes one.
 
 ## Properties
 

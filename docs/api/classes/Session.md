@@ -24,6 +24,7 @@
 | <a id="name"></a> `name` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="playlists"></a> `playlists` | `readonly` | [`Collection`](Collection.md)\<[`Playlist`](Playlist.md)\> | All playlists (take lanes) in the session; each names its track. | - |
+| <a id="preferences"></a> `preferences` | `readonly` | [`SessionPreferences`](SessionPreferences.md) | Settings Add Ons keep with this session, by reverse-DNS context (fact 110). | - |
 | <a id="readonly"></a> `readOnly` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="sessionpackagepath"></a> `sessionPackagePath` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="sessionpackageuid"></a> `sessionPackageUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
@@ -43,8 +44,7 @@
 get batching(): boolean;
 ```
 
-True while a [transaction](#transaction) batch is open. LUNA holds selection writes and MIDI
-deltas until the commit, so the selection-based verbs refuse to run inside one.
+True while a [transaction](#transaction) is open, of either kind.
 
 ##### Returns
 
@@ -142,6 +142,22 @@ Tracks sorted by their `order` key.
 ##### Returns
 
 [`Track`](Track.md)[]
+
+***
+
+### transactionMode
+
+#### Get Signature
+
+```ts
+get transactionMode(): TransactionMode | undefined;
+```
+
+The kind of [transaction](#transaction) open now, or `undefined` outside one.
+
+##### Returns
+
+[`TransactionMode`](../type-aliases/TransactionMode.md) \| `undefined`
 
 ***
 
@@ -421,6 +437,10 @@ insertClip(options): Promise<unknown>;
 
 Insert a clip from a source file onto a track's active playlist. Timeline position is in
 ticks; source offsets are nanoseconds (fact 16).
+
+`sourceUid` is required for every clip type, MIDI included: LUNA answers
+`uasrv.invalid_property` without one (fact 112). To start a MIDI clip of your own, write
+its notes with [Playlist.createNotes](Playlist.md#createnotes), which makes the clip.
 
 #### Parameters
 
@@ -806,8 +826,12 @@ options): Promise<T>;
 ```
 
 Run `fn` as one undoable step. Aborts (discarding pending changes) if `fn` throws.
-Called while a batch is already open, `fn` runs inside that batch: wrappers that batch
+Called while a transaction is already open, `fn` runs inside that one: wrappers that batch
 their own steps (`Output.retarget`) then join the caller's undo entry instead of nesting.
+
+A batch (the default) holds LUNA's pushes until the commit, so the model shows the edits
+only once this resolves. With `continuous`, every command replaces the one before it
+(see [TransactionOptions.continuous](../interfaces/TransactionOptions.md#continuous)).
 
 #### Type Parameters
 
@@ -827,12 +851,22 @@ their own steps (`Output.retarget`) then join the caller's undo entry instead of
 
 `Promise`\<`T`\>
 
-#### Example
+#### Examples
 
 ```ts
 await session.transaction('Rename all', async () => {
   for (const t of session.tracks.items) await t.name.set(`${t.name.value} (mix)`);
 });
+```
+
+```ts
+// Rewrite a clip's notes as one undo step: delete the old ones, write the new ones.
+await session.transaction('Humanize', async () => {
+  const old = clip.midi.notes.items;
+  await clip.midi.deleteNotes(old);
+  await clip.addNotes(old.map((n) => ({ pitch: n.pitch, tick: Math.max(0, n.startTick + Math.round((Math.random() - 0.5) * 40)), lengthTicks: n.stopTick! - n.startTick, velocity: n.velocity })));
+});
+await clip.midi.refresh();
 ```
 
 ***

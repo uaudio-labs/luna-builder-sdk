@@ -360,9 +360,50 @@ export class Musical {
     return this.post('set_time_signature', { numerator, denominator, bar });
   }
 
-  /** `sharpsAndFlats`: 1..7 sharps, -1..-7 flats, 0 for C / A minor. */
-  setKeySignature(sharpsAndFlats: number, isMinor: boolean, tick = 0): Promise<unknown> {
-    return this.post('set_key_signature', { tick, sharps_and_flats: sharpsAndFlats, is_minor: isMinor });
+  /**
+   * Set the key from `tick` (default: the session start) and resolve to its row once it is in
+   * {@link keySignatures}. LUNA keeps one key signature per tick, so one already at `tick` is
+   * rewritten in place (the same row), not joined by a second (fact 113). One undo entry. `sharpsAndFlats` is 1..7 sharps, -1..-7
+   * flats, 0 for C major or A minor. Rejects with `out_of_range` before anything is sent for a
+   * value outside those, a non-boolean `isMinor` or a non-integer tick.
+   *
+   * @example
+   * await session.musical.ready();
+   * await session.musical.setKeySignature(-3, true);   // C minor from the start
+   * session.musical.keySignatureAt(session.transport.tick)?.sharpsAndFlats.value;   // -3
+   */
+  async setKeySignature(sharpsAndFlats: number, isMinor: boolean, tick = 0): Promise<KeySignature> {
+    requireTick(tick, 'key signature tick');
+    if (!Number.isInteger(sharpsAndFlats) || sharpsAndFlats < -7 || sharpsAndFlats > 7) {
+      throw new UAError('out_of_range', 'setKeySignature(): sharpsAndFlats must be an integer from -7 (flats) to 7 (sharps)');
+    }
+    if (typeof isMinor !== 'boolean') throw new UAError('out_of_range', 'setKeySignature(): isMinor must be a boolean');
+    await this.post('set_key_signature', { tick, sharps_and_flats: sharpsAndFlats, is_minor: isMinor });
+    const isIt = (k: KeySignature): boolean => k.tick.value === tick && k.sharpsAndFlats.value === sharpsAndFlats && k.isMinor.value === isMinor;
+    await settle(() => this.keySignatures.items.some(isIt), 'set key signature', {
+      path: this.keySignatures.path,
+      refresh: () => this.keySignatures.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+    return this.keySignatures.items.find(isIt)!;
+  }
+
+  /**
+   * The key signature in effect at `tick`: the last one at or before it. `undefined` when
+   * none is, or the list is not loaded (`await musical.ready()` first).
+   *
+   * @example
+   * const key = session.musical.keySignatureAt(session.transport.tick);
+   * key && `${key.sharpsAndFlats.value} ${key.isMinor.value ? 'minor' : 'major'}`;
+   */
+  keySignatureAt(tick: number): KeySignature | undefined {
+    let found: KeySignature | undefined;
+    for (const k of this.keySignatures.items) {
+      const at = k.tick.value;
+      if (at === undefined || at > tick) continue;
+      if (found === undefined || at > found.tick.value!) found = k;
+    }
+    return found;
   }
 
   /** Move bar one to `tick`. */

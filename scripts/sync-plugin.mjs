@@ -18,7 +18,7 @@
  */
 import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 export const PLUGIN = 'plugins/ua-luna-builder';
@@ -127,4 +127,6 @@ async function main() {
   console.log(`Generated ${PLUGIN}: shell, ${BUILDS.length} builds, skills, template, examples, ${DOCS.length} docs.`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+// Run as a script, not when check-plugin imports it. Compared as URLs: on Windows
+// `file://${argv[1]}` is file://C:\..., which never equals import.meta.url's file:///C:/...
+if (process.argv[1] && import.meta.url.toLowerCase() === pathToFileURL(process.argv[1]).href.toLowerCase()) await main();
