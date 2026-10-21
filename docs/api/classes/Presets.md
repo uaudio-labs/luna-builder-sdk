@@ -91,7 +91,7 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 find(pluginId, name): Promise<PresetRow | undefined>;
 ```
 
-The plugin's preset named exactly `name` (case-insensitive), or `undefined`. When the
+The plugin's preset name exactly `name` (case-insensitive), or `undefined`. When the
 library holds a user preset and a factory preset of the same name, the user one wins,
 matching what LUNA's preset browser opens.
 
@@ -214,7 +214,8 @@ await track.property<string>('comments').set('take 3')
 query(options): Promise<PresetRow[]>;
 ```
 
-Query the preset database (fact 98). Columnar on the wire; rows here.
+Query the preset database (fact 98). Columnar on the wire; rows here. Search and tags
+combine: a row must match both (fact 120).
 
 #### Parameters
 
@@ -231,6 +232,42 @@ Query the preset database (fact 98). Columnar on the wire; rows here.
 ```ts
 const rows = await luna.presets.query({ pluginId: 'uaudio_qi', search: 'EQ' });
 rows[0]?.uid; rows[0]?.name; rows[0]?.factory;
+const clean = await luna.presets.query({ pluginId, tags: ['Clean', 'Jazz'], withTags: true });
+clean[0]?.tags; // ['Clean', 'Jazz', ...]
+```
+
+***
+
+### recommend()
+
+```ts
+recommend(pluginId, text): Promise<PresetRecommendation[]>;
+```
+
+Presets UA Assistant recommends for free text, best first, five at most (fact 121). Needs
+UA Assistant connected to LUNA ([Assistant.enabled](Assistant.md#enabled)), and an instance of the plugin
+created since it connected, which is when LUNA builds the plugin's search index. Otherwise
+this rejects with the engine's code: `ua.unknown` (no assistant),
+`assistant.preset_search_not_initialized_error` (no index yet), or
+`assistant.input_classifier_rejected` (text the assistant will not search on). Empty text
+resolves to `[]` without asking.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `pluginId` | `string` |
+| `text` | `string` |
+
+#### Returns
+
+`Promise`\<[`PresetRecommendation`](../interfaces/PresetRecommendation.md)[]\>
+
+#### Example
+
+```ts
+const recs = await luna.presets.recommend('uaudio_paradise_guitar_studio', 'warm jazz clean');
+await slot.loadPreset(recs[0].uid);
 ```
 
 ***
@@ -256,6 +293,75 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 #### Inherited from
 
 [`Node`](Node.md).[`reload`](Node.md#reload)
+
+***
+
+### selection()
+
+```ts
+selection(pluginId, options): PresetSelection;
+```
+
+A live preset selection over one plugin: set `search` and `tags`, read `presets` and
+`recommendations`. Requests are debounced and a reply that a newer one overtook is
+dropped, so the lists always match the inputs. Recommendations come from the search text,
+keep only presets carrying the selected tags (so with tags selected there can be fewer
+than the assistant's five), and stay empty while UA Assistant is not connected. A refused
+request leaves them empty and its code in `recommendationError`. Call `dispose()` when done.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `pluginId` | `string` |
+| `options` | [`PresetSelectionOptions`](../interfaces/PresetSelectionOptions.md) |
+
+#### Returns
+
+[`PresetSelection`](PresetSelection.md)
+
+#### Example
+
+```ts
+const sel = luna.presets.selection('uaudio_paradise_guitar_studio');
+await sel.ready();
+sel.groups.value;                       // tag groups for the chips
+await sel.search.set('warm');
+await sel.toggleTag('Clean');
+await sel.settled();
+sel.presets.items.map((p) => p.name);   // names containing "warm", tagged Clean
+sel.recommendations.items[0]?.name;     // the assistant's best match, tagged Clean
+await slot.loadPreset(sel.presets.items[0].uid);
+sel.dispose();
+```
+
+***
+
+### tagGroups()
+
+```ts
+tagGroups(pluginId): Promise<PresetTagGroup[]>;
+```
+
+The plugin's tag groups, in LUNA's order (fact 120). Empty for a plugin whose presets
+are not tagged.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `pluginId` | `string` |
+
+#### Returns
+
+`Promise`\<[`PresetTagGroup`](../interfaces/PresetTagGroup.md)[]\>
+
+#### Example
+
+```ts
+const groups = await luna.presets.tagGroups('uaudio_paradise_guitar_studio');
+groups.map((g) => g.name); // ['TYPE', 'GENRE', 'DESCRIPTION']
+```
 
 ***
 

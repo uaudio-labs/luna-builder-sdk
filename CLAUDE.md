@@ -65,6 +65,59 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
   (`DEV_ONLY_FIELDS` in the installer's `build-and-test.py`). A scaffold `file:`-depends on
   it, and npm would otherwise run `prepare` there and resolve its dev dependencies.
 
+## Clips, fades and renderings: how to work on them
+
+`docs/CLIPS.md` is the consumer guide (what an Add On must do); this is how to change the SDK
+side. Facts 72-73 and 116-119 hold the measured behaviour.
+
+- **Where LUNA keeps it** (in the `hbsystem` repo): the compiled-clip node is
+  `deviced/services/session/Sesn_CompiledClip.cpp` (published only once a client sets
+  `enable_compiled_clips`), with property names in
+  `networking/source/modules/uaserver/UASrv_Properties.h` and its unit test
+  `CompiledClipsPublishFadesAndFullRange` in `deviced/services/test/TEST_Playlists.cpp`.
+  Edit commands are `deviced/services/editing/Edit_*.cpp`; how LUNA's own GUI uses them is
+  `clients/source/deckclient/DkClnt_Editor.cpp` and `houston/rack/source/pages/timeline/`
+  (`Rack_MoveClip`, `Rack_CrossFade`); compiling and fade placement are
+  `shared/source/deck/UAClipCompiler.cpp`; renderings are
+  `deviced/services/playback/Plybk_ClipCompiler.cpp`.
+- **A new compiled-clip property** is one change across both repos: LUNA (node, property
+  name, the deviced test), then the SDK (`CompiledClip` prop and snapshot, `CompiledClipLike`
+  if placement reads it, the mock's `compilePlaylist`/`segmentFades`, fact 116, CHANGELOG).
+  Older LUNA builds will not have it: give the SDK a defined answer for `undefined`.
+- **Read LUNA's code before modelling a command, then probe it live, then write the mock**
+  from what LUNA did. Mirror what LUNA's GUI sends (e.g. a drag moves the clicked compiled
+  piece, not the clip). Every behaviour the code depends on gets a fact.
+- **Things measured that surprised**: renderings are per compiled piece, and made for
+  sample-rate conversion too (a 44.1 kHz engine renders every 48 kHz file); after an edit a
+  rendered piece's rendering is null for 30-60 ms (`needs_render` stays true); crossfade
+  offsets are relative to the edit LUNA hears; `set_fade`'s shape applies only on creation;
+  `delete_fades` looks only at segments overlapping its range; `heal_separation`'s stop is
+  inclusive; `batch_fades` ignores `playlist_uid`; a raw `set` is not echoed to its writer
+  and a multi-property `set` is refused; `w-resize`/`e-resize` are not drawn in LUNA's web view.
+- **Probing a running LUNA**: check which build is on port 4718 (`ps`; it may be another
+  tree's, without your LUNA change; a LUNA change needs the user to restart LUNA, never kill
+  theirs). Ask before editing the user's session; use a scratch session (guard the script on
+  its name) or a temporary track past the end of the session. Record track and source ids
+  first; clean up in `finally`; wait for `session.sources` to stop growing (renderings arrive
+  seconds later) before deleting only the ids that are new. Never delete what you cannot
+  prove the probe made. Report what was left (undo entries always are).
+- **Page tests** (`tests/unit/example-pages.test.ts`, harness `tests/helpers/page.ts`) run
+  the example in jsdom on the mock. `page.draws.ops` records every canvas call with its args,
+  `fillStyle` and `strokeStyle`, so a test can check direction, colour and paint order (e.g.
+  everything after the last `clearRect` is the latest frame). Drive the canvas with
+  `MouseEvent('pointerdown'|'pointermove'|'pointerup', { clientX, clientY })`; the canvas is
+  unscaled in jsdom. Wait on the page's state (`canvas.dataset.edit`, a button enabled again,
+  a table row's text), never a fixed delay: delays pass alone and fail in a full run. Turn
+  snapping off for sub-grid drags. Make each new test fail once on the previous page
+  (`git show HEAD:./examples/<page> > examples/<page>`, run it, put the fix back).
+- **Recording what a page paints against a running LUNA**: load the page in jsdom with the
+  real SDK (`dist/`, so `npm run build` first), and append the hook to the page's own script
+  before evaluating it; separate `window.eval` calls do not share the script's top-level
+  `let` bindings. Wrap `paint` to log the scene per frame (view start, each segment's bounds
+  and audio). Build the hook with plain string concatenation, not a template literal inside a
+  template literal. That is how the flicker causes (a dropped preview, a sliding view, a
+  rendering gap) were found; guess less, measure first.
+
 ## Updating the minimum LUNA version
 
 For a request like "update the luna builder sdk min luna version to 3.2". The value is the

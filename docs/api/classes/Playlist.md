@@ -10,6 +10,7 @@
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="clips"></a> `clips` | `readonly` | [`Collection`](Collection.md)\<[`Clip`](Clip.md)\> | - | - |
+| <a id="compiledclips"></a> `compiledClips` | `readonly` | [`CompiledClips`](CompiledClips.md) | What the playlist actually plays: the clips with overlaps resolved by layer, and their fades (fact 116). Draw from these rather than from `clips`. | - |
 | <a id="frozen"></a> `frozen` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
@@ -60,6 +61,38 @@ Last path segment: the uid or name the engine addresses this node by.
 [`Node`](Node.md).[`id`](Node.md#id)
 
 ## Methods
+
+### addFades()
+
+```ts
+addFades(options): Promise<void>;
+```
+
+Fade in and out every clip on the lane between two ticks, `lengthNs` long, the way
+LUNA's Batch Fades does: butted clips get a crossfade. LUNA picks the lane through its
+track, so this works only on the track's active playlist (fact 117). One undo step.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `lengthNs`: `number`; `shape?`: [`FadeShape`](../type-aliases/FadeShape.md); `startTick`: `number`; `stopTick`: `number`; \} |
+| `options.lengthNs` | `number` |
+| `options.shape?` | [`FadeShape`](../type-aliases/FadeShape.md) |
+| `options.startTick` | `number` |
+| `options.stopTick` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await lane.addFades({ startTick: 0, stopTick: session.transport.maxTick.value!, lengthNs: 10_000_000 });
+```
+
+***
 
 ### command()
 
@@ -153,6 +186,65 @@ const take = (pitch) => [{ pitch, startTick: bar, stopTick: bar + Luna.TICKS_PER
 await session.transaction('Pick a root', async () => {
   for (const pitch of [60, 62, 64]) await lane.createNotes(take(pitch));
 }, { continuous: true });
+```
+
+***
+
+### deleteFades()
+
+```ts
+deleteFades(startTick, stopTick): Promise<void>;
+```
+
+Remove every fade, crossfades included, that lies wholly between two ticks on this lane
+(LUNA's `delete_fades`). One undo step.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `startTick` | `number` |
+| `stopTick` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await lane.deleteFades(0, session.transport.maxTick.value!);
+```
+
+***
+
+### heal()
+
+```ts
+heal(startTick, stopTick): Promise<void>;
+```
+
+Join clips that were split apart and still play on from each other in their source
+(LUNA's `heal_separation`). It acts on clips starting after `startTick` up to and
+**including** `stopTick`, and on the clip running into `startTick`, so a clip that begins
+exactly at `stopTick` and continues the same audio is joined too (fact 117). One undo
+step; the user's selection is put back afterwards.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `startTick` | `number` |
+| `stopTick` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await lane.heal(clip.start.value!, clip.stop.value! - 1);
 ```
 
 ***
@@ -271,6 +363,32 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 #### Inherited from
 
 [`Node`](Node.md).[`reload`](Node.md#reload)
+
+***
+
+### split()
+
+```ts
+split(at): Promise<void>;
+```
+
+Cut every clip on this lane at each tick (LUNA's `separate_clips`). One undo step.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `at` | `number` \| readonly `number`[] |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await lane.split([bar(5), bar(9)]);
+```
 
 ***
 

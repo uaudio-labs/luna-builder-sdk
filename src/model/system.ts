@@ -4,6 +4,7 @@
  */
 import type { Client } from '../client/client';
 import { UAError } from '../wire/errors';
+import type { Unsubscribe } from '../wire/port';
 import { derived, type Prop } from '../store/prop';
 import { Collection } from './collection';
 import { Node } from './node';
@@ -73,6 +74,164 @@ export class Devices extends Collection<Device> {
   /** @internal */
   constructor(client: Client) {
     super(client, '/devices', (p) => new Device(client, p), { levels: 2, commands: false, flatvalue: true });
+  }
+}
+
+/** The uid of LUNA's own device under `/devices`, which holds its MIDI devices (fact 123). */
+export const LUNA_DEVICE_UID = 'd37e009d693549a0b6ab1da3fad05443';
+
+/** Names of the two entries LUNA lists beside the real MIDI devices (fact 123). */
+const PSEUDO_MIDI_DEVICES = new Set(['All', 'None']);
+
+/**
+ * `/devices/<LUNA>/midi/<uid>/input_ports/<n>` or `output_ports/<n>`: one of a MIDI device's
+ * ports. `uid` is the engine node MIDI from the device (an input port) or to it (an output
+ * port) passes through (fact 123).
+ *
+ * @example
+ * await luna.midiDevices.load();
+ * const volt = luna.midiDevices.items.find((d) => d.name.value === 'Volt 876');
+ * console.log(volt?.outputPort?.uid.value);
+ */
+export class MidiPort extends Node {
+  readonly uid: Prop<string>;
+
+  /** @internal */
+  constructor(client: Client, path: string) {
+    super(client, path);
+    this.uid = this.prop<string>('uid');
+  }
+
+  /** True for a port that sends to the device, false for one that receives from it. */
+  get isOutput(): boolean {
+    return this.path.includes('/output_ports/');
+  }
+}
+
+/**
+ * `/devices/<LUNA>/midi/<uid>`: a MIDI device LUNA sees, as its MIDI settings list it. Besides
+ * the real devices, LUNA lists `All` and `None`, whose settings read `null`; `isPhysical` is
+ * false for those two (fact 123).
+ *
+ * @example
+ * await luna.midiDevices.load();
+ * for (const d of luna.midiDevices.items.filter((d) => d.isPhysical)) {
+ *   console.log(d.name.value, d.midiDeviceType.value);
+ * }
+ */
+export class MidiDevice extends Node {
+  readonly name: Prop<string>;
+  /** `normal` for a plain MIDI device; `null` for `All` and `None`. */
+  readonly midiDeviceType: Prop<string | null>;
+  readonly midiDeviceMode: Prop<string | null>;
+  /** Milliseconds LUNA shifts MIDI sent to this device. */
+  readonly outputLateness: Prop<number | null>;
+  readonly midiClockGenerationEnabled: Prop<boolean | null>;
+  /** For example `song1`. */
+  readonly midiClockGenerationMode: Prop<string | null>;
+  readonly midiClockGenerationOffsetMs: Prop<number | null>;
+  /** `[status, data1, data2]` of the last note LUNA received from it; `[255, 255, 255]` before any. */
+  readonly lastMidiNote: Prop<number[]>;
+  /** `[status, data1, data2]` of the last controller LUNA received from it; `[255, 255, 255]` before any. */
+  readonly lastMidiControl: Prop<number[]>;
+  /**
+   * Ports that receive MIDI from the device. `All` and `None` have one too. Empty on a LUNA
+   * that does not publish ports (fact 123).
+   */
+  readonly inputPorts: Collection<MidiPort>;
+  /** Ports that send MIDI to the device; empty for a device with no MIDI out (fact 123). */
+  readonly outputPorts: Collection<MidiPort>;
+
+  /** @internal */
+  constructor(client: Client, path: string) {
+    super(client, path);
+    this.name = this.prop<string>('name');
+    this.midiDeviceType = this.prop<string | null>('midi_device_type');
+    this.midiDeviceMode = this.prop<string | null>('midi_device_mode');
+    this.outputLateness = this.prop<number | null>('output_lateness');
+    this.midiClockGenerationEnabled = this.prop<boolean | null>('midi_clock_generation_enabled');
+    this.midiClockGenerationMode = this.prop<string | null>('midi_clock_generation_mode');
+    this.midiClockGenerationOffsetMs = this.prop<number | null>('midi_clock_generation_offset_ms');
+    this.lastMidiNote = this.prop<number[]>('last_midi_note');
+    this.lastMidiControl = this.prop<number[]>('last_midi_control');
+    const portOptions = { levels: 2, commands: false, flatvalue: true } as const;
+    this.inputPorts = new Collection<MidiPort>(client, `${path}/input_ports`, (p) => new MidiPort(client, p), portOptions);
+    this.outputPorts = new Collection<MidiPort>(client, `${path}/output_ports`, (p) => new MidiPort(client, p), portOptions);
+  }
+
+  /** The device's first input port. LUNA gives a device at most one. */
+  get inputPort(): MidiPort | undefined {
+    return this.inputPorts.items[0];
+  }
+
+  /** The device's first output port, or `undefined` when it has no MIDI out. */
+  get outputPort(): MidiPort | undefined {
+    return this.outputPorts.items[0];
+  }
+
+  protected override release(): void {
+    this.inputPorts.dispose();
+    this.outputPorts.dispose();
+  }
+
+  /** False for LUNA's `All` and `None` entries, true for a device that exists. */
+  get isPhysical(): boolean {
+    const name = this.name.value;
+    return name !== undefined && !PSEUDO_MIDI_DEVICES.has(name);
+  }
+}
+
+/**
+ * `/devices/<LUNA>/midi`: the MIDI devices LUNA sees. The folder is outside any session, so
+ * `watch()` it to follow devices plugged in or removed (fact 34).
+ *
+ * @example
+ * const w = luna.midiDevices.watch();
+ * await w.ready;
+ * luna.midiDevices.onChange(() => draw(luna.midiDevices.items.filter((d) => d.isPhysical)));
+ */
+export class MidiDevices extends Collection<MidiDevice> {
+  /** @internal */
+  constructor(client: Client) {
+    // levels 4 reaches each device's `input_ports/<n>` and `output_ports/<n>` and their uids.
+    super(client, `/devices/${LUNA_DEVICE_UID}/midi`, (p) => new MidiDevice(client, p), { levels: 4, commands: false, flatvalue: true });
+  }
+
+  /**
+   * Called when a device is added or removed, and also when a device's name or ports arrive
+   * or change. A device that comes online is announced before its name and ports (fact 123),
+   * so a listener that needs `inputPort` or `outputPort` would otherwise miss it.
+   *
+   * @example
+   * luna.midiDevices.onChange(() => {
+   *   const inputs = luna.midiDevices.items.filter((d) => d.isPhysical && d.inputPort);
+   *   draw(inputs);
+   * });
+   */
+  override onChange(listener: () => void): Unsubscribe {
+    const perDevice = new Map<MidiDevice, Unsubscribe[]>();
+    const follow = (): void => {
+      const current = new Set(this.items);
+      for (const [device, offs] of perDevice) {
+        if (current.has(device)) continue;
+        for (const off of offs) off();
+        perDevice.delete(device);
+      }
+      for (const device of current) {
+        if (perDevice.has(device)) continue;
+        perDevice.set(device, [device.name.onChange(listener), device.inputPorts.onChange(listener), device.outputPorts.onChange(listener)]);
+      }
+    };
+    const offMembers = super.onChange(() => {
+      follow();
+      listener();
+    });
+    follow();
+    return () => {
+      offMembers();
+      for (const offs of perDevice.values()) for (const off of offs) off();
+      perDevice.clear();
+    };
   }
 }
 

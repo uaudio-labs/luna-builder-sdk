@@ -22,10 +22,13 @@ edits and imports made in LUNA (or by another client) without a refresh. Musical
 are quarter-note beats; source offsets are seconds.</p>
 <button id="refresh">Connect / refresh</button><p id="status" role="status">Connecting…</p>
 <h2>Timeline</h2>
-<p>Each lane draws its clips' overview pairs placed through the tempo map — fine pairs when
-zoomed in, coarse when zoomed out (fact 72). A time-stretched clip draws LUNA's render in
-amber; a clip whose render is not announced yet draws an outline only. Nothing here is PCM,
-and missing analysis draws nothing rather than silence.</p>
+<p>Each lane draws what it plays: its compiled clips, where an overlap is already resolved
+so a clip on a higher layer hides the one beneath (fact 116). Each segment's overview pairs
+are placed through the tempo map — fine pairs when zoomed in, coarse when zoomed out
+(fact 72), in the track's colour. A time-stretched clip draws LUNA's render; a clip whose render is not
+announced yet draws an outline only. Fades draw as ramps over the segment, crossfades in
+violet; the ramp is straight whatever the fade's shape. Nothing here is PCM, and missing
+analysis draws nothing rather than silence.</p>
 <div class="toolbar">
   <select id="zoom" aria-label="Zoom"><option value="session">Whole session</option><option value="32">8 bars</option><option value="8">2 bars</option><option value="4">1 bar</option></select>
   <input id="scroll" type="range" min="0" max="1000" value="0" aria-label="Scroll">
@@ -48,6 +51,10 @@ const B = Luna.TICKS_PER_BEAT;
 const W = 1000, TH = 260, PAGE = 512;
 const beats = (ticks) => ticks === undefined ? 'unknown' : Luna.ticksToBeats(ticks).toFixed(3);
 const secs = (ns) => ns === undefined ? 'unknown' : (ns / 1e9).toFixed(3);
+// LUNA's colours are 0xAARRGGBB; waveforms take their track's colour, as in LUNA.
+const cssColor = (argb, alpha = 1) => typeof argb === 'number'
+  ? `rgba(${(argb >>> 16) & 0xff}, ${(argb >>> 8) & 0xff}, ${argb & 0xff}, ${alpha})`
+  : `rgba(100, 215, 178, ${alpha})`;
 
 let luna, session, index = 0, returned = 0, generation = 0, waveGeneration = 0, timelineTicket = 0, closed = false, events = 0;
 const offs = [];
@@ -103,10 +110,16 @@ function contentEnd() {
   return Math.max(session.transport.maxTick.value ?? 0, ...stops, 8 * B);
 }
 
+// The view's first tick, and how far it scrolls. The start is a tick, not a fraction of the
+// content, so an edit in LUNA that lengthens the session does not slide the view; the extent
+// only grows, until the zoom changes.
+let viewStart = 0, extent = 0;
 function view() {
-  const zoom = $('zoom').value, end = contentEnd() + 4 * B;
-  const span = zoom === 'session' ? end : Number(zoom) * B;
-  const start = Math.max(0, Math.min(end - span, (Number($('scroll').value) / 1000) * Math.max(0, end - span)));
+  extent = Math.max(extent, contentEnd() + 4 * B);
+  const span = $('zoom').value === 'session' ? extent : Number($('zoom').value) * B;
+  const room = Math.max(0, extent - span);
+  const start = Math.min(Math.max(0, viewStart), room);
+  $('scroll').value = String(room ? Math.round((start / room) * 1000) : 0);
   return { start, end: start + span, span };
 }
 
@@ -123,20 +136,30 @@ async function drawTimeline() {
   for (const { track, lane } of session.visibleTracks.map((track) => ({ track, lane: session.playlistFor(track) }))) {
     if (!lane) continue;
     const clips = [];
-    for (const clip of lane.clips.items) {
-      const s0 = clip.start.value, s1 = clip.stop.value;
-      if (s0 === undefined || s1 === undefined || s1 <= start || s0 >= end) continue;
-      const audio = session.sources && Luna.clipAudio(clip, session.sources);
-      if (!audio) { clips.push({ clip, s0, s1, state: clip.renderState.value === 'current' ? 'pending' : 'missing' }); continue; }
-      // Ask only for the audio under the visible part of the clip, with a pair of margin:
+    // Draw the compiled segments, not the raw clips: those can overlap (fact 116).
+    for (const seg of lane.compiledClips.inOrder()) {
+      const s0 = seg.start.value, s1 = seg.stop.value, clip = lane.clips.byId(seg.clipUid.value ?? '');
+      if (!clip || s0 === undefined || s1 === undefined || s1 <= start || s0 >= end) continue;
+      const fades = { fadeIn: seg.fadeIn.value, fadeOut: seg.fadeOut.value, reportsFades: seg.reportsFades.value };
+      if (clip.clipType.value === 'midi') { clips.push({ seg, clip, s0, s1, ...fades, state: 'notes' }); continue; }
+      const audio = session.sources && Luna.compiledClipAudio(t, seg, clip, session.sources);
+      if (!audio) {
+        // While LUNA makes a segment's new rendering, keep the waveform last drawn for the same
+        // clip over the same span rather than flashing an outline (fact 116).
+        const before = scene?.lanes.flatMap((l) => l.clips).find((p) => p.clip.id === clip.id && p.s0 === s0 && p.s1 === s1 && p.state === 'drawn');
+        if (before) { clips.push({ ...before, seg, ...fades, held: true }); continue; }
+        clips.push({ seg, clip, s0, s1, ...fades, state: seg.needsRender.value || clip.renderState.value === 'current' ? 'pending' : 'missing' });
+        continue;
+      }
+      // Ask only for the audio under the visible part of the segment, with a pair of margin:
       // a whole two-minute clip at `fine` would be forty pages.
-      const from = Math.max(audio.startNs, Luna.audioNsAtTick(t, clip, audio, Math.max(s0, start)) - Luna.OVERVIEW_PAIR_NS);
-      const to = Math.min(audio.stopNs, Luna.audioNsAtTick(t, clip, audio, Math.min(s1, end)) + Luna.OVERVIEW_PAIR_NS);
+      const from = Math.max(audio.startNs, Luna.audioNsAtTick(t, seg, audio, Math.max(s0, start)) - Luna.OVERVIEW_PAIR_NS);
+      const to = Math.min(audio.stopNs, Luna.audioNsAtTick(t, seg, audio, Math.min(s1, end)) + Luna.OVERVIEW_PAIR_NS);
       const range = await cache.range(audio.source, from, Math.max(from, to), kind);
       if (ticket !== timelineTicket || closed) return;
-      clips.push({ clip, s0, s1, audio, range, state: range.count ? 'drawn' : 'missing' });
+      clips.push({ seg, clip, s0, s1, ...fades, audio, range, state: range.count ? 'drawn' : 'missing' });
     }
-    lanes.push({ label: `${track.name.value} / ${lane.name.value}`, clips });
+    lanes.push({ label: `${track.name.value} / ${lane.name.value}`, color: track.color.value, clips });
   }
   if (ticket !== timelineTicket || closed) return;
   scene = { t, start, end, span, nsPerPixel, kind, lanes };
@@ -160,23 +183,30 @@ function paintTimeline() {
     if (label) { ctx.fillStyle = '#e4eaf1'; ctx.fillText(String(bar), x(bt) + 3, 2); }
   }
   const laneH = Math.max(24, (TH - 24) / Math.max(1, lanes.length));
-  let drawn = 0, pending = 0, missing = 0;
-  for (const [row, { label, clips }] of lanes.entries()) {
+  let drawn = 0, pending = 0, missing = 0, fades = 0, noFadeData = false;
+  for (const [row, { label, color, clips }] of lanes.entries()) {
     const top = 24 + row * laneH;
     ctx.fillStyle = '#acb9c8';
     ctx.fillText(label, 4, top + 2);
-    for (const { clip, s0, s1, audio, range, state } of clips) {
+    for (const { seg, clip, s0, s1, fadeIn, fadeOut, reportsFades, audio, range, state } of clips) {
       const x0 = Math.max(0, x(s0)), x1 = Math.min(W, x(s1));
       ctx.strokeStyle = '#3b4d5e';
       ctx.strokeRect(x0 + 0.5, top + 14.5, Math.max(1, x1 - x0 - 1), laneH - 16);
+      if (!reportsFades) noFadeData = true;
+      if (state === 'notes') {
+        paintNotes(ctx, clip, s0, s1, x, top + 30, laneH - 34, color);
+        ctx.fillStyle = '#e4eaf1'; ctx.fillText(clip.name.value ?? clip.id, x0 + 4, top + 16);
+        drawn++;
+        continue;
+      }
       if (state === 'pending') { pending++; continue; }
       if (state === 'missing') { missing++; continue; }
       // One min/max per pixel per channel at LUNA's waveform zoom and the clip's gain, one filled shape per lane.
       const px0 = Math.floor(x0);
       const cols = Luna.waveformColumns(range, Math.max(0, Math.ceil(x1) - px0), (i) =>
-        Luna.audioNsAtTick(t, clip, audio, start + (px0 + i) / W * span), { gain: session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20) });
+        Luna.audioNsAtTick(t, seg, audio, start + (px0 + i) / W * span), { gain: session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20) });
       const waveLanes = Luna.waveformLanes(cols.channels.length, top + 15, laneH - 18, 0);
-      ctx.fillStyle = audio.stretched ? '#f0c674' : '#64d7b2';
+      ctx.fillStyle = cssColor(color);
       ctx.beginPath();
       cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, waveLanes[c], px0));
       ctx.fill();
@@ -185,6 +215,12 @@ function paintTimeline() {
       drawn++;
     }
   }
+  // Fades go over every segment, after all of them: a crossfade reaches across the edit into
+  // the neighbour, which would otherwise paint over that half.
+  for (const [row, { clips }] of lanes.entries()) {
+    const top = 24 + row * laneH;
+    for (const { fadeIn, fadeOut } of clips) fades += drawFade(ctx, x, fadeIn, true, top + 15, laneH - 18) + drawFade(ctx, x, fadeOut, false, top + 15, laneH - 18);
+  }
   const tick = session.transport.location.value?.tick;
   if (tick !== undefined && tick >= start && tick <= end) {
     ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2;
@@ -192,8 +228,49 @@ function paintTimeline() {
     ctx.lineWidth = 1;
   }
   $('timelineStatus').textContent =
-    `${kind} pairs · ${(nsPerPixel / 1e6).toFixed(2)} ms per pixel · ${drawn} clip${drawn === 1 ? '' : 's'} drawn` +
-    `${pending ? ` · ${pending} render pending` : ''}${missing ? ` · ${missing} without analysis` : ''} · ${cache.size} pages cached`;
+    `${kind} pairs · ${(nsPerPixel / 1e6).toFixed(2)} ms per pixel · ${drawn} segment${drawn === 1 ? '' : 's'} drawn` +
+    `${pending ? ` · ${pending} render pending` : ''}${missing ? ` · ${missing} without analysis` : ''}` +
+    `${noFadeData ? ' · this LUNA does not report fades' : ` · ${fades} fade${fades === 1 ? '' : 's'}`} · ${cache.size} pages cached`;
+}
+
+// A MIDI segment's notes as bars, pitch scaled to the clip's own range so every piece of a
+// split clip shares one scale. Velocity sets the opacity; muted notes are faint; a note with
+// no note-off runs to the segment's end. Returns how many notes were drawn.
+function paintNotes(ctx, clip, s0, s1, x, top, height, color) {
+  const notes = clip.midi.notes.items, base = clip.start.value;
+  if (!notes.length || base === undefined || height < 4) return 0;
+  let lo = 127, hi = 0;
+  for (const n of notes) { lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); }
+  lo = Math.max(0, lo - 1); hi = Math.min(127, hi + 1);
+  const row = height / (hi - lo + 1), bar = Math.max(1, Math.min(6, row * 0.8));
+  let drawn = 0;
+  for (const n of notes) {
+    const a = Math.max(base + n.startTick, s0), b = Math.min(n.stopTick === undefined ? s1 : base + n.stopTick, s1);
+    if (b <= a) continue;
+    ctx.fillStyle = cssColor(color, n.muted ? 0.25 : 0.45 + 0.55 * (n.velocity / 127));
+    ctx.fillRect(x(a), top + (hi - n.pitch) * row + (row - bar) / 2, Math.max(1, x(b) - x(a)), bar);
+    drawn++;
+  }
+  return drawn;
+}
+
+// A fade as a straight ramp from silence to full over its ticks (or back down). A plain fade
+// shades the side it silences; a crossfade is just its ramp in violet, crossing the other
+// side's, so no shading hides the audio. Returns 1 when something was drawn.
+function drawFade(ctx, x, fade, fadingIn, top, height) {
+  if (!fade) return 0;
+  const a = x(fade.start), b = x(fade.stop);
+  if (b < 0 || a > W) return 0;
+  const bottom = top + height, [y0, y1] = fadingIn ? [bottom, top] : [top, bottom];
+  if (!fade.crossfade) {
+    ctx.fillStyle = 'rgba(10, 13, 16, 0.55)';
+    ctx.beginPath(); ctx.moveTo(a, y0); ctx.lineTo(b, y1); ctx.lineTo(fadingIn ? a : b, top); ctx.closePath(); ctx.fill();
+  }
+  ctx.strokeStyle = fade.crossfade ? '#c792ea' : '#e4eaf1';
+  ctx.lineWidth = fade.crossfade ? 1.5 : 1;
+  ctx.beginPath(); ctx.moveTo(a, y0); ctx.lineTo(b, y1); ctx.stroke();
+  ctx.lineWidth = 1;
+  return 1;
 }
 
 // Location pushes arrive faster than frames during playback; paint at most once per frame.
@@ -273,6 +350,10 @@ function bindAll() {
   for (const p of session.playlists.items) {
     liveOffs.push(p.name.onChange(() => renderClips()));
     liveOffs.push(p.clips.onChange(() => { events++; bindAll(); renderClips(); }));
+    liveOffs.push(p.compiledClips.onChange(() => { events++; bindAll(); void drawTimeline(); }));
+    for (const seg of p.compiledClips.items) {
+      for (const prop of [seg.start, seg.stop, seg.sourceStart, seg.sourceStop, seg.fadeIn, seg.fadeOut]) liveOffs.push(prop.onChange(() => void drawTimeline()));
+    }
     for (const clip of p.clips.items) {
       for (const prop of [clip.name, clip.start, clip.stop, clip.sourceStart, clip.sourceStop, clip.renderSourceUid, clip.renderState, clip.gain]) {
         liveOffs.push(prop.onChange(() => bump(clip.id)));
@@ -293,8 +374,14 @@ function bindAll() {
       renderClips();
     }));
   }
+  // MIDI clips' notes, read once and followed as they are edited in LUNA.
+  for (const p of session.playlists.items) for (const clip of p.clips.items.filter((c) => c.clipType.value === 'midi')) {
+    void clip.midi.ready().then(() => void drawTimeline(), () => {});
+    liveOffs.push(clip.midi.notes.onChange(() => void drawTimeline()));
+  }
   liveOffs.push(session.transport.location.onChange(schedulePlayhead));
   liveOffs.push(session.context.waveformZoom.onChange(() => renderClips()));
+  for (const track of session.visibleTracks) liveOffs.push(track.color.onChange(() => void drawTimeline()));
 }
 
 async function refresh() {
@@ -320,6 +407,8 @@ async function refresh() {
     await session.ready();
     await Promise.all([session.musical.ready(), session.sources?.load() ?? Promise.resolve()]);
     for (const p of session.playlists.items) await p.clips.load();
+    // Compiled clips for the lanes the timeline draws; loading asks LUNA to publish them.
+    for (const track of session.visibleTracks) await session.playlistFor(track)?.compiledClips.load();
     if (ticket !== generation || closed) return;
     for (const s of session.sources?.items ?? []) known.add(s.id);
     if (fresh) { events = 0; bindAll(); renderMarkers(); renderSources(); index = 0; await waveform(); }
@@ -334,8 +423,13 @@ async function refresh() {
 }
 
 $('refresh').onclick = refresh;
-$('zoom').onchange = () => void drawTimeline();
-$('scroll').oninput = () => void drawTimeline();
+$('zoom').onchange = () => { extent = 0; void drawTimeline(); };
+$('scroll').oninput = () => {
+  extent = Math.max(extent, contentEnd() + 4 * B);
+  const span = $('zoom').value === 'session' ? extent : Number($('zoom').value) * B;
+  viewStart = (Number($('scroll').value) / 1000) * Math.max(0, extent - span);
+  void drawTimeline();
+};
 $('sources').onchange = () => { index = 0; void waveform(); };
 $('previous').onclick = () => { index = Math.max(0, index - PAGE); void waveform(); };
 $('next').onclick = () => { index += returned; void waveform(); };

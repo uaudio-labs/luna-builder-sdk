@@ -2,9 +2,86 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
-## Unreleased
+## 0.2.0
 
 Added
+- `luna.midiDevices`: the MIDI devices LUNA sees, as `Luna.MidiDevice` nodes with `name`,
+  `midiDeviceType`, output lateness, MIDI clock settings and the last note and controller
+  received (fact 123). LUNA lists `All` and `None` beside the real devices; `isPhysical` is
+  false for those two. `watch()` it to follow devices plugged in or removed; its `onChange` also
+  fires when a new device's name and ports arrive, which LUNA sends just after the device.
+  `Luna.LUNA_DEVICE_UID` is LUNA's own device. `Luna.MockEngine.addMidiDevice` adds one.
+- `midiDevice.inputPorts` / `outputPorts` (and `inputPort` / `outputPort`, the first of each):
+  `Luna.MidiPort` nodes whose `uid` is the engine node MIDI from or to the device passes
+  through. They need a LUNA that publishes MIDI ports; on an older one both lists are empty.
+  A device with no MIDI out has no output port.
+- `Luna.SendMidi` sends to MIDI hardware: `sendNoteToOutput`, `sendControllerToOutput`,
+  `sendProgramChangeToOutput` and `sendMidiToOutput` (any 3 bytes) take a `Luna.MidiDevice`, one of
+  its output ports, or a port uid, and send out of that device's MIDI out (fact 124). Notes,
+  controllers and program changes take a channel. `Luna.MockEngine.midiSent` records them with
+  `outputPortUid`.
+- `Luna.QwertyMidi.handleKeyDownToOutput(e, device, channel?)` plays the computer keyboard out of
+  a MIDI device's output port; `handleKeyUp` and `releaseAll` send each note-off where its
+  note-on went.
+- `Luna.MidiInput` receives live MIDI from MIDI hardware: `listen(target, handler)` takes a
+  `Luna.MidiDevice`, one of its input ports, or `'all'`, and calls the handler with each channel
+  message (`type`, `status`, `channel`, `data1`, `data2`, `time`, `port`) until the returned
+  function is called. `onNote` and `onControlChange` filter; `onGap` reports missed batches.
+  Needs a LUNA that publishes `midi_events` on MIDI input ports (fact 125); MIDI the Add On
+  sends is not echoed. `Luna.MockEngine.receiveMidi` plays a device's MIDI in tests.
+- Preset selection, as LUNA's plugin pages offer it (facts 120-122). `luna.presets.query` takes
+  `tags` (all of them, or any with `matchAnyTag`) and `withTags`, which puts each preset's tags
+  on its row. `luna.presets.tagGroups(pluginId)` reads the plugin's tag groups (for example
+  Paradise's `TYPE`, `GENRE`, `DESCRIPTION`). `luna.presets.recommend(pluginId, text)` asks UA
+  Assistant for the presets that best match free text, with `uid`, `name` and `score`.
+  `luna.assistant.enabled` says whether UA Assistant is connected, which recommendations need.
+  `slot.loadPreset(uid)` loads a preset onto the plugin already in a slot.
+- `luna.presets.selection(pluginId)`: a live `Luna.PresetSelection` with writable `search`,
+  `tags` and `matchAnyTag`, and `presets`, `recommendations` and `groups` that follow them.
+  Typing is debounced, a reply that a newer request overtook is dropped, and recommendations
+  keep only presets carrying the selected tags. `examples/presets.html` shows it with a search
+  box, tag chips and one-click loading.
+- `Luna.MockEngine`: `addPreset(..., { tags })`, `addPresetTagGroup`, `setAssistantEnabled`,
+  `setPresetRecommendations`, and the `preset_recommendations` and per-plugin `load` commands.
+- `docs/CLIPS.md`: drawing and editing clips, waveforms, MIDI notes, fades and crossfades as
+  LUNA does, with every pitfall measured while building `examples/clip-editor.html`, and the
+  `edit-clips` skill that walks an agent through it. `docs/llms.txt` points agents at both and
+  no longer suggests drawing raw clips; `test-add-on` and `verify-add-on` say how to make a
+  test prove something and how to leave a session clean after edits that render.
+- `playlist.compiledClips`: what a lane actually plays, as `Luna.CompiledClip` segments that
+  never overlap, because LUNA has already given each stretch to the clip on the highest layer
+  (fact 116). Loading it asks LUNA to publish them for that lane. Each segment has `clipUid`,
+  `start`/`stop`, its own `sourceStart`/`sourceStop`, the crossfade-widened
+  `fullStart`/`fullStop`, and `fadeIn`/`fadeOut` (`{ uid, start, stop, shape, curvature,
+  crossfade, contributorClipUid }`, or `undefined`). `inOrder()` and `ofClip(uid)` sort them by
+  time. On a LUNA that does not report fades, `reportsFades` is false.
+- Clip editing, each one undo step (fact 117): `clip.move(toTick, { copy })`,
+  `clip.duplicate()`, `clip.split(ticks)`, `clip.slip(byNs)` (moves the audio inside the clip),
+  `clip.setMuted(muted)`; on a lane, `playlist.split(ticks)` and `playlist.heal(start, stop)`.
+  Selection-based commands put the user's selection back afterwards.
+- Fade editing (fact 117): `clip.setFadeIn`/`setFadeOut(lengthTicks, { shape })`,
+  `clip.crossfade(next, lengthTicks, { align, shape })` (centred, before or after the edit),
+  `clip.removeFadeIn`/`removeFadeOut`/`removeCrossfade(next)`,
+  `session.setFadeCurve(fades, { shape, curvature, reset })`, and on a lane
+  `playlist.addFades({ startTick, stopTick, lengthNs, shape })` and `playlist.deleteFades(start, stop)`.
+  `Luna.MockEngine` models them all.
+- `context.select` also takes `playlistUids` and `focus`.
+- `Luna.compiledClipAudio` draws each piece of a time-stretched clip from its own render.
+  LUNA renders every compiled piece separately, so the clip's render covered only its first
+  piece, and a later piece (a stretched clip with another clip over its middle) drew nothing
+  (fact 116). Compiled clips gain `renderSourceUid`, `renderSourceStart` and
+  `renderSourceStop`; on a LUNA that does not report them, later pieces draw as outlines.
+- `clip.slip` refuses with `out_of_range` a slip later than the source has audio for, which
+  LUNA would answer as a success and ignore (fact 117).
+- `Luna.compiledClipAudio(timeline, segment, clip, sources)`: the audio one segment plays,
+  for drawing its waveform with `Luna.audioNsAtTick` anchored at the segment.
+- `examples/clip-editor.html`: multi-track clip and fade editing over the compiled clips. Drag
+  a clip to move it, its edges to trim it, its corner handles for fades and the handle on an
+  edit for a crossfade; a panel covers split, duplicate, mute, slip, heal, layering, fade shape
+  and curve, and whole-lane fades.
+- `Luna.MockEngine` publishes compiled clips once a client turns them on;
+  `new Luna.MockEngine({ compiledClipFades: false })` models a LUNA without the fade data.
+
 - `session.transactionMode`: `'batch'`, `'continuous'`, or `undefined` outside a transaction;
   the `Luna.TransactionMode` type.
 - `Luna.SendMidi`: plays MIDI on a track live, the way a keyboard would, without writing to a
@@ -34,6 +111,50 @@ Added
   clip for tests, since `insertClip` cannot make one.
 
 Changed
+- The docs and skills now say to use `Luna.MidiInput` for live MIDI input, not Web MIDI
+  (`navigator.requestMIDIAccess()`), which LUNA's macOS web view does not have. `docs/RECIPES.md`
+  has a thirteenth prompt, a MIDI monitor built on it.
+- `examples/clip-editor.html` selects the piece of a clip that was clicked, as LUNA does,
+  rather than the whole clip: where another clip lies on top, only the clicked piece is
+  highlighted, Duplicate copies that piece, and crossfade and curve controls act on its edits.
+- Compiled clips gain `needsRender`, and `Luna.compiledClipAudio` returns `undefined` for a
+  piece that plays a rendering LUNA is still making, instead of the original file at the wrong
+  scale (fact 116). Both example timelines hold a piece's last waveform while its new
+  rendering is made, so drawing a crossfade no longer shows the old waveform, then the
+  original, then the new one.
+- `examples/clip-editor.html` no longer flickers after an edit: a drag's preview stays up
+  until the edit's result is painted, where the clip used to snap back to where it was for a
+  frame or two, and the view keeps its start when an edit lengthens the session instead of
+  sliding sideways. `examples/arrangement.html` keeps its view the same way when LUNA's edits
+  lengthen the session.
+- `compiledClip.crossfade(next, lengthTicks, { align, shape })` and
+  `compiledClip.removeCrossfade(next)` crossfade the segments either side of an edit, which
+  also covers overlapping clips: a clip on top over the middle of another crossfades where it
+  begins and where it ends (fact 117). `examples/clip-editor.html` puts a crossfade handle on
+  every edit between audio clips, butted or overlapping, and its crossfade buttons use the
+  selected clip's next edit.
+- `compiledClip.move(toTick, { copy })` moves what shows of a clip, as dragging it in LUNA
+  does (fact 119): a clip that carries on under another is split at that edge when it shows
+  again, and trimmed to it when the rest is hidden; a clip lying on top stays put. Resolves
+  to the moved piece. `examples/clip-editor.html` drags pieces this way; before, dragging a
+  clip moved its hidden parts and any clip on top of it too. The mock models it.
+- `examples/arrangement.html` and `examples/clip-editor.html` draw a MIDI clip's notes: a bar
+  per note in the track colour, pitch scaled to the clip's own range, velocity as opacity,
+  muted notes faint, following note edits made in LUNA.
+- `clip.setFadeIn`, `setFadeOut` and `crossfade` reject a MIDI or video clip with `unavailable`:
+  LUNA fades audio clips only, and answers a fade on any other with success and no change
+  (fact 117). `examples/clip-editor.html` gives such clips no fade handles or fade settings.
+- `examples/clip-editor.html` shows what a drag or click would do: a hand over a clip (closed
+  while dragging), bracket pointers where it trims, ramp and cross pointers over the fade-in,
+  fade-out and crossfade handles, a text cursor over empty lane space and a busy pointer while
+  LUNA answers, each with a tooltip.
+- `examples/arrangement.html` and `examples/clip-editor.html` draw fades after every segment,
+  so the half of a crossfade that reaches past the edit is no longer painted over by the next
+  segment, and draw a crossfade as its two crossing ramps without shading.
+- `examples/arrangement.html` and `examples/clip-editor.html` fill waveforms in the track's
+  colour (`channel.color`), following a recolour live; a muted clip is drawn faded.
+- `examples/arrangement.html` draws each lane's compiled clips, so a clip on top hides the
+  one beneath, and draws their fades and crossfades.
 - `midi.deleteNotes`, `midi.setMuted` and `midi.setVelocities` run inside a batch
   `session.transaction()` instead of refusing with `busy`, so rewriting a clip's notes
   (`deleteNotes` then `clip.addNotes`) is one undo step (fact 74). LUNA holds a batch's pushes
@@ -52,6 +173,8 @@ Changed
   spaces around the slash (`C / E`). Words such as `bridge` and `chorus` are still text.
 
 Fixed
+- `sendDeviceNote` documentation: a device name feeds the note into LUNA as that device's input;
+  it does not play the device.
 - `Luna.MockEngine` now follows LUNA's `create_note` (fact 111): it takes session ticks,
   writes each note into the clip under its note-on rather than the lane's first MIDI clip,
   makes a bar-aligned clip named after the track when there is none, and puts session ticks

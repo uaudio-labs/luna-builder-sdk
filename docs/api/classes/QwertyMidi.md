@@ -73,6 +73,41 @@ document.addEventListener('keydown', (e) => qwerty.handleKeyDown(e, session.uid,
 
 ***
 
+### handleKeyDownToOutput()
+
+```ts
+handleKeyDownToOutput(
+   e, 
+   output, 
+   channel): boolean;
+```
+
+Handle a keydown, playing the note out of a MIDI device's output port rather than on a
+track (fact 124). Same keys and return value as [handleKeyDown](#handlekeydown); the note-off on
+keyup goes to the same port.
+
+#### Parameters
+
+| Parameter | Type | Default value | Description |
+| ------ | ------ | ------ | ------ |
+| `e` | [`QwertyKeyEvent`](../type-aliases/QwertyKeyEvent.md) | `undefined` | - |
+| `output` | [`MidiOutputTarget`](../type-aliases/MidiOutputTarget.md) | `undefined` | - |
+| `channel` | `number` | `0` | MIDI channel, 0-15. Default 0. |
+
+#### Returns
+
+`boolean`
+
+#### Example
+
+```ts
+await luna.midiDevices.load();
+const synth = luna.midiDevices.items.find((d) => d.name.value === 'Volt 876');
+document.addEventListener('keydown', (e) => synth?.outputPort && qwerty.handleKeyDownToOutput(e, synth));
+```
+
+***
+
 ### handleKeyUp()
 
 ```ts
@@ -80,8 +115,8 @@ handleKeyUp(e): boolean;
 ```
 
 Handle a keyup. Returns true, having called `preventDefault()`, when it released a held
-note. The note-off goes to the track and pitch the note-on went to, even if the octave
-changed while it was held.
+note. The note-off goes to the track or output and pitch the note-on went to, even if the
+octave or the target changed while it was held.
 
 #### Parameters
 

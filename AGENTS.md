@@ -4,7 +4,7 @@ Read and follow [CLAUDE.md](CLAUDE.md) before working on this SDK. It is the sha
 development guidance for both Claude Code and Codex, including architecture,
 conventions, tests, and plugin generation. Keep those instructions in one place.
 
-The five shared skills in `skills/` are exposed to Codex through `.agents/skills/`.
+The six shared skills in `skills/` are exposed to Codex through `.agents/skills/`.
 For Add On work, use the relevant skill and [docs/llms.txt](docs/llms.txt) to find
 the consumer documentation. In this checkout, resolve the builder root to this
 directory and run `node <builder>/dist/cli.js` after `npm run build`.

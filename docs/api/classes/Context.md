@@ -403,13 +403,16 @@ Run one of the context's edit commands (`copy`, `paste`, `duplicate`, `select_al
 select(options): Promise<void>;
 ```
 
-Set range and/or tracks in one go; omitted parts are left alone.
+Set range, tracks, playlists and/or focus in one go; omitted parts are left alone. `focus`
+is what LUNA's selection commands act on: `timeline` for clips (fact 117).
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `options` | \{ `startTick?`: `number`; `stopTick?`: `number`; `trackUids?`: `string`[]; \} |
+| `options` | \{ `focus?`: `string`; `playlistUids?`: `string`[]; `startTick?`: `number`; `stopTick?`: `number`; `trackUids?`: `string`[]; \} |
+| `options.focus?` | `string` |
+| `options.playlistUids?` | `string`[] |
 | `options.startTick?` | `number` |
 | `options.stopTick?` | `number` |
 | `options.trackUids?` | `string`[] |
@@ -417,6 +420,12 @@ Set range and/or tracks in one go; omitted parts are left alone.
 #### Returns
 
 `Promise`\<`void`\>
+
+#### Example
+
+```ts
+await ctx.select({ startTick: 0, stopTick: Luna.WHOLE_NOTE, playlistUids: [lane.id], focus: 'timeline' });
+```
 
 ***
 

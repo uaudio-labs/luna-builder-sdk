@@ -83,10 +83,11 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 - Keep every unsubscribe function and call it when the session changes.
 - Use `luna.raw` only when no typed method exists, and then consider adding one
   (see the add-feature skill).
-- The SDK does not stream audio or receive MIDI. To play notes live on a track use
-  `Luna.SendMidi` (or `Luna.QwertyMidi` for the computer keyboard); for live MIDI input use
-  Web MIDI (`navigator.requestMIDIAccess()`) in the page. Do not try to stream audio through
-  the SDK or `luna.raw`.
+- The SDK does not stream audio. To play notes live on a track use `Luna.SendMidi` (or
+  `Luna.QwertyMidi` for the computer keyboard); to hear a MIDI keyboard or controller use
+  `Luna.MidiInput`, never Web MIDI (`navigator.requestMIDIAccess()`), which LUNA's macOS web
+  view does not have (`examples/midi-input.html` is a whole page). Do not try to stream
+  audio through the SDK or `luna.raw`.
 - Do not use `<script type="module">` in the page; Windows loads Add Ons from `file://`. In
   the TypeScript template, read `Luna` as the global (typed by the tsconfig); importing the
   SDK in `src/` bundles a second copy.
@@ -96,6 +97,10 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
   Always include an HTML drop zone: in LUNA 3.1.0.4589 and earlier a file picker opens
   nothing (docs/FILES.md, "Inside LUNA today").
 - Guard every `luna.gui` call with `await luna.gui.available()`; `/gui` is absent off LUNA.
+- Preset pickers: use `luna.presets.selection(pluginId)` (search, tag chips, UA Assistant
+  recommendations) and `slot.loadPreset(uid)`; copy `examples/presets.html`. Recommendations
+  need `luna.assistant.enabled` and the plugin inserted after UA Assistant connected; show
+  `recommendationError` rather than failing the page (docs/EVIDENCE.md, facts 120-122).
 - API keys and tokens go in `luna.secrets` (docs/MANIFEST.md, "Secrets"), never in
   `localStorage`, IndexedDB, cookies, the manifest or a file in the Add On. Name them by
   service (`openai.api_key`), and say so in the UI when `luna.secrets.storage` is `'memory'`.

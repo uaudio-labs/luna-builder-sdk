@@ -1,6 +1,6 @@
 {
   "name": "@uaudio/luna-builder-sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "SDK for building LUNA Add Ons that run inside LUNA or on the WebAssembly LUNA engine",
   "license": "Apache-2.0",
   "private": true,

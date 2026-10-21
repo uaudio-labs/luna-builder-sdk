@@ -8,11 +8,13 @@ from `../dist/luna.global.js`, so run `npm run build` in the builder folder firs
 
 | File | Shows |
 |---|---|
-| `arrangement.html` | The session as a timeline: a lane per track, a bar\|beat ruler through the tempo map, every clip drawn from LUNA's overview data at the current zoom, and the playhead. Live: trims, moves, renames, deletes and imports appear without a refresh. |
+| `arrangement.html` | The session as a timeline: a lane per track, a bar\|beat ruler through the tempo map, every audio clip drawn from LUNA's overview data at the current zoom, every MIDI clip's notes, and the playhead. Live: trims, moves, renames, deletes and imports appear without a refresh. |
+| `clip-editor.html` | Multi-track clip and fade editing over LUNA's compiled clips: drag to move or trim, drag corner handles for fades and the edit handle for a crossfade, and a panel for split, duplicate, mute, slip, heal, layering, fade shape and curve, and whole-lane fades. Each edit is one undo step; the lanes follow edits made in LUNA. |
 | `editor.html` | Every clip, marker and note edit the SDK offers, one undo entry each, with LUNA's own selection read back after every action to prove it was put back. |
 | `addon/` | The smallest useful Add On: one file, one button on the master bus mute, and the whole connection lifecycle. The copy-out starting point. |
 | `mixer.html` | A strip per channel: fader, pan, mute, solo, meter with held peak and clip. A drag is one undo entry. `?all=1` includes the system tracks. |
 | `inserts.html` | Insert slots, the plugin catalog, parameters with the plugin's own readouts, IN/OUT and remove. |
+| `presets.html` | Preset selection for a plugin on any insert: type to filter presets by name, pick tags from the plugin's tag groups (any or all), and see UA Assistant's recommendations for the same text, kept within the selected tags. Click to load a preset onto the slot. Built on `luna.presets.selection()`. |
 | `ruler.html` | Live bar\|beat ruler over the tempo map with tempo, signature and key rows, clickable markers, and LUNA's own playhead annotation beside the SDK's. |
 | `sends.html` | Every send and cue output: level, pan, mute, pre-fader, enable, meter, destination, and a picker that reroutes it (assign appends, so it uses `retarget`). |
 | `automation.html` | The first track's volume lane drawn live: insert a ramp, move, revalue and delete breakpoints, and drive the track's automation mode. |
@@ -21,6 +23,7 @@ from `../dist/luna.global.js`, so run `npm run build` in the builder folder firs
 | `secrets.html` | `luna.secrets`: save, read and delete an API key in the OS keychain inside LUNA (page memory elsewhere), and check that LUNA does not answer an iframe. Installed as two Add Ons with different ids over the one file, to show each has its own keys. |
 | `browse.html` | A folder browser over the disk as LUNA sees it: `luna.gui.listFiles()` for each folder, LUNA's folder dialog (`chooseFolders()`) or a typed path to start, an Import button that copies an audio file in (`importPath`) and puts it on a new track at the playhead in one undo entry, and audio rows you can drag onto LUNA's timeline. Needs LUNA's `/gui`. |
 | `import.html` | Pick or drop a file, watch it upload to LUNA in chunks, see it in the live source list, place it as a clip through the tempo map. |
+| `midi-input.html` | Live MIDI input from the MIDI devices LUNA sees, through `Luna.MidiInput`: a log of every message with its time, device, type, channel and bytes, the notes held, and each controller's latest value. Pick one device or all; pause or clear the log. |
 | `pianoroll.html` | A live read-only piano roll over one MIDI clip: notes edited in LUNA appear without a refresh. |
 | `tracks.html` | The raw wire: list the focused session's tracks through `luna.raw`, with no model layer. |
 

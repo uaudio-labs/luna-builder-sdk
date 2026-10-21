@@ -1,0 +1,207 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA MIDI input</title>
+<!--
+  Live MIDI input: every message the MIDI devices LUNA sees are sending, as it arrives. Play a
+  keyboard or move a controller and it is logged with its time, device, type, channel and
+  bytes; the notes held and each controller's latest value are kept above the log.
+
+  `new Luna.MidiInput(luna).listen(device, handler)` does the work (fact 125). LUNA only
+  streams a device's MIDI while someone listens, and never echoes MIDI an Add On sent. "All
+  devices" listens to each device on its own, so every message says where it came from;
+  `listen('all', ...)` hears them all through LUNA's All port in one subscription, but its
+  messages do not name the device.
+
+  `npx ua-builder serve` serves the package over HTTP, or open it from file:// in a real
+  browser. Use this rather than Web MIDI (navigator.requestMIDIAccess()), which LUNA's macOS
+  web view does not have.
+-->
+<script src="../dist/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #17171a; color: #e8e8ec; font: 13px/1.35 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #2a2a30; flex-wrap: wrap; }
+  header .title { font-weight: 600; }
+  select, button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #3a3a42; background: #26262c; color: inherit; }
+  button { cursor: pointer; }
+  button[aria-pressed="true"] { background: #5a4a1a; border-color: #c9a227; }
+  #status { margin-left: auto; opacity: .6; }
+  #status.error { color: #ff8080; opacity: 1; }
+  main { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-height: 26px; }
+  .label { opacity: .55; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; min-width: 90px; }
+  .chip { padding: 3px 9px; border-radius: 12px; font-size: 12px; background: #26262c; border: 1px solid #3a3a42; }
+  #held .chip { background: #2d5a8a; border-color: #5a9ae0; }
+  .none { opacity: .4; }
+  #count { opacity: .55; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 500; opacity: .55; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 4px 8px; border-bottom: 1px solid #2a2a30; position: sticky; top: 0; background: #17171a; }
+  td { padding: 3px 8px; border-bottom: 1px solid #222228; white-space: nowrap; }
+  td.raw { font-family: ui-monospace, Menlo, monospace; opacity: .7; }
+  tr.noteOn td.type { color: #7fd17f; }
+  tr.noteOff td.type { color: #d1a07f; }
+  tr.controlChange td.type { color: #7fb4d1; }
+  tr.gap td { color: #ff8080; }
+  #scroll { max-height: calc(100vh - 210px); overflow: auto; }
+</style>
+<header>
+  <span class="title">LUNA MIDI input</span>
+  <select id="device" aria-label="MIDI device"></select>
+  <button id="pause" aria-pressed="false">Pause</button>
+  <button id="clear">Clear</button>
+  <span id="status">connecting…</span>
+</header>
+<main>
+  <div class="row" id="held"><span class="label">Held notes</span></div>
+  <div class="row" id="ccs"><span class="label">Controllers</span></div>
+  <div id="count"></div>
+  <div id="scroll">
+    <table>
+      <thead><tr><th>Time</th><th>Device</th><th>Type</th><th>Ch</th><th>Data 1</th><th>Data 2</th><th>Bytes</th></tr></thead>
+      <tbody id="log"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+(async () => {
+  const MAX_ROWS = 500;
+  const ALL = '';
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const noteName = (n) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`; // 60 is C4
+  const hex = (b) => b.toString(16).padStart(2, '0').toUpperCase();
+
+  const status = document.getElementById('status');
+  const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
+  const deviceSel = document.getElementById('device');
+  const pauseBtn = document.getElementById('pause');
+  const logEl = document.getElementById('log');
+  const heldEl = document.getElementById('held');
+  const ccsEl = document.getElementById('ccs');
+  const countEl = document.getElementById('count');
+
+  let luna;
+  try { luna = await Luna.connect(); } catch (e) { say(e.message, true); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  luna.status.onChange(() => {
+    const connected = luna.status.value === 'connected';
+    say(connected ? '' : 'disconnected from LUNA', !connected);
+  });
+
+  const input = new Luna.MidiInput(luna);
+  let stops = [];          // one unsubscribe per device listened to
+  let paused = false;
+  let received = 0;
+  let firstTime;           // time of the first message logged; later ones are shown relative to it
+  const held = new Map();  // `${device}|${channel}|${note}` -> label
+  const ccs = new Map();   // `${device}|${channel}|${cc}` -> label
+
+  // Devices with a MIDI in. Their uids change when LUNA restarts, so the choice is kept by name.
+  const inputs = () => luna.midiDevices.items.filter((d) => d.isPhysical && d.inputPort);
+
+  function relist() {
+    const keep = deviceSel.value;
+    const names = inputs().map((d) => d.name.value);
+    deviceSel.replaceChildren(
+      Object.assign(document.createElement('option'), { value: ALL, textContent: 'All devices' }),
+      ...names.map((name) => Object.assign(document.createElement('option'), { value: name, textContent: name })),
+    );
+    deviceSel.value = names.includes(keep) ? keep : ALL;
+    listen();
+  }
+
+  let listeningTo = '';     // input port paths currently listened to, so a re-list that changes nothing keeps them
+
+  function listen() {
+    const chosen = deviceSel.value;
+    const devices = inputs().filter((d) => chosen === ALL || d.name.value === chosen);
+    const key = devices.map((d) => d.inputPort.path).join('|');
+    if (key === listeningTo && stops.length) return;
+    listeningTo = key;
+    for (const stop of stops) stop();
+    stops = devices.map((d) => input.listen(d, (m) => receive(d.name.value, m), {
+      onGap: ({ missed, dropped }) => addRow(gapRow(d.name.value, missed, dropped)),
+    }));
+    if (!devices.length) say('no MIDI input devices in LUNA', true);
+    else say(`listening to ${devices.length === 1 ? devices[0].name.value : `${devices.length} devices`}`);
+  }
+
+  function receive(device, m) {
+    received++;
+    track(device, m);
+    if (!paused) addRow(messageRow(device, m));
+    renderSummary();
+  }
+
+  // Held notes and controller values follow every message, paused or not.
+  function track(device, m) {
+    const key = `${device}|${m.channel}|${m.data1}`;
+    if (m.type === 'noteOn') held.set(key, `${noteName(m.data1)} ch${m.channel + 1}`);
+    else if (m.type === 'noteOff') held.delete(key);
+    else if (m.type === 'controlChange') ccs.set(key, `CC${m.data1} ch${m.channel + 1}: ${m.data2}`);
+  }
+
+  function messageRow(device, m) {
+    firstTime ??= m.time;
+    const tr = document.createElement('tr');
+    tr.className = m.type;
+    const isNote = m.type === 'noteOn' || m.type === 'noteOff' || m.type === 'polyPressure';
+    const data1 = isNote ? `${m.data1} (${noteName(m.data1)})` : String(m.data1);
+    // Pitch bend's two data bytes are one 14-bit value, 8192 at rest.
+    const data2 = m.type === 'pitchBend' ? `${m.data2} (${(m.data2 << 7) | m.data1})` : m.type === 'programChange' || m.type === 'channelPressure' ? '' : String(m.data2);
+    const bytes = [m.status, m.data1, m.data2].map(hex).join(' ');
+    for (const [cls, text] of [['time', `${(m.time - firstTime).toFixed(1)} ms`], ['device', device], ['type', m.type], ['ch', String(m.channel + 1)], ['d1', data1], ['d2', data2], ['raw', bytes]]) {
+      tr.append(Object.assign(document.createElement('td'), { className: cls, textContent: text }));
+    }
+    return tr;
+  }
+
+  function gapRow(device, missed, dropped) {
+    const tr = document.createElement('tr');
+    tr.className = 'gap';
+    const td = Object.assign(document.createElement('td'), { colSpan: 7 });
+    td.textContent = `${device}: ${missed ? `${missed} batch${missed === 1 ? '' : 'es'} missed` : ''}${missed && dropped ? ', ' : ''}${dropped ? `LUNA dropped ${dropped} messages` : ''}; held notes may be stale`;
+    tr.append(td);
+    return tr;
+  }
+
+  function addRow(tr) {
+    logEl.prepend(tr); // newest first
+    while (logEl.rows.length > MAX_ROWS) logEl.lastElementChild.remove();
+  }
+
+  function chips(el, values) {
+    el.replaceChildren(el.firstElementChild, ...(values.length
+      ? values.map((v) => Object.assign(document.createElement('span'), { className: 'chip', textContent: v }))
+      : [Object.assign(document.createElement('span'), { className: 'none', textContent: 'none' })]));
+  }
+
+  function renderSummary() {
+    chips(heldEl, [...held.values()]);
+    chips(ccsEl, [...ccs.values()]);
+    countEl.textContent = `${received} message${received === 1 ? '' : 's'} received${paused ? ' (log paused)' : ''}`;
+  }
+
+  deviceSel.onchange = listen;
+  pauseBtn.onclick = () => {
+    paused = !paused;
+    pauseBtn.setAttribute('aria-pressed', String(paused));
+    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    renderSummary();
+  };
+  document.getElementById('clear').onclick = () => {
+    logEl.replaceChildren();
+    held.clear();
+    ccs.clear();
+    received = 0;
+    firstTime = undefined;
+    renderSummary();
+  };
+
+  // Follow devices being plugged in or removed. onChange also fires once a new device's name
+  // and ports arrive, which LUNA sends just after the device itself.
+  await luna.midiDevices.watch().ready;
+  luna.midiDevices.onChange(relist);
+  relist();
+  renderSummary();
+})();
+</script>

@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · Edit clips and fades</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 27px; } h2 { margin-top: 28px; font-size: 19px; }
+  p { color: #acb9c8; line-height: 1.6; }
+  button, select, input { font: inherit; padding: 6px 10px; margin: 4px 6px 4px 0; }
+  input[type=number] { width: 5.5em; } input[type=range] { padding: 0; vertical-align: middle; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+  .toolbar label { color: #acb9c8; margin-right: 4px; }
+  .group { border: 1px solid #343d48; border-radius: 6px; padding: 8px 12px; margin: 10px 0; }
+  .group h3 { margin: 0 0 4px; font-size: 14px; color: #acb9c8; font-weight: 600; }
+  canvas { width: 100%; background: #101419; border: 1px solid #343d48; display: block; touch-action: none; cursor: default; }
+  canvas:focus { outline: 2px solid #4b8bd6; }
+  table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #343d48; }
+  th { color: #acb9c8; } tbody tr { cursor: pointer; } tbody tr.selected td { background: #1f3550; }
+  #status, #info { min-height: 22px; } #log { font: 13px ui-monospace, monospace; color: #acb9c8; max-height: 160px; overflow: auto; }
+  #log .error { color: #ff8a8a; }
+  [disabled] { opacity: 0.45; }
+</style>
+<h1>Edit clips and fades</h1>
+<p>Every track's active playlist as a lane, drawn from LUNA's compiled clips, so where clips
+overlap you see the one that plays (fact 116). <strong>Drag</strong> a clip to move what
+shows of it, as in LUNA: a clip that carries on under another is split at that edge if it
+shows again further along, and trimmed to it if not (fact 119). Drag a clip's <strong>edges</strong> to trim it, and the <strong>handles</strong> on its top corners to
+set its fade-in and fade-out. Where two clips meet, the handle on the edit sets a centred
+crossfade. Click to select a clip and place the cursor; the panel below does the rest. Each
+edit is one undo step in LUNA (fact 117), and the lanes follow edits made in LUNA itself.</p>
+<div class="toolbar">
+  <button id="refresh">Connect / refresh</button>
+  <button id="undo">Undo</button><button id="redo">Redo</button>
+  <label for="zoom">Zoom</label><select id="zoom"><option value="session">Whole session</option><option value="64">16 bars</option><option value="32" selected>8 bars</option><option value="8">2 bars</option></select>
+  <input id="scroll" type="range" min="0" max="1000" value="0" aria-label="Scroll">
+  <label for="snap">Snap</label><select id="snap"><option value="0">Off</option><option value="4">Bar</option><option value="1" selected>Beat</option><option value="0.5">1/8</option><option value="0.25">1/16</option></select>
+</div>
+<p id="status" role="status">Connecting…</p>
+<canvas id="timeline" width="1100" height="300" tabindex="0" aria-label="Lanes of clips; drag to edit, click to select"></canvas>
+<p id="info" role="status">Nothing selected.</p>
+
+<div class="group">
+  <h3>Selected clip</h3>
+  <div class="toolbar">
+    <button id="split">Split at cursor <kbd>S</kbd></button>
+    <button id="duplicate">Duplicate <kbd>D</kbd></button>
+    <button id="mute">Mute <kbd>M</kbd></button>
+    <button id="front">Bring to front</button><button id="back">Send to back</button>
+    <button id="slipLeft">Slip −10 ms</button><button id="slipRight">Slip +10 ms</button>
+    <button id="heal">Heal with next</button>
+    <button id="delete">Delete <kbd>⌫</kbd></button>
+  </div>
+</div>
+<div class="group" id="fades">
+  <h3>Fades of the selected clip</h3>
+  <div class="toolbar">
+    <label for="fadeBeats">Length (beats)</label><input id="fadeBeats" type="number" min="0.0625" step="0.25" value="0.5">
+    <label for="shape">Shape</label><select id="shape"><option value="log">Log</option><option value="equal_power">Equal power</option><option value="linear">Linear</option></select>
+    <button id="fadeIn">Fade in</button><button id="fadeOut">Fade out</button>
+    <label for="align">Crossfade</label><select id="align"><option value="center">Across the edit</option><option value="before">Before it</option><option value="after">After it</option></select>
+    <button id="crossfade">Crossfade with next</button>
+  </div>
+  <div class="toolbar">
+    <label for="curve">Curvature</label><input id="curve" type="range" min="-1" max="1" step="0.05" value="0">
+    <button id="applyCurve">Apply shape and curve</button>
+    <button id="resetCurve">Reset curve</button>
+    <button id="removeIn">Remove fade in</button><button id="removeOut">Remove fade out</button><button id="removeCross">Remove crossfade</button>
+  </div>
+</div>
+<div class="group">
+  <h3>Selected clip's lane</h3>
+  <div class="toolbar">
+    <button id="splitLane">Split lane at cursor</button>
+    <label for="batchMs">Fade every clip (ms)</label><input id="batchMs" type="number" min="1" value="10">
+    <button id="batch">Fade all</button><button id="unfade">Remove all fades</button>
+  </div>
+</div>
+
+<h2>Clips</h2>
+<table><thead><tr><th>Lane</th><th>Clip</th><th>Start → stop (beats)</th><th>Shows as</th><th>Fades</th><th>Muted</th></tr></thead><tbody id="clips"></tbody></table>
+<h2>Edit log</h2>
+<div id="log" aria-live="polite"></div>
+
+<script src="../dist/luna.global.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const B = Luna.TICKS_PER_BEAT;
+const W = 1100, RULER = 22, LANE = 78, HANDLE = 7, EDGE = 8;
+const canvas = $('timeline'), ctx = canvas.getContext('2d');
+const cache = new Luna.Waveforms({ maxPages: 512 });
+const beats = (ticks) => ticks === undefined ? '?' : (ticks / B).toFixed(2);
+// LUNA's colours are 0xAARRGGBB; waveforms take their track's colour, as in LUNA.
+const cssColor = (argb, alpha = 1) => typeof argb === 'number'
+  ? `rgba(${(argb >>> 16) & 0xff}, ${(argb >>> 8) & 0xff}, ${argb & 0xff}, ${alpha})`
+  : `rgba(100, 215, 178, ${alpha})`;
+
+let luna, session, closed = false, generation = 0, sceneTicket = 0;
+let scene;                 // gathered lanes, segments and waveform ranges; painted synchronously
+let selected;              // { lane, clipUid, s0 }: the piece of a clip that was clicked, as LUNA
+                           // selects it, not the whole clip (s0 is its start; unset for a clip
+                           // with nothing showing)
+let cursor;                // tick of the last click
+let drag;                  // the gesture in progress, painted as a preview
+let committing;            // a finished gesture whose edit is in flight: its preview stays up
+                           // until the result is painted, so nothing snaps back in between
+let viewStart = 0;         // the view's first tick: scrolling sets it, edits leave it alone
+let extent = 0;            // how far the view scrolls: grows with the content, reset on zoom
+let busy = false;          // one edit at a time; LUNA answers each before the next
+const offs = [];
+let liveOffs = [];
+
+// ── edits ────────────────────────────────────────────────────────────────────────────────
+function log(text, error = false) {
+  const line = document.createElement('div');
+  if (error) line.className = 'error';
+  line.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+  $('log').prepend(line);
+}
+
+/** Run one edit, report it, and refuse a second one while it is in flight. */
+async function edit(what, fn) {
+  if (busy) { committing = undefined; paint(); return; }
+  busy = true; updateControls(); showEdit(hovered);
+  try {
+    await fn();
+    log(what);
+  } catch (e) {
+    log(`${what}: ${e.code ? `${e.code} — ` : ''}${e.message}`, true);
+  } finally {
+    busy = false; updateControls();
+    // Paint the result before taking the preview down. A newer change can supersede a
+    // gather, so try again until one paints.
+    for (let i = 0; i < 5 && !(await gather()); i++);
+    committing = undefined; paint(); showEdit(hovered);
+  }
+}
+
+function selectedClip() {
+  return selected && selected.lane.clips.byId(selected.clipUid);
+}
+
+/** Select the piece of `clipUid` that starts at `s0`, or the clip's first piece that shows. */
+function select(lane, clipUid, s0) {
+  selected = { lane, clipUid, s0: s0 ?? lane.compiledClips.ofClip(clipUid)[0]?.start.value };
+}
+
+/** The selected piece. An edit can move its start; then it is the clip's first piece. */
+function selectedSegment() {
+  if (!selected) return undefined;
+  const pieces = selected.lane.compiledClips.ofClip(selected.clipUid);
+  return pieces.find((s) => s.start.value === selected.s0) ?? pieces[0];
+}
+
+/** LUNA fades audio clips only; a MIDI or video clip gets no fade handles or settings (fact 117). */
+const fadable = (clip) => clip?.clipType.value === 'audio';
+
+/**
+ * The edit after the selected piece, if it can take a crossfade: the segment that starts where
+ * the piece stops, from another audio clip. Butted clips meet at an edit, and so do overlapping
+ * ones where a clip on top begins or ends over another (fact 117).
+ */
+function editAfter() {
+  const left = selectedSegment(), clip = selectedClip();
+  if (!left || !clip) return undefined;
+  const right = selected.lane.compiledClips.inOrder().find((s) => s.start.value === left.stop.value);
+  const other = right && selected.lane.clips.byId(right.clipUid.value ?? '');
+  return other && other !== clip && fadable(clip) && fadable(other) ? { left, right, other } : undefined;
+}
+
+function fadeTicks() { return Math.max(1, Math.round(Number($('fadeBeats').value) * B)); }
+function snap(tick) {
+  const step = Number($('snap').value) * B;
+  return step ? Math.round(tick / step) * step : Math.round(tick);
+}
+
+// ── view ────────────────────────────────────────────────────────────────────────────────
+function lanes() {
+  return session ? session.visibleTracks.map((track) => ({ track, lane: session.playlistFor(track) })).filter((l) => l.lane) : [];
+}
+
+function contentEnd() {
+  const stops = lanes().flatMap(({ lane }) => lane.clips.items.map((c) => c.stop.value ?? 0));
+  return Math.max(session?.transport.maxTick.value ?? 0, ...stops, 16 * B);
+}
+
+/**
+ * The visible range. The start is a tick, not a fraction of the content, so an edit that
+ * lengthens the session does not slide the view; the scroll bar follows the view instead.
+ */
+function view() {
+  extent = Math.max(extent, contentEnd() + 8 * B);
+  const span = $('zoom').value === 'session' ? extent : Number($('zoom').value) * B;
+  const room = Math.max(0, extent - span);
+  const start = Math.min(Math.max(0, viewStart), room);
+  $('scroll').value = String(room ? Math.round((start / room) * 1000) : 0);
+  return { start, end: start + span, span };
+}
+
+function scrollTo(fraction) {
+  extent = Math.max(extent, contentEnd() + 8 * B);
+  const span = $('zoom').value === 'session' ? extent : Number($('zoom').value) * B;
+  viewStart = fraction * Math.max(0, extent - span);
+}
+
+const xOf = (tick) => (tick - scene.start) / scene.span * W;
+const tickAt = (x) => scene.start + x / W * scene.span;
+
+// Gather first, then paint in one synchronous pass, so a slow page read never shows half a frame.
+/** Gather and paint; false when a newer gather superseded this one before it painted. */
+async function gather() {
+  const ticket = ++sceneTicket;
+  if (!session) { scene = undefined; paint(); return true; }
+  const t = session.musical.timeline, { start, end, span } = view();
+  const kind = Luna.kindForScale(Math.max(1, (t.seconds(end) - t.seconds(start)) * 1e9 / W));
+  const rows = [];
+  for (const { track, lane } of lanes()) {
+    const segments = [];
+    for (const seg of lane.compiledClips.inOrder()) {
+      const clip = lane.clips.byId(seg.clipUid.value ?? '');
+      const s0 = seg.start.value, s1 = seg.stop.value;
+      if (!clip || s0 === undefined || s1 === undefined) continue;
+      const item = { seg, clip, s0, s1, fadeIn: seg.fadeIn.value, fadeOut: seg.fadeOut.value, reportsFades: seg.reportsFades.value };
+      if (s1 > start && s0 < end && session.sources) {
+        const audio = Luna.compiledClipAudio(t, seg, clip, session.sources);
+        if (audio) {
+          const from = Math.max(audio.startNs, Luna.audioNsAtTick(t, seg, audio, Math.max(s0, start)) - Luna.OVERVIEW_PAIR_NS);
+          const to = Math.min(audio.stopNs, Luna.audioNsAtTick(t, seg, audio, Math.min(s1, end)) + Luna.OVERVIEW_PAIR_NS);
+          item.audio = audio;
+          item.range = await cache.range(audio.source, from, Math.max(from, to), kind).catch(() => undefined);
+          if (ticket !== sceneTicket || closed) return false;
+        }
+      }
+      // While LUNA makes a segment's new rendering there is no audio to draw: keep the waveform
+      // last drawn for the same clip over the same span, as LUNA's timeline does, rather than
+      // flashing an outline (fact 116).
+      if (!item.audio && fadable(clip)) {
+        const before = scene?.rows.flatMap((r) => r.segments).find((p) => p.clip.id === clip.id && p.s0 === s0 && p.s1 === s1 && p.audio);
+        if (before) { item.audio = before.audio; item.range = before.range; item.held = true; }
+      }
+      segments.push(item);
+    }
+    rows.push({ track, lane, segments });
+  }
+  if (ticket !== sceneTicket || closed) return false;
+  scene = { t, start, end, span, rows };
+  const h = RULER + Math.max(1, rows.length) * LANE;
+  if (canvas.height !== h) canvas.height = h;
+  paint();
+  renderTable();
+  updateControls();
+  return true;
+}
+
+function paint() {
+  ctx.clearRect(0, 0, W, canvas.height);
+  if (!scene) return;
+  const { t, start, end } = scene;
+  ctx.font = '12px system-ui'; ctx.textBaseline = 'top'; ctx.lineWidth = 1;
+  // Bars.
+  const first = t.barBeat(start).bar, last = t.barBeat(end).bar, step = Math.max(1, Math.ceil((last - first) / 32));
+  for (let bar = first; bar <= last; bar++) {
+    const x = xOf(t.tickAt({ bar }));
+    if (x < 0 || x > W) continue;
+    ctx.strokeStyle = (bar - first) % step === 0 ? '#5d6e80' : '#2c3640';
+    ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, canvas.height); ctx.stroke();
+    if ((bar - first) % step === 0) { ctx.fillStyle = '#e4eaf1'; ctx.fillText(String(bar), x + 3, 2); }
+  }
+  let noFades = false;
+  for (const [row, { track, lane, segments }] of scene.rows.entries()) {
+    const top = RULER + row * LANE;
+    ctx.strokeStyle = '#26303a'; ctx.beginPath(); ctx.moveTo(0, top + LANE - 0.5); ctx.lineTo(W, top + LANE - 0.5); ctx.stroke();
+    for (const item of segments) {
+      if (!item.reportsFades) noFades = true;
+      paintSegment(item, top, selectedSegment()?.id === item.seg.id && selected.lane === lane, track.color.value);
+    }
+    ctx.fillStyle = '#acb9c8'; ctx.fillText(track.name.value ?? track.id, 4, top + 2);
+  }
+  // Fades go over every segment, after all of them: a crossfade reaches across the edit into
+  // the neighbour, which would otherwise paint over that half.
+  for (const [row, { lane, segments }] of scene.rows.entries()) {
+    for (const item of segments) paintFades(item, RULER + row * LANE, segments);
+  }
+  const shown = drag ?? committing;
+  if (shown?.preview) paintPreview(shown);
+  if (cursor !== undefined) {
+    const x = xOf(cursor);
+    ctx.strokeStyle = '#4b8bd6'; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); ctx.setLineDash([]);
+  }
+  const tick = session?.transport.location.value?.tick;
+  if (tick !== undefined && tick >= start && tick <= end) {
+    ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(xOf(tick), 0); ctx.lineTo(xOf(tick), canvas.height); ctx.stroke(); ctx.lineWidth = 1;
+  }
+  const count = scene.rows.reduce((n, r) => n + r.segments.length, 0);
+  $('status').textContent = `${session.name.value} · ${scene.rows.length} lane${scene.rows.length === 1 ? '' : 's'} · ${count} segment${count === 1 ? '' : 's'}` +
+    (noFades ? ' · this LUNA does not report fades, so fade editing is off' : '');
+}
+
+function paintSegment(item, top, isSelected, color) {
+  const { seg, clip, s0, s1, audio, range } = item;
+  const x0 = xOf(s0), x1 = xOf(s1), y = top + 16, h = LANE - 20;
+  if (x1 < 0 || x0 > W) return;
+  const muted = clip.muted.value === true;
+  ctx.fillStyle = isSelected ? '#1f3550' : '#1a222b';
+  ctx.fillRect(x0, y, Math.max(1, x1 - x0), h);
+  if (clip.clipType.value === 'midi') paintNotes(ctx, clip, s0, s1, xOf, y + 15, h - 18, color);
+  if (audio && range?.count) {
+    const px0 = Math.max(0, Math.floor(x0)), px1 = Math.min(W, Math.ceil(x1));
+    const cols = Luna.waveformColumns(range, Math.max(0, px1 - px0), (i) => Luna.audioNsAtTick(scene.t, seg, audio, tickAt(px0 + i)),
+      { gain: session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20) });
+    ctx.fillStyle = cssColor(color, muted ? 0.35 : 1);
+    ctx.beginPath();
+    cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, Luna.waveformLanes(cols.channels.length, y + 14, h - 16, 0)[c], px0));
+    ctx.fill();
+  }
+  ctx.strokeStyle = isSelected ? '#8fc1ff' : '#3b4d5e';
+  ctx.strokeRect(x0 + 0.5, y + 0.5, Math.max(1, x1 - x0 - 1), h - 1);
+  ctx.fillStyle = muted ? '#7d8a98' : '#e4eaf1';
+  ctx.fillText(`${clip.name.value || clip.id}${muted ? ' (muted)' : ''}`, Math.max(x0, 0) + 4, y + 2);
+}
+
+/**
+ * A segment's fades and handles. A plain fade shades what it silences; a crossfade is the two
+ * ramps crossing over the edit, each drawn by its own side, so no shading hides the audio.
+ */
+function paintFades(item, top, segments) {
+  const { fadeIn, fadeOut } = item, y = top + 16, h = LANE - 20;
+  if (xOf(item.s1) < 0 || xOf(item.s0) > W) return;
+  for (const [fade, fadingIn] of [[fadeIn, true], [fadeOut, false]]) {
+    if (!fade) continue;
+    const a = xOf(fade.start), b = xOf(fade.stop), [ya, yb] = fadingIn ? [y + h, y] : [y, y + h];
+    if (!fade.crossfade) {
+      ctx.fillStyle = 'rgba(10, 13, 16, 0.55)';
+      ctx.beginPath(); ctx.moveTo(a, ya); ctx.lineTo(b, yb); ctx.lineTo(fadingIn ? a : b, y); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = fade.crossfade ? '#c792ea' : '#e4eaf1';
+    ctx.lineWidth = fade.crossfade ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(a, ya); ctx.lineTo(b, yb); ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+  if (item.reportsFades && fadable(item.clip)) for (const handle of handlesOf(item, top, segments)) {
+    ctx.fillStyle = handle.kind === 'crossfade' ? '#c792ea' : '#e4eaf1';
+    ctx.fillRect(handle.x - HANDLE / 2, handle.y - HANDLE / 2, HANDLE, HANDLE);
+  }
+}
+
+function paintPreview(d) {
+  const top = RULER + d.row * LANE + 16, h = LANE - 20;
+  ctx.strokeStyle = '#ffd479'; ctx.setLineDash([5, 3]);
+  if (d.kind === 'move') ctx.strokeRect(xOf(d.preview.start), top, xOf(d.preview.stop) - xOf(d.preview.start), h);
+  else if (d.kind === 'trimStart' || d.kind === 'trimStop') ctx.strokeRect(xOf(d.preview.start), top, xOf(d.preview.stop) - xOf(d.preview.start), h);
+  else {
+    // A fade-in rises, a fade-out falls, and a crossfade is both across the edit.
+    const a = xOf(d.preview.from), b = xOf(d.preview.to);
+    ctx.beginPath();
+    if (d.kind !== 'fadeOut') { ctx.moveTo(a, top + h); ctx.lineTo(b, top); }
+    if (d.kind !== 'fadeIn') { ctx.moveTo(a, top); ctx.lineTo(b, top + h); }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+/** Fade handles of one segment: at the inner end of each fade, or at the clip edge when there is none. */
+/**
+ * Fade handles of one segment. Where it meets an audio segment of another clip, at a butted
+ * edit or where a clip on top begins or ends over another, one crossfade handle sits on the
+ * edit, drawn by the segment on its left. Otherwise a fade-in handle at the clip's own start
+ * and a fade-out handle at its own end, at the inner end of the fade or the clip edge.
+ */
+function handlesOf(item, top, segments) {
+  const { clip, s0, s1, fadeIn, fadeOut } = item, y = top + 16 + HANDLE / 2, out = [];
+  const i = segments.indexOf(item);
+  const meets = (other) => other && other.clip !== clip && fadable(other.clip);
+  const prev = segments[i - 1]?.s1 === s0 ? segments[i - 1] : undefined;
+  const next = segments[i + 1]?.s0 === s1 ? segments[i + 1] : undefined;
+  if (!meets(prev) && s0 === clip.start.value) {
+    out.push({ kind: 'fadeIn', x: xOf(fadeIn ? fadeIn.stop : s0) + (fadeIn ? 0 : HANDLE), y, fade: fadeIn });
+  }
+  if (meets(next)) out.push({ kind: 'crossfade', x: xOf(s1), y, fade: fadeOut, left: item, right: next, edge: s1 });
+  else if (s1 === clip.stop.value) out.push({ kind: 'fadeOut', x: xOf(fadeOut ? fadeOut.start : s1) - (fadeOut ? 0 : HANDLE), y, fade: fadeOut });
+  return out;
+}
+
+// ── pointer ─────────────────────────────────────────────────────────────────────────────
+// A MIDI segment's notes as bars, pitch scaled to the clip's own range so every piece of a
+// split clip shares one scale. Velocity sets the opacity; muted notes are faint; a note with
+// no note-off runs to the segment's end. Returns how many notes were drawn.
+function paintNotes(ctx, clip, s0, s1, x, top, height, color) {
+  const notes = clip.midi.notes.items, base = clip.start.value;
+  if (!notes.length || base === undefined || height < 4) return 0;
+  let lo = 127, hi = 0;
+  for (const n of notes) { lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); }
+  lo = Math.max(0, lo - 1); hi = Math.min(127, hi + 1);
+  const row = height / (hi - lo + 1), bar = Math.max(1, Math.min(6, row * 0.8));
+  let drawn = 0;
+  for (const n of notes) {
+    const a = Math.max(base + n.startTick, s0), b = Math.min(n.stopTick === undefined ? s1 : base + n.stopTick, s1);
+    if (b <= a) continue;
+    ctx.fillStyle = cssColor(color, n.muted ? 0.25 : 0.45 + 0.55 * (n.velocity / 127));
+    ctx.fillRect(x(a), top + (hi - n.pitch) * row + (row - bar) / 2, Math.max(1, x(b) - x(a)), bar);
+    drawn++;
+  }
+  return drawn;
+}
+
+/** A 16 px cursor drawn as SVG, white on a dark outline so it shows on any background. */
+// Drawn rather than the CSS keywords: LUNA's web view does not draw w-resize/e-resize (fact 118).
+function svgCursor(path, fallback, hotX = 8, hotY = 8) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-linecap="round" stroke-linejoin="round">` +
+    `<path d="${path}" stroke="#101419" stroke-width="4"/><path d="${path}" stroke="#ffffff" stroke-width="2"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotX} ${hotY}, ${fallback}`;
+}
+
+/** The pointer and hint for each kind of edit a drag or click there would make. */
+const EDITS = {
+  move: { cursor: 'grab', dragging: 'grabbing', hint: 'Drag to move what shows of the clip here; click to select it and place the cursor' },
+  // A bracket on the clip edge, opening into the clip, with a double arrow across it.
+  trimStart: { cursor: svgCursor('M7 2 V14 M7 2 H10 M7 14 H10 M2 8 H13 M4 6 L2 8 L4 10 M11 6 L13 8 L11 10', 'col-resize', 7, 8), hint: "Drag to trim the clip's start" },
+  trimStop: { cursor: svgCursor('M9 2 V14 M9 2 H6 M9 14 H6 M3 8 H14 M5 6 L3 8 L5 10 M12 6 L14 8 L12 10', 'col-resize', 9, 8), hint: "Drag to trim the clip's end" },
+  fadeIn: { cursor: svgCursor('M2 14 L14 2', 'nesw-resize'), hint: 'Drag to set the fade-in' },
+  fadeOut: { cursor: svgCursor('M2 2 L14 14', 'nwse-resize'), hint: 'Drag to set the fade-out' },
+  crossfade: { cursor: svgCursor('M2 2 L14 14 M2 14 L14 2', 'col-resize'), hint: 'Drag to set the crossfade; drag to the edit to remove it' },
+  cursor: { cursor: 'text', hint: 'Click to place the cursor' },
+};
+
+let hovered;               // the kind of edit under the pointer, restored after a busy spell
+
+/** Show what a drag or click at this point would do. */
+function showEdit(kind, dragging = false) {
+  hovered = kind;
+  const edit = busy ? { cursor: 'progress', hint: 'Waiting for LUNA…' } : EDITS[kind];
+  canvas.style.cursor = edit ? (dragging && edit.dragging) || edit.cursor : 'default';
+  canvas.title = edit?.hint ?? '';
+  canvas.dataset.edit = busy ? 'busy' : kind ?? '';
+}
+
+function pointAt(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = rect.width ? W / rect.width : 1, sy = rect.height ? canvas.height / rect.height : 1;
+  return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+}
+
+/**
+ * The lanes and segments as the model holds them now. Hit-testing uses these rather than the
+ * last painted scene, which can trail an edit while its waveforms load.
+ */
+function liveRows() {
+  return lanes().map(({ track, lane }) => ({
+    track, lane,
+    segments: lane.compiledClips.inOrder().flatMap((seg) => {
+      const clip = lane.clips.byId(seg.clipUid.value ?? ''), s0 = seg.start.value, s1 = seg.stop.value;
+      return clip && s0 !== undefined && s1 !== undefined ? [{ seg, clip, s0, s1, fadeIn: seg.fadeIn.value, fadeOut: seg.fadeOut.value, reportsFades: seg.reportsFades.value }] : [];
+    }),
+  }));
+}
+
+/** What lies under a point: a fade handle first, then a clip edge, then a clip body. */
+function hit(p) {
+  if (!scene) return undefined;
+  const row = Math.floor((p.y - RULER) / LANE);
+  const r = liveRows()[row];
+  if (!r) return undefined;
+  const top = RULER + row * LANE;
+  for (const item of r.segments) {
+    if (!item.reportsFades || !fadable(item.clip)) continue;
+    for (const handle of handlesOf(item, top, r.segments)) {
+      if (Math.abs(p.x - handle.x) <= HANDLE && Math.abs(p.y - handle.y) <= HANDLE) return { row, lane: r.lane, item, kind: handle.kind, handle };
+    }
+  }
+  const tick = tickAt(p.x);
+  const item = r.segments.find((s) => tick >= s.s0 && tick < s.s1);
+  if (!item || p.y < top + 16) return { row, lane: r.lane };
+  const { clip } = item;
+  if (s0Edge(item) && Math.abs(p.x - xOf(clip.start.value)) <= EDGE) return { row, lane: r.lane, item, kind: 'trimStart' };
+  if (s1Edge(item) && Math.abs(p.x - xOf(clip.stop.value)) <= EDGE) return { row, lane: r.lane, item, kind: 'trimStop' };
+  return { row, lane: r.lane, item, kind: 'move' };
+}
+const s0Edge = (item) => item.s0 === item.clip.start.value;
+const s1Edge = (item) => item.s1 === item.clip.stop.value;
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!scene || busy) return;
+  canvas.focus();
+  const p = pointAt(e), h = hit(p);
+  cursor = snap(tickAt(p.x));
+  if (h?.item) select(h.lane, h.item.clip.id, h.item.s0);
+  if (h?.kind) {
+    drag = { ...h, x: p.x, startTick: tickAt(p.x), moved: false };
+    canvas.setPointerCapture?.(e.pointerId);
+  }
+  paint(); renderTable(); updateControls();
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag) {
+    const h = scene && hit(pointAt(e));
+    showEdit(h?.kind ?? (h?.lane ? 'cursor' : undefined));
+    return;
+  }
+  showEdit(drag.kind, true);
+  const p = pointAt(e);
+  if (Math.abs(p.x - drag.x) > 3) drag.moved = true;
+  if (!drag.moved) return;
+  const { clip } = drag.item, start = clip.start.value, stop = clip.stop.value;
+  const tick = snap(tickAt(p.x)), delta = tick - snap(drag.startTick);
+  switch (drag.kind) {
+    // A drag moves the piece under the pointer, as in LUNA, not the whole clip (fact 119).
+    case 'move': { const { s0, s1 } = drag.item; drag.preview = { start: Math.max(0, s0 + delta), stop: Math.max(0, s0 + delta) + (s1 - s0) }; break; }
+    case 'trimStart': drag.preview = { start: Math.min(tick, stop - 1), stop }; break;
+    case 'trimStop': drag.preview = { start, stop: Math.max(tick, start + 1) }; break;
+    case 'fadeIn': drag.preview = { from: start, to: Math.min(Math.max(tick, start + 1), stop) }; break;
+    case 'fadeOut': drag.preview = { from: Math.max(Math.min(tick, stop - 1), start), to: stop }; break;
+    case 'crossfade': { const edge = drag.handle.edge; drag.preview = { from: edge - Math.abs(tick - edge), to: edge + Math.abs(tick - edge) }; break; }
+  }
+  paint();
+});
+
+function endDrag() {
+  const d = drag;
+  drag = undefined;
+  if (d) showEdit(d.kind);
+  if (!d?.moved || !d.preview) { paint(); return; }
+  committing = d;
+  const { clip } = d.item, name = clip.name.value || clip.id;
+  switch (d.kind) {
+    case 'move': return edit(`Move ${name} to beat ${beats(d.preview.start)}`, async () => {
+      const moved = await d.item.seg.move(d.preview.start);
+      // Moving part of a clip makes a new clip of it; keep it selected.
+      select(d.lane, moved.clipUid.value ?? clip.id, moved.start.value);
+    });
+    case 'trimStart': case 'trimStop': return edit(`Trim ${name} to ${beats(d.preview.start)}–${beats(d.preview.stop)}`, () => clip.trim(d.preview.start, d.preview.stop));
+    case 'fadeIn': return edit(`Fade in ${name} over ${beats(d.preview.to - d.preview.from)} beats`, () => clip.setFadeIn(d.preview.to - d.preview.from));
+    case 'fadeOut': return edit(`Fade out ${name} over ${beats(d.preview.to - d.preview.from)} beats`, () => clip.setFadeOut(d.preview.to - d.preview.from));
+    case 'crossfade': {
+      // Between the segments either side of the edit, butted or overlapping (fact 117).
+      const { left, right } = d.handle, length = d.preview.to - d.preview.from;
+      return edit(`Crossfade ${nameOf(left.clip)} → ${nameOf(right.clip)} over ${beats(length)} beats`, () =>
+        length > 0 ? left.seg.crossfade(right.seg, length) : left.seg.removeCrossfade(right.seg));
+    }
+  }
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', () => { drag = undefined; paint(); });
+canvas.addEventListener('pointerleave', () => { if (!drag) showEdit(undefined); });
+
+// Keys only while the timeline has focus, so LUNA keeps its own shortcuts everywhere else.
+canvas.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const action = { s: 'split', d: 'duplicate', m: 'mute', Delete: 'delete', Backspace: 'delete' }[e.key];
+  if (!action || $(action).disabled) return;
+  e.preventDefault();
+  $(action).click();
+});
+
+// ── panel ───────────────────────────────────────────────────────────────────────────────
+function segmentsOf(clip) { return selected ? selected.lane.compiledClips.ofClip(clip.id) : []; }
+
+function updateControls() {
+  const clip = selectedClip();
+  const reportsFades = clip ? segmentsOf(clip).some((s) => s.reportsFades.value) : false;
+  const clipFades = reportsFades && fadable(clip);
+  const after = clip && editAfter(), next = after?.other, piece = selectedSegment();
+  const inside = clip && cursor !== undefined && cursor > clip.start.value && cursor < clip.stop.value;
+  const set = (id, on) => { $(id).disabled = busy || !on; };
+  for (const id of ['duplicate', 'mute', 'front', 'back', 'slipLeft', 'slipRight', 'heal', 'delete']) set(id, !!clip);
+  set('split', inside);
+  set('splitLane', !!selected && cursor !== undefined);
+  for (const id of ['batch', 'unfade']) set(id, !!selected && reportsFades);
+  for (const id of ['fadeIn', 'fadeOut', 'applyCurve', 'resetCurve', 'removeIn', 'removeOut']) set(id, clipFades);
+  set('crossfade', clipFades && !!after);
+  set('removeCross', clipFades && !!after);
+  $('mute').textContent = clip?.muted.value ? 'Unmute' : 'Mute';
+  $('info').textContent = clip
+    ? `${clip.name.value || clip.id} · beats ${beats(clip.start.value)}–${beats(clip.stop.value)}` +
+      (piece && (piece.start.value !== clip.start.value || piece.stop.value !== clip.stop.value) ? ` · showing ${beats(piece.start.value)}–${beats(piece.stop.value)}` : '') +
+      ` · source from ${((clip.sourceStart.value ?? 0) / 1e9).toFixed(3)} s` +
+      `${cursor !== undefined ? ` · cursor at beat ${beats(cursor)}` : ''}${next ? ` · next: ${next.name.value || next.id}` : ''}`
+    : 'Nothing selected. Click a clip, or a row below.';
+}
+
+/** The fades a curve change applies to: the selected piece's, and the other half of each crossfade. */
+function selectedFades() {
+  const clip = selectedClip(), piece = selectedSegment(), fades = [];
+  for (const f of [piece?.fadeIn.value, piece?.fadeOut.value]) if (f) fades.push(f);
+  for (const f of [...fades]) {
+    if (!f.contributorClipUid) continue;
+    for (const seg of selected.lane.compiledClips.ofClip(f.contributorClipUid)) {
+      for (const g of [seg.fadeIn.value, seg.fadeOut.value]) if (g?.contributorClipUid === clip.id) fades.push(g);
+    }
+  }
+  return fades;
+}
+
+const act = (id, what, fn) => { $(id).onclick = () => { const clip = selectedClip(); if (clip) void edit(what(clip), () => fn(clip)); }; };
+const nameOf = (clip) => clip.name.value || clip.id;
+act('split', (c) => `Split ${nameOf(c)} at beat ${beats(cursor)}`, (c) => c.split(cursor));
+// Duplicates what shows of the clip, the selected piece, right after it (fact 119).
+act('duplicate', (c) => `Duplicate ${nameOf(c)}`, async () => {
+  const piece = selectedSegment();
+  const copy = await piece.move(piece.stop.value, { copy: true });
+  select(selected.lane, copy.clipUid.value, copy.start.value);
+});
+act('mute', (c) => `${c.muted.value ? 'Unmute' : 'Mute'} ${nameOf(c)}`, (c) => c.setMuted(!c.muted.value));
+act('front', (c) => `Bring ${nameOf(c)} to front`, (c) => c.bringToFront());
+act('back', (c) => `Send ${nameOf(c)} to back`, (c) => c.sendToBack());
+act('slipLeft', (c) => `Slip ${nameOf(c)} 10 ms earlier`, (c) => c.slip(-10_000_000));
+act('slipRight', (c) => `Slip ${nameOf(c)} 10 ms later`, (c) => c.slip(10_000_000));
+act('heal', (c) => `Heal ${nameOf(c)} with the clip after it`, (c) => selected.lane.heal(c.start.value, c.stop.value));
+act('delete', (c) => `Delete ${nameOf(c)}`, async (c) => { await c.delete(); selected = undefined; });
+act('fadeIn', (c) => `Fade in ${nameOf(c)}`, (c) => c.setFadeIn(fadeTicks(), { shape: $('shape').value }));
+act('fadeOut', (c) => `Fade out ${nameOf(c)}`, (c) => c.setFadeOut(fadeTicks(), { shape: $('shape').value }));
+act('crossfade', (c) => `Crossfade ${nameOf(c)} into ${nameOf(editAfter().other)}`, () => {
+  const { left, right } = editAfter();
+  return left.crossfade(right, fadeTicks(), { align: $('align').value, shape: $('shape').value });
+});
+act('removeIn', (c) => `Remove the fade-in of ${nameOf(c)}`, (c) => c.removeFadeIn());
+act('removeOut', (c) => `Remove the fade-out of ${nameOf(c)}`, (c) => c.removeFadeOut());
+act('removeCross', (c) => `Remove the crossfade after ${nameOf(c)}`, () => { const { left, right } = editAfter(); return left.removeCrossfade(right); });
+act('applyCurve', (c) => `Set the fades of ${nameOf(c)} to ${$('shape').value}, curvature ${$('curve').value}`, (c) =>
+  session.setFadeCurve(selectedFades(), { shape: $('shape').value, curvature: Number($('curve').value) }));
+act('resetCurve', (c) => `Reset the fade curves of ${nameOf(c)}`, (c) => session.setFadeCurve(selectedFades(), { reset: true }));
+$('splitLane').onclick = () => selected && void edit(`Split lane at beat ${beats(cursor)}`, () => selected.lane.split(cursor));
+$('batch').onclick = () => selected && void edit(`Fade every clip on the lane over ${$('batchMs').value} ms`, () =>
+  selected.lane.addFades({ startTick: 0, stopTick: contentEnd(), lengthNs: Number($('batchMs').value) * 1e6, shape: $('shape').value }));
+$('unfade').onclick = () => selected && void edit('Remove every fade on the lane', () => selected.lane.deleteFades(0, contentEnd() + 8 * B));
+$('undo').onclick = () => session && void edit('Undo', () => session.undo());
+$('redo').onclick = () => session && void edit('Redo', () => session.redo());
+
+// ── table ───────────────────────────────────────────────────────────────────────────────
+function renderTable() {
+  const tbody = $('clips');
+  tbody.replaceChildren();
+  for (const { track, lane } of lanes()) {
+    for (const clip of [...lane.clips.items].sort((a, b) => (a.start.value ?? 0) - (b.start.value ?? 0))) {
+      const segs = lane.compiledClips.ofClip(clip.id);
+      const fades = segs.flatMap((s) => [s.fadeIn.value && (s.fadeIn.value.crossfade ? 'crossfade in' : 'in'), s.fadeOut.value && (s.fadeOut.value.crossfade ? 'crossfade out' : 'out')]).filter(Boolean);
+      const tr = tbody.insertRow();
+      tr.dataset.clip = clip.id;
+      if (selected?.lane === lane && selected.clipUid === clip.id) tr.className = 'selected';
+      for (const value of [track.name.value ?? track.id, nameOf(clip), `${beats(clip.start.value)} → ${beats(clip.stop.value)}`,
+        segs.length === 0 ? 'hidden' : segs.length === 1 ? 'whole' : `${segs.length} pieces`, fades.join(', ') || '—', clip.muted.value ? 'yes' : '']) {
+        tr.insertCell().textContent = value;
+      }
+      tr.onclick = () => { select(lane, clip.id); paint(); renderTable(); updateControls(); };
+    }
+  }
+  if (!tbody.rows.length) { const td = tbody.insertRow().insertCell(); td.colSpan = 6; td.textContent = 'No clips. Record or import some audio in LUNA.'; }
+}
+
+// ── connection ──────────────────────────────────────────────────────────────────────────
+function bindAll() {
+  for (const off of liveOffs) off();
+  liveOffs = [];
+  const later = () => void gather();
+  liveOffs.push(session.playlists.onChange(() => { bindAll(); later(); }));
+  liveOffs.push(session.tracks.onChange(() => { void loadLanes().then(() => { bindAll(); later(); }); }));
+  for (const { track } of lanes()) liveOffs.push(track.color.onChange(() => paint()));
+  for (const { lane } of lanes()) {
+    liveOffs.push(lane.clips.onChange(() => { bindAll(); later(); }));
+    liveOffs.push(lane.compiledClips.onChange(() => { bindAll(); later(); }));
+    for (const clip of lane.clips.items) for (const p of [clip.name, clip.start, clip.stop, clip.sourceStart, clip.muted, clip.gain, clip.renderState]) liveOffs.push(p.onChange(later));
+    // A MIDI clip's notes, read once and followed as they are edited in LUNA.
+    for (const clip of lane.clips.items.filter((c) => c.clipType.value === 'midi')) {
+      void clip.midi.ready().then(later, () => {});
+      liveOffs.push(clip.midi.notes.onChange(later));
+    }
+    for (const seg of lane.compiledClips.items) for (const p of [seg.start, seg.stop, seg.sourceStart, seg.fadeIn, seg.fadeOut]) liveOffs.push(p.onChange(later));
+  }
+  if (session.sources) liveOffs.push(session.sources.onChange(later));
+  liveOffs.push(session.context.waveformZoom.onChange(later));
+  liveOffs.push(session.transport.location.onChange(() => { if (!drag) paint(); }));
+}
+
+async function loadLanes() {
+  for (const { lane } of lanes()) { await lane.clips.load(); await lane.compiledClips.load(); }
+}
+
+async function refresh() {
+  const ticket = ++generation;
+  $('refresh').disabled = true;
+  try {
+    if (!luna) {
+      luna = await Luna.connect();
+      if (closed) { await luna.close(); return; }
+      offs.push(Luna.bindShortcuts(luna).dispose);   // LUNA's undo, redo, play and record keys
+      offs.push(luna.raw.onStatus((state) => { if (state === 'disconnected') $('status').textContent = 'Disconnected. Refresh once LUNA is back.'; }));
+    }
+    session = await luna.session();
+    await Promise.all([session.musical.ready(), session.sources?.load() ?? Promise.resolve()]);
+    await loadLanes();
+    if (ticket !== generation || closed) return;
+    bindAll();
+    extent = 0;
+    await gather();
+  } catch (e) {
+    if (ticket === generation && !closed) $('status').textContent = e.message;
+  } finally {
+    if (!closed) $('refresh').disabled = false;
+  }
+}
+
+$('refresh').onclick = refresh;
+$('scroll').addEventListener('input', () => { scrollTo(Number($('scroll').value) / 1000); void gather(); });
+$('zoom').onchange = () => { extent = 0; void gather(); };
+window.addEventListener('pagehide', () => {
+  closed = true; ++generation;
+  for (const off of liveOffs) off();
+  for (const off of offs) off();
+  void luna?.close();
+});
+updateControls();
+void refresh();
+</script>
+</html>

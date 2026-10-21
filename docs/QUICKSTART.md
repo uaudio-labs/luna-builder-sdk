@@ -1,7 +1,7 @@
 # Quickstart
 
 Build a LUNA Add On with `@uaudio/luna-builder-sdk`, all under `Luna`. Read once; then use the headings.
-No audio streaming. Live MIDI out is `Luna.SendMidi` and `Luna.QwertyMidi` (section 10); live MIDI input is Web MIDI (`navigator.requestMIDIAccess()`).
+No audio streaming. Live MIDI out is `Luna.SendMidi` and `Luna.QwertyMidi`, live MIDI in from hardware is `Luna.MidiInput` (section 10). Use `Luna.MidiInput` for MIDI input, not Web MIDI (`navigator.requestMIDIAccess()`): LUNA's macOS web view has no Web MIDI, and `Luna.MidiInput` hears the devices LUNA's MIDI settings list, the same way inside LUNA and in a browser.
 
 ## 1. Create and run
 
@@ -28,9 +28,8 @@ const luna = await Luna.connect({ engine: 'mock', setup: (e) => e.addSession('s'
 Throws `Luna.NotRunning` if nothing answers; afterwards it reconnects by itself. `luna.status`
 is a Prop (`connecting | connected | disconnected | closed`); `luna.engine` names the engine.
 
-Inside LUNA, every key the page does not `preventDefault()` goes on to LUNA's own shortcuts. Bind
-the standard ones (undo, redo, play, record) after connecting so they also work when the page runs
-outside LUNA; inside LUNA the call does nothing:
+Inside LUNA, every key the page does not `preventDefault()` goes on to LUNA's own shortcuts. Bind the standard
+ones (undo, redo, play, record) after connecting so they also work outside LUNA; inside LUNA the call does nothing:
 
 ```js
 Luna.bindShortcuts(luna);                                                // fact 79
@@ -48,10 +47,9 @@ await track.name.set('Lead Vocal');     // optimistic write, rolls back on rejec
 stop();
 ```
 
-Every list is a `Collection`: `.items`, `.byId(id)`, `.onChange(fn)`, `.load()`,
-`.membersReady()`. A member the engine adds is in `.items` at once but empty until the SDK has
-read it; `onChange` and `membersReady()` wait for that read. Notifications coalesce per frame.
-Writes resolve on acknowledgement; `.value` holds them at once, echoed or not (fact 6).
+Every list is a `Collection`: `.items`, `.byId(id)`, `.onChange(fn)`, `.load()`, `.membersReady()`. A member the
+engine adds is in `.items` at once but empty until the SDK has read it; `onChange` and `membersReady()` wait for that
+read. Notifications coalesce per frame. Writes resolve on acknowledgement; `.value` holds them at once, echoed or not (fact 6).
 
 ## 4. Session
 
@@ -152,29 +150,29 @@ await pl.clips.load();
 for (const c of pl.clips.items) c.start.value, c.stop.value;     // ticks
 c.sourceStart.value, c.sourceStop.value;                         // nanoseconds into the file
 await session.insertClip({ trackUid, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
-await c.trim(a, b); await c.delete(); await c.addNote(60, 0, Luna.QUARTER_NOTE);
+await c.trim(a, b); await c.move(b); await c.split(a); await c.slip(10e6); await c.setMuted(true); await c.delete();   // one undo step each (fact 117)
+await c.setFadeIn(Luna.QUARTER_NOTE, { shape: 'equal_power' }); await c.crossfade(next, Luna.EIGHTH_NOTE); await c.addNote(60, 0, Luna.QUARTER_NOTE);
 await c.addNotes([60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })));  // one undo step
-const src = session.sources.byId(c.sourceUid.value);
-const ov = await src.overview({ index: 0, count: 1024 });   // min/max floats -1..1, one page
+const ov = await session.sources.byId(c.sourceUid.value).overview({ index: 0, count: 1024 });   // min/max floats -1..1, one page
 await session.newPlaylists([track.id], { duplicate: true }); await session.setPlaylist(track.id, 2);
 ```
 
-A clip that does not fit its source's tempo plays a stretched render; draw what `clipAudio` picks (fact 73):
+Clips can overlap, and the higher layer plays: draw a lane from its compiled clips, which resolve that, with their fades as `seg.fadeIn`/`seg.fadeOut` in ticks (fact 116). A stretched clip draws LUNA's render (fact 73):
 
 ```js
-const audio = Luna.clipAudio(clip, session.sources);      // undefined => draw an outline, never silence
-const cache = new Luna.Waveforms();
-const kind = Luna.kindForScale(nsPerPixel);               // 'coarse' past 31.25 ms per pixel
-const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
-const ns = Luna.audioNsAtTick(session.musical.timeline, clip, audio, tick);   // tick -> file offset
-// One min/max per pixel per channel, linear at LUNA's waveform zoom times the clip gain; column i's left edge is file offset nsAt(i).
-const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);
-const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(session.musical.timeline, clip, audio, tickAtPx(i)), { gain });
-const lanes = Luna.waveformLanes(cols.channels.length, top, height, 0);   // stereo: left lane above right
-ctx.beginPath(); cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0)); ctx.fill();   // LUNA's shape (fact 93)
+await pl.compiledClips.load();                              // asks LUNA to publish them for this lane
+const t = session.musical.timeline, cache = new Luna.Waveforms(), kind = Luna.kindForScale(nsPerPixel);  // 'coarse' past 31.25 ms per pixel
+for (const seg of pl.compiledClips.inOrder()) {             // non-overlapping, earliest first
+  const clip = pl.clips.byId(seg.clipUid.value), audio = Luna.compiledClipAudio(t, seg, clip, session.sources);  // undefined => draw an outline, never silence
+  const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
+  const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);   // LUNA's waveform zoom times the clip gain
+  const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(t, seg, audio, tickAtPx(i)), { gain });   // one min/max per pixel per channel
+  const lanes = Luna.waveformLanes(cols.channels.length, top, height, 0);   // stereo: left lane above right
+  ctx.beginPath(); cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0)); ctx.fill();   // LUNA's shape (fact 93)
+}
 ```
 
-`examples/arrangement.html` is the whole picture: lanes, ruler, waveforms and playhead, live.
+`examples/arrangement.html` is the whole picture, live; `docs/CLIPS.md` and `examples/clip-editor.html` cover editing clips and fades.
 
 ## 8. Effects and plugins
 
@@ -182,9 +180,11 @@ ctx.beginPath(); cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, la
 await luna.plugins.load();
 const comp = luna.plugins.find('1176')[0];          // or byCategory('Compressor')
 const slot = await track.insert(comp.id);           // first empty slot; resolves once loaded, rejects with plugin_error (fact 86)
-slot.loaded.value; slot.params;                     // live parameters are Controls, touched on write
-await slot.setIn(false);                            // bypass (not the `enabled` property)
-await slot.clear();
+slot.loaded.value; slot.params; await slot.setIn(false); // parameters are Controls, touched on write; bypass is setIn, not `enabled`
+const sel = luna.presets.selection(slot.pluginId.value); await sel.ready();   // preset picker; sel.groups = tag chips by group (fact 120)
+await sel.search.set('warm'); await sel.toggleTag('Clean'); await sel.settled(); // filters names + tags, debounced, stale replies dropped
+sel.presets.items; sel.recommendations.items;  // UA Assistant's picks for the text, within the tags: need luna.assistant.enabled and the plugin inserted after it connected (fact 121)
+await slot.loadPreset(sel.presets.items[0].uid); sel.dispose(); await slot.clear();   // examples/presets.html
 ```
 
 ## 9. Markers, chords, tempo, selection
@@ -212,7 +212,7 @@ await Luna.settle(() => !pl.clips.byId(uid), 'delete clip', { refresh: () => pl.
 
 ## 10. MIDI edits and recording
 
-Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps in its own and restores yours. In a batch `transaction()` the lists catch up at the commit; `lane.createNotes` needs a continuous one, where each call replaces the last take (fact 115). To play a note live instead, `new Luna.SendMidi(luna).sendMidiNote(session.uid, track.id, 60, 100, true)`; `Luna.QwertyMidi` plays from the keyboard.
+Velocity, mute and note deletion go through LUNA's edit *selection* (fact 74): the SDK swaps in its own and restores yours. In a batch `transaction()` the lists catch up at the commit; `lane.createNotes` needs a continuous one, where each call replaces the last take (fact 115). To play a note live instead, `new Luna.SendMidi(luna).sendMidiNote(session.uid, track.id, 60, 100, true)`; `sendNoteToOutput(device, 60, 100, true)` plays a hardware synth on one of `luna.midiDevices`; `Luna.QwertyMidi` plays from the keyboard. To hear a MIDI keyboard, `new Luna.MidiInput(luna).onNote(device, (note, velocity, on) => ...)` (or `listen(device, (m) => ...)` for every message, `'all'` for every device) after `luna.midiDevices.load()`; it returns the function that stops it. Do not use Web MIDI for this; `examples/midi-input.html` is a whole page.
 
 ```js
 await clip.midi.ready();
@@ -256,10 +256,9 @@ Every command self-describes: `get <node>?properties=0&children=0` returns its J
 
 ## 13. Errors
 
-All errors are `Luna.Error` with `.code`: the engine's string (`uasrv.invalid_property`,
-`uasrv.read_only`, `uasrv.invalid_object`), or `not_running`, `timeout`, `disconnected`,
-`no_session`, `unsupported`, `no_effect` (the edit never showed, fact 71) or `disposed` (the
-node is gone; `node.onDispose(fn)`). A `get` on a missing path answers `{}`, not an error.
+All errors are `Luna.Error` with `.code`: the engine's string (`uasrv.invalid_property`, `uasrv.read_only`,
+`uasrv.invalid_object`), or `not_running`, `timeout`, `disconnected`, `no_session`, `unsupported`, `unavailable`, `no_effect` (the edit
+never showed, fact 71) or `disposed` (the node is gone; `node.onDispose(fn)`). A `get` on a missing path answers `{}`, not an error.
 
 ## 14. Testing
 

@@ -12,6 +12,8 @@ import type { Prop } from '../store/prop';
 import { UAError } from '../wire/errors';
 import { Clip } from './clip';
 import { Collection } from './collection';
+import { CompiledClips, type FadeShape } from './compiled-clip';
+import { requireFadeShape } from './clip';
 import { Context } from './context';
 import type { Note } from './midi';
 import { Node } from './node';
@@ -43,6 +45,11 @@ export class Playlist extends Node {
   readonly stemFormat: Prop<string>;
   readonly frozen: Prop<boolean>;
   readonly clips: Collection<Clip>;
+  /**
+   * What the playlist actually plays: the clips with overlaps resolved by layer, and their
+   * fades (fact 116). Draw from these rather than from `clips`.
+   */
+  readonly compiledClips: CompiledClips;
 
   private readonly sessionUid: string;
   private readonly transactionMode: (() => TransactionMode | undefined) | undefined;
@@ -58,7 +65,8 @@ export class Playlist extends Node {
     this.version = this.prop<number>('version');
     this.stemFormat = this.prop<string>('stem_format');
     this.frozen = this.prop<boolean>('frozen');
-    this.clips = new Collection<Clip>(client, `${path}/clips`, (p) => new Clip(client, p, sessionUid, transactionMode), { levels: 2, commands: false, flatvalue: true });
+    this.clips = new Collection<Clip>(client, `${path}/clips`, (p) => new Clip(client, p, sessionUid, transactionMode, () => this.clips), { levels: 2, commands: false, flatvalue: true });
+    this.compiledClips = new CompiledClips(client, `${path}/compiled_clips`, () => this.property<boolean>('enable_compiled_clips').set(true));
     this.sessionUid = sessionUid;
     this.transactionMode = transactionMode;
   }
@@ -175,7 +183,83 @@ export class Playlist extends Node {
     return { clip: clip!, notes: found };
   }
 
+  /**
+   * Cut every clip on this lane at each tick (LUNA's `separate_clips`). One undo step.
+   *
+   * @example
+   * await lane.split([bar(5), bar(9)]);
+   */
+  async split(at: number | readonly number[]): Promise<void> {
+    const ticks = (typeof at === 'number' ? [at] : [...at]).map((t) => requireTick(t, 'at'));
+    if (!ticks.length) throw new UAError('out_of_range', 'split(): give at least one tick', { path: this.path });
+    await this.contextPost('separate_clips', { location: ticks, playlist_uid: [this.id] });
+  }
+
+  /**
+   * Join clips that were split apart and still play on from each other in their source
+   * (LUNA's `heal_separation`). It acts on clips starting after `startTick` up to and
+   * **including** `stopTick`, and on the clip running into `startTick`, so a clip that begins
+   * exactly at `stopTick` and continues the same audio is joined too (fact 117). One undo
+   * step; the user's selection is put back afterwards.
+   *
+   * @example
+   * await lane.heal(clip.start.value!, clip.stop.value! - 1);
+   */
+  async heal(startTick: number, stopTick: number): Promise<void> {
+    requireTick(startTick, 'startTick');
+    requireTick(stopTick, 'stopTick');
+    if (stopTick <= startTick) throw new UAError('out_of_range', 'heal(): stopTick must be after startTick', { path: this.path });
+    const context = this.context;
+    await context.refreshSelection().catch(() => {});
+    const saved = context.snapshot();
+    try {
+      await context.select({ startTick, stopTick, playlistUids: [this.id] });
+      await this.contextPost('heal_separation', {});
+    } finally {
+      await context.restore(saved).catch(() => {});
+    }
+  }
+
+  /**
+   * Fade in and out every clip on the lane between two ticks, `lengthNs` long, the way
+   * LUNA's Batch Fades does: butted clips get a crossfade. LUNA picks the lane through its
+   * track, so this works only on the track's active playlist (fact 117). One undo step.
+   *
+   * @example
+   * await lane.addFades({ startTick: 0, stopTick: session.transport.maxTick.value!, lengthNs: 10_000_000 });
+   */
+  async addFades(options: { startTick: number; stopTick: number; lengthNs: number; shape?: FadeShape }): Promise<void> {
+    requireTick(options.startTick, 'startTick');
+    requireTick(options.stopTick, 'stopTick');
+    if (!(options.lengthNs > 0)) throw new UAError('out_of_range', 'addFades(): lengthNs must be positive', { path: this.path });
+    const shape = requireFadeShape(options.shape, 'addFades()');
+    const track = this.trackUid.value;
+    if (!track || this.client.store.cell<string>(`/sessions/${this.sessionUid}/tracks/${track}`, 'playlist_uid').value !== this.id) {
+      throw new UAError('unavailable', "addFades(): LUNA fades only a track's active playlist", { path: this.path });
+    }
+    await this.contextPost('batch_fades', { track_uid: [track], start: options.startTick, stop: options.stopTick, length: Math.round(options.lengthNs), ...(shape ? { fade_shape: shape } : {}) });
+  }
+
+  /**
+   * Remove every fade, crossfades included, that lies wholly between two ticks on this lane
+   * (LUNA's `delete_fades`). One undo step.
+   *
+   * @example
+   * await lane.deleteFades(0, session.transport.maxTick.value!);
+   */
+  async deleteFades(startTick: number, stopTick: number): Promise<void> {
+    requireTick(startTick, 'startTick');
+    requireTick(stopTick, 'stopTick');
+    await this.contextPost('delete_fades', { playlist_uid: [this.id], start: startTick, stop: stopTick });
+  }
+
+  private contextPost(command: string, payload: Record<string, unknown>): Promise<unknown> {
+    if (this.disposed) return Promise.reject(new UAError('disposed', 'the playlist is gone', { path: this.path }));
+    return this.wire.post(`/sessions/${this.sessionUid}/contexts/main/commands/${command}`, { session_uid: this.sessionUid, ...payload });
+  }
+
   protected override release(): void {
     this.clips.dispose();
+    this.compiledClips.dispose();
   }
 }

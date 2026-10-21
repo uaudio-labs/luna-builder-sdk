@@ -16,6 +16,18 @@
             "height": 900
         },
         {
+            "id": "com.uaudio.builder.clip-editor",
+            "title": "Edit clips and fades (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "clip-editor.html",
+            "local_content_offset": "..",
+            "width": 1200,
+            "height": 960
+        },
+        {
             "id": "com.uaudio.builder.automation",
             "title": "Automation (Builder)",
             "version": "0.1.0",
@@ -124,6 +136,18 @@
             "height": 760
         },
         {
+            "id": "com.uaudio.builder.midi-input",
+            "title": "MIDI input (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "midi-input.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 700
+        },
+        {
             "id": "com.uaudio.builder.mixer",
             "title": "Mixer (Builder)",
             "version": "0.1.0",
@@ -146,6 +170,18 @@
             "local_content_offset": "..",
             "width": 1100,
             "height": 820
+        },
+        {
+            "id": "com.uaudio.builder.presets",
+            "title": "Presets (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "presets.html",
+            "local_content_offset": "..",
+            "width": 1000,
+            "height": 760
         },
         {
             "id": "com.uaudio.builder.ruler",

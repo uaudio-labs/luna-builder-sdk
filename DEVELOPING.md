@@ -22,7 +22,7 @@ npm run test:engine         # against a wasm engine build in headless Chrome (UA
 
 Open `luna-builder-sdk` as the Codex project, or launch `codex` from this directory.
 `AGENTS.md` points to the shared guidance in `CLAUDE.md`; `.agents/skills/` contains
-relative symlinks to the five original skill folders. No plugin installation is
+relative symlinks to the six original skill folders. No plugin installation is
 needed for checkout work. Start a new task after changing project instructions.
 Opening the enclosing HB tree does not automatically discover this nested folder's
 skills; use the SDK folder as the task's working directory.

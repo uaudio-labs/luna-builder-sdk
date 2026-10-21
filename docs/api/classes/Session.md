@@ -795,6 +795,41 @@ Save (commit) the session.
 
 ***
 
+### setFadeCurve()
+
+```ts
+setFadeCurve(fades, options): Promise<void>;
+```
+
+Set the shape and/or curvature of fades, given as `seg.fadeIn.value` / `seg.fadeOut.value`
+from [Playlist.compiledClips](Playlist.md#compiledclips) (pass both halves of a crossfade). LUNA's
+`change_fade_curvature`, one undo step; it also reaches the matching fades of tracks in the
+same edit group. `curvature` is -1 to 1, 0 being the shape's own curve; `reset` puts back
+`log` with curvature 0 (fact 117).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `fades` | readonly ( \| \{ `uid`: `string`; \} \| `undefined`)[] |
+| `options` | \{ `curvature?`: `number`; `reset?`: `boolean`; `shape?`: [`FadeShape`](../type-aliases/FadeShape.md); \} |
+| `options.curvature?` | `number` |
+| `options.reset?` | `boolean` |
+| `options.shape?` | [`FadeShape`](../type-aliases/FadeShape.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+const seg = lane.compiledClips.ofClip(clip.id)[0];
+await session.setFadeCurve([seg.fadeIn.value], { shape: 'equal_power', curvature: 0.3 });
+```
+
+***
+
 ### setPlaylist()
 
 ```ts

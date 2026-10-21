@@ -212,6 +212,25 @@ export class Effect extends Node {
     });
   }
 
+  /**
+   * Load a preset onto the plugin in this slot: its state and its identity, so `presetUid`
+   * and `presetName` follow (fact 122). The preset must belong to the slot's plugin; take its
+   * uid from {@link Presets.query}, {@link Presets.recommend} or a {@link PresetSelection}.
+   * Rejects with code `unavailable` when the slot is empty.
+   *
+   * @example
+   * const [row] = await luna.presets.query({ pluginId: slot.pluginId.value!, search: 'Clean' });
+   * await slot.loadPreset(row.uid);
+   * slot.presetName.value; // row.name
+   */
+  async loadPreset(presetUid: string): Promise<void> {
+    this.assertLive();
+    if (this.pluginId.value === undefined || this.uid.value === undefined) await this.load();
+    const pluginId = this.pluginId.value;
+    if (!pluginId) throw new UAError('unavailable', `loadPreset(): ${this.id} holds no plugin`, { path: this.path });
+    await this.wire.post(`/presets/plugins/${pluginId}/load`, { session_uid: this.sessionUid, uid: this.uid.value, preset_uid: presetUid });
+  }
+
   /** Step through the plugin's presets. */
   nextPreset(): Promise<unknown> {
     return this.post('commands/preset_browser_increment');

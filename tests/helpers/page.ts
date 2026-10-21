@@ -21,6 +21,8 @@ import { Luna } from '../../src/index';
 /** Every 2D call a page makes, in order, so a test can prove it painted. */
 export interface DrawLog {
   calls: string[];
+  /** The same calls with their arguments, for a test that checks where something was drawn. */
+  ops: { name: string; args: unknown[]; fillStyle?: unknown; strokeStyle?: unknown }[];
   clear(): void;
 }
 
@@ -36,6 +38,7 @@ function fakeContext(log: DrawLog): Record<string, unknown> {
   for (const name of CONTEXT_METHODS) {
     ctx[name] = (...args: unknown[]) => {
       log.calls.push(name);
+      log.ops.push({ name, args, fillStyle: ctx['fillStyle'], strokeStyle: ctx['strokeStyle'] });
       if (name === 'measureText') return { width: String(args[0] ?? '').length * 6 };
       if (name === 'createLinearGradient') return { addColorStop: () => undefined };
       if (name === 'getImageData') return { data: new Uint8ClampedArray(4) };
@@ -87,7 +90,7 @@ export async function loadExamplePage(name: string, engine: Luna.MockEngine, opt
     pretendToBeVisual: true,
   });
   const window = dom.window as unknown as Window & typeof globalThis;
-  const draws: DrawLog = { calls: [], clear: () => (draws.calls.length = 0) };
+  const draws: DrawLog = { calls: [], ops: [], clear: () => { draws.calls.length = 0; draws.ops.length = 0; } };
   // jsdom has no canvas; a recording fake keeps drawing pages alive and assertable.
   (window as unknown as { HTMLCanvasElement: { prototype: Record<string, unknown> } }).HTMLCanvasElement.prototype['getContext'] = () => fakeContext(draws);
 

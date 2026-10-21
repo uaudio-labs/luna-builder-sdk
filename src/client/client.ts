@@ -9,9 +9,9 @@ import { Store } from '../store/store';
 import type { Session } from '../model/session';
 import { Sessions } from '../model/sessions';
 import { Plugins } from '../model/plugins';
-import { Presets } from '../model/presets';
+import { Assistant, Presets } from '../model/presets';
 import { Workspace } from '../model/workspace';
-import { Devices, Drivers, Jobs, Preferences, Renders, type AudioInput } from '../model/system';
+import { Devices, Drivers, Jobs, MidiDevices, Preferences, Renders, type AudioInput } from '../model/system';
 import { Gui } from '../model/gui';
 import { Secrets } from './secrets';
 import type { WasmEngine } from '../engine/loader';
@@ -34,12 +34,16 @@ export class Client {
   readonly sessions: Sessions;
   /** The plugin catalog (`/plugins`). Call `load()` once before reading. */
   readonly plugins: Plugins;
-  /** The preset library query (`/presets`). */
+  /** The preset library (`/presets`): query, tag groups, recommendations, live selection. */
   readonly presets: Presets;
+  /** Whether UA Assistant is connected to LUNA (`/assistant`); preset recommendations need it. */
+  readonly assistant: Assistant;
   /** Session packages on disk and the workspace query. */
   readonly workspace: Workspace;
   readonly drivers: Drivers;
   readonly devices: Devices;
+  /** The MIDI devices LUNA sees (`/devices/<LUNA>/midi`), `All` and `None` included. */
+  readonly midiDevices: MidiDevices;
   readonly preferences: Preferences;
   readonly renders: Renders;
   readonly jobs: Jobs;
@@ -62,10 +66,12 @@ export class Client {
     this.statusUnsub = port.onStatus((s) => this.statusCell.update(s));
     this.sessions = new Sessions(this);
     this.plugins = new Plugins(this);
+    this.assistant = new Assistant(this);
     this.presets = new Presets(this);
     this.workspace = new Workspace(this);
     this.drivers = new Drivers(this);
     this.devices = new Devices(this);
+    this.midiDevices = new MidiDevices(this);
     this.preferences = new Preferences(this);
     this.renders = new Renders(this);
     this.jobs = new Jobs(this);

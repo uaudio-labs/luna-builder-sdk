@@ -189,6 +189,41 @@ const clipUid = engine.addMidiClip('abc', 'Keys', { startTick: 0, stopTick: Luna
 
 ***
 
+### addMidiDevice()
+
+```ts
+addMidiDevice(name, options): string;
+```
+
+Add a MIDI device under LUNA's device (`/devices/<LUNA_DEVICE_UID>/midi`, fact 123). The
+first call also adds LUNA's device, the `midi` folder, and the `All` and `None` entries
+LUNA lists beside the real devices, each with an input port only. The device gets an input
+and an output port unless `input` or `output` is false. Returns the device's uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `name` | `string` |
+| `options` | \{ `deviceType?`: `string`; `input?`: `boolean`; `output?`: `boolean`; `uid?`: `string`; \} |
+| `options.deviceType?` | `string` |
+| `options.input?` | `boolean` |
+| `options.output?` | `boolean` |
+| `options.uid?` | `string` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+engine.addMidiDevice('Volt 876');
+engine.addMidiDevice('IAC Driver Bus 1', { uid: 'iac1' });
+```
+
+***
+
 ### addNode()
 
 ```ts
@@ -267,7 +302,8 @@ addPreset(
    options): string;
 ```
 
-Add a preset for a plugin to the library (fact 98). Returns its uid.
+Add a preset for a plugin to the library (fact 98), with any `tags` (fact 120). Returns
+its uid.
 
 #### Parameters
 
@@ -275,11 +311,42 @@ Add a preset for a plugin to the library (fact 98). Returns its uid.
 | ------ | ------ |
 | `pluginId` | `string` |
 | `name` | `string` |
-| `options` | \{ `factory?`: `boolean`; `favorite?`: `boolean`; `uid?`: `string`; `version?`: `number`; \} |
+| `options` | \{ `factory?`: `boolean`; `favorite?`: `boolean`; `tags?`: `string`[]; `uid?`: `string`; `version?`: `number`; \} |
 | `options.factory?` | `boolean` |
 | `options.favorite?` | `boolean` |
+| `options.tags?` | `string`[] |
 | `options.uid?` | `string` |
 | `options.version?` | `number` |
+
+#### Returns
+
+`string`
+
+***
+
+### addPresetTagGroup()
+
+```ts
+addPresetTagGroup(
+   pluginId, 
+   name, 
+   tags, 
+   options): string;
+```
+
+Add a group of preset tags for a plugin, as LUNA keeps them: a sub-category named `name`
+under the category `category` (default `Default`) holding the tags (fact 120). Returns
+the sub-category uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `pluginId` | `string` |
+| `name` | `string` |
+| `tags` | `string`[] |
+| `options` | \{ `category?`: `string`; \} |
+| `options.category?` | `string` |
 
 #### Returns
 
@@ -521,6 +588,26 @@ has(path): boolean;
 
 ***
 
+### isMidiOutputPortUid()
+
+```ts
+isMidiOutputPortUid(uid): boolean;
+```
+
+True when `uid` is a mock MIDI device's output port uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `uid` | `string` |
+
+#### Returns
+
+`boolean`
+
+***
+
 ### locationAt()
 
 ```ts
@@ -643,6 +730,45 @@ Names of a node's properties.
 
 ***
 
+### receiveMidi()
+
+```ts
+receiveMidi(
+   device, 
+   messages, 
+   options): number;
+```
+
+MIDI arriving from a device, as LUNA publishes it (fact 125): one batch on the device's
+input port `midi_events`, and the same batch on `All`'s. Like LUNA, nothing is published
+on a port no one subscribes to by its `midi_events` path, and a `get` reads no events.
+`device` is a uid from [addMidiDevice](#addmididevice) or a device name; each message is
+`[status, data1, data2]`, stamped `timeMs` (default 0) apart by `stepMs` (default 1).
+Returns how many ports published.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `device` | `string` |
+| `messages` | readonly readonly \[`number`, `number`, `number`\][] |
+| `options` | \{ `stepMs?`: `number`; `timeMs?`: `number`; \} |
+| `options.stepMs?` | `number` |
+| `options.timeMs?` | `number` |
+
+#### Returns
+
+`number`
+
+#### Example
+
+```ts
+engine.addMidiDevice('Volt 876', { uid: 'volt' });
+engine.receiveMidi('volt', [[0x90, 60, 100], [0x80, 60, 0]]);
+```
+
+***
+
 ### removeNode()
 
 ```ts
@@ -656,6 +782,48 @@ Remove a node and its subtree. Pushes `removed` to subscribers.
 | Parameter | Type |
 | ------ | ------ |
 | `path` | `string` |
+
+#### Returns
+
+`void`
+
+***
+
+### setAssistantEnabled()
+
+```ts
+setAssistantEnabled(enabled): void;
+```
+
+Connect or disconnect UA Assistant, which preset recommendations need (fact 121).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `enabled` | `boolean` |
+
+#### Returns
+
+`void`
+
+***
+
+### setPresetRecommendations()
+
+```ts
+setPresetRecommendations(pluginId, recommend): void;
+```
+
+Script what UA Assistant recommends for a plugin. Without one the mock ranks the plugin's
+presets by how many words of the query appear in their name or tags.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `pluginId` | `string` |
+| `recommend` | (`query`) => `object`[] |
 
 #### Returns
 

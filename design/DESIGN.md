@@ -48,7 +48,7 @@ Goals, in priority order:
 | 9 | Manifest | Add `version`, `sdk_version`, `min_luna_version`, `engines` to `manifest.json` (v1). |
 | 10 | Dev tooling | `docs/EVIDENCE.md` records measured daemon behaviours. A `serve` command hosts pages with COOP/COEP, with an optional proxy to native LUNA. |
 | 11 | Not in v1 | Capability detection object. The `WasmD_Bridge` change (see Risks) is tracked as a separate hbsystem request, not a builder task. |
-| 12 | Streaming | No audio streaming and no live MIDI input: an Add On receives live MIDI with Web MIDI. Live MIDI *out* is in scope as one message per call through LUNA's `send_midi` (`Luna.SendMidi`, `Luna.QwertyMidi`, ported from uanet-clients' `UASSendMidi`/`UASQwertyMidi` with their method names). (Revised from "sending MIDI is the Add On's own business", NEXT-2380.) |
+| 12 | Streaming | No audio streaming. Live MIDI *out* is in scope as one message per call through LUNA's `send_midi` (`Luna.SendMidi`, `Luna.QwertyMidi`, ported from uanet-clients' `UASSendMidi`/`UASQwertyMidi` with their method names). (Revised from "sending MIDI is the Add On's own business", NEXT-2380.) Live MIDI *in* from hardware is in scope as `Luna.MidiInput`, through a LUNA tap on the MIDI driver input published on each input port's `midi_events` while subscribed (fact 125); MIDI an Add On sends is not echoed, and any Add On may listen. (Revised from "an Add On receives live MIDI with Web MIDI", NEXT-2542: LUNA's macOS web view has no Web MIDI.) |
 
 ## The Luna namespace
 

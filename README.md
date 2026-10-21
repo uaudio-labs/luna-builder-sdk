@@ -8,11 +8,11 @@ Status: alpha. Sessions, transport, tracks, controls, buses, playlists, clips, M
 automation, renders and recording are implemented and tested against a live LUNA. See
 [CHANGELOG.md](CHANGELOG.md).
 
-Not supported: streaming audio or MIDI. The SDK controls and edits a session (clips, notes,
-parameters, transport); it does not carry live audio or MIDI to or from LUNA. An Add On that
-wants live MIDI input receives it with [Web MIDI](https://developer.mozilla.org/docs/Web/API/Web_MIDI_API)
-(`navigator.requestMIDIAccess()`); sending MIDI, through Web MIDI or otherwise, is up to the
-Add On.
+Not supported: streaming audio. The SDK controls and edits a session (clips, notes,
+parameters, transport). It carries live MIDI messages, not audio: `Luna.SendMidi` plays them on
+a track or out of a MIDI device, and `Luna.MidiInput` receives what the MIDI devices LUNA sees
+are sending. Use `Luna.MidiInput` for live MIDI input, not Web MIDI
+(`navigator.requestMIDIAccess()`): LUNA's macOS web view has no Web MIDI, and `Luna.MidiInput` hears the devices LUNA's MIDI settings list, the same way inside LUNA and in a browser.
 
 ## Get set up
 
@@ -30,10 +30,13 @@ in one, only in the Add Ons you scaffold from it. A scaffold's `.npmrc` sets
 
 ## Build an Add On
 
-Read `docs/QUICKSTART.md` first, then `docs/RECIPES.md` for eleven Add Ons worth asking an
+Read `docs/QUICKSTART.md` first, then `docs/RECIPES.md` for thirteen Add Ons worth asking an
 agent for. An Add On that loads the user's files should read `docs/FILES.md`: a `File` for the
 page and a path for LUNA are two separate routes, and LUNA 3.1.0.4589 has no working file
-picker. `docs/api/` is the generated reference, `docs/llms.txt`
+picker. An Add On that draws or edits clips and fades should read `docs/CLIPS.md` first:
+draw LUNA's compiled clips, not the overlapping raw ones, and edit them the way LUNA does.
+A preset picker should start from `examples/presets.html` and `luna.presets.selection()`.
+`docs/api/` is the generated reference, `docs/llms.txt`
 the index for coding agents, and `skills/` holds shared Claude Code and Codex skills for creating, extending,
 testing and debugging Add Ons. From this folder:
 
@@ -50,7 +53,7 @@ npx ua-builder doctor                               # what is reachable from her
 
 ## Install for an agent
 
-The same five skills ship as an agent plugin, [ua-luna-builder](plugin/README.md),
+The same six skills ship as an agent plugin, [ua-luna-builder](plugin/README.md),
 which also carries the SDK builds, its CLI, the scaffold template, the examples and the
 consumer docs. An agent holding only the plugin can build, test and install an Add On with
 no checkout, no npm install and no network.
@@ -154,8 +157,8 @@ const luna = await Luna.connect({ port_: engine.port() });
 src/          the SDK source; everything public is exported from src/luna.ts as Luna.<Name>
 cli/          ua-builder new/serve/install/pack/doctor, built to dist/cli.js
 tests/        vitest: unit (Luna.MockEngine), live (a running LUNA)
-docs/         QUICKSTART.md, FILES.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
-skills/       create-add-on, add-feature, test-add-on, debug-connection, verify-add-on
+docs/         QUICKSTART.md, FILES.md, CLIPS.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
+skills/       create-add-on, add-feature, test-add-on, debug-connection, verify-add-on, edit-clips
 templates/    add-on-basic scaffold
 examples/     addon (master mute), mixer, inserts, ruler, sends, tracks (raw wire), plus
               check-*.mjs probes

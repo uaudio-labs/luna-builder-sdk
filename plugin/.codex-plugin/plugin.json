@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "LUNA Add On Builder",
     "shortDescription": "Build, test and install LUNA Add Ons.",
-    "longDescription": "Scaffold, extend, test and install LUNA Add Ons with the bundled luna-builder-sdk, five skills and four worked examples. Runs against a LUNA on the same machine.",
+    "longDescription": "Scaffold, extend, test and install LUNA Add Ons with the bundled luna-builder-sdk, six skills and four worked examples. Runs against a LUNA on the same machine.",
     "developerName": "Universal Audio",
     "category": "Productivity",
     "capabilities": [],

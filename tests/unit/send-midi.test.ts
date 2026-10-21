@@ -98,6 +98,80 @@ describe('Luna.SendMidi', () => {
   });
 });
 
+describe('Luna.SendMidi to a MIDI output port (fact 124)', () => {
+  async function withDevices() {
+    const engine = new Luna.MockEngine();
+    engine.addMidiDevice('Volt 876', { uid: 'volt' });
+    engine.addMidiDevice('Keyboard', { uid: 'kbd', output: false });
+    await engine.settled();
+    const luna = await Luna.connect({ port_: engine.port() });
+    await luna.midiDevices.load();
+    const volt = luna.midiDevices.byId('volt')!;
+    const kbd = luna.midiDevices.byId('kbd')!;
+    return { engine, midi: new Luna.SendMidi(luna), volt, kbd };
+  }
+
+  it('sends a note out of a device\'s output port, by device, port or uid', async () => {
+    const { engine, midi, volt } = await withDevices();
+    await midi.sendNoteToOutput(volt, 60, 100, true);
+    await midi.sendNoteToOutput(volt.outputPort!, 60, 0, false);
+    await midi.sendMidiToOutput('volt_out', 0xe0, 0x00, 0x40);
+    expect(engine.midiSent).toEqual([
+      { outputPortUid: 'volt_out', bytes: [0x90, 60, 100], recordEnabled: false },
+      { outputPortUid: 'volt_out', bytes: [0x80, 60, 0], recordEnabled: false },
+      { outputPortUid: 'volt_out', bytes: [0xe0, 0x00, 0x40], recordEnabled: false },
+    ]);
+  });
+
+  it('puts the channel in the status byte for notes, controllers and program changes', async () => {
+    const { engine, midi, volt } = await withDevices();
+    await midi.sendNoteToOutput(volt, 64, 90, true, 9);
+    await midi.sendControllerToOutput(volt, 7, 100, 2);
+    await midi.sendProgramChangeToOutput(volt, 5, 0, 12, 3);
+    expect(engine.midiSent.map((m) => m.bytes)).toEqual([
+      [0x99, 64, 90],
+      [0xb2, 7, 100],
+      [0xb3, 0, 0],
+      [0xb3, 32, 12],
+      [0xc3, 5, 0],
+    ]);
+  });
+
+  it('rejects a device without MIDI out, an input port, and bad bytes before sending', async () => {
+    const { engine, midi, volt, kbd } = await withDevices();
+    await expect(midi.sendNoteToOutput(kbd, 60, 100, true)).rejects.toMatchObject({ code: 'not_found' });
+    await expect(midi.sendNoteToOutput(volt.inputPort!, 60, 100, true)).rejects.toMatchObject({ code: 'invalid_value' });
+    await expect(midi.sendMidiToOutput('', 0x90, 60, 100)).rejects.toMatchObject({ code: 'invalid_value' });
+    await expect(midi.sendNoteToOutput(volt, 128, 100, true)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.sendNoteToOutput(volt, 60, 100, true, 16)).rejects.toMatchObject({ code: 'out_of_range' });
+    expect(engine.midiSent).toEqual([]);
+  });
+
+  it('still feeds a device name in as that device\'s input', async () => {
+    const { engine, midi } = await withDevices();
+    await midi.sendDeviceNote('Volt 876', 60, 100, true);
+    expect(engine.midiSent).toEqual([{ midiInputSource: 'Volt 876', bytes: [0x90, 60, 100], recordEnabled: false }]);
+  });
+
+  it('plays QwertyMidi keys out of an output port, note-off to the same port', async () => {
+    const { engine, midi, volt } = await withDevices();
+    const qwerty = new Luna.QwertyMidi(midi);
+    const ev = (k: string) => ({ key: k, metaKey: false, ctrlKey: false, altKey: false, preventDefault() {} });
+    expect(qwerty.handleKeyDownToOutput(ev('a'), volt, 2)).toBe(true);
+    expect(qwerty.handleKeyDownToOutput(ev('a'), volt, 2)).toBe(true); // key repeat: not replayed
+    expect(qwerty.handleKeyUp(ev('a'))).toBe(true);
+    qwerty.handleKeyDownToOutput(ev('s'), volt);
+    qwerty.releaseAll();
+    await vi.waitFor(() => expect(engine.midiSent).toHaveLength(4));
+    expect(engine.midiSent).toEqual([
+      { outputPortUid: 'volt_out', bytes: [0x92, 48, 100], recordEnabled: false },
+      { outputPortUid: 'volt_out', bytes: [0x82, 48, 0], recordEnabled: false },
+      { outputPortUid: 'volt_out', bytes: [0x90, 50, 100], recordEnabled: false },
+      { outputPortUid: 'volt_out', bytes: [0x80, 50, 0], recordEnabled: false },
+    ]);
+  });
+});
+
 describe('Luna.QwertyMidi', () => {
   it('plays A as C4 and releases it on keyup, claiming both events', async () => {
     const { engine, luna, session, piano, midi } = await connected();

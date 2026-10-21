@@ -23,7 +23,8 @@ import { Markers } from './markers';
 import { SessionPreferences } from './preferences';
 import { Musical } from './musical';
 import { Node } from './node';
-import type { Clip } from './clip';
+import { requireFadeShape, type Clip } from './clip';
+import type { FadeShape } from './compiled-clip';
 import { Playlist } from './playlist';
 import { requireTick, settle } from './settle';
 import { Render } from './system';
@@ -457,6 +458,35 @@ export class Session extends Node {
     if (options.trackUids !== undefined) payload['track_uid'] = options.trackUids;
     if (options.copy !== undefined) payload['copy'] = options.copy;
     return this.post('move_clips', payload);
+  }
+
+  /**
+   * Set the shape and/or curvature of fades, given as `seg.fadeIn.value` / `seg.fadeOut.value`
+   * from {@link Playlist.compiledClips} (pass both halves of a crossfade). LUNA's
+   * `change_fade_curvature`, one undo step; it also reaches the matching fades of tracks in the
+   * same edit group. `curvature` is -1 to 1, 0 being the shape's own curve; `reset` puts back
+   * `log` with curvature 0 (fact 117).
+   *
+   * @example
+   * const seg = lane.compiledClips.ofClip(clip.id)[0];
+   * await session.setFadeCurve([seg.fadeIn.value], { shape: 'equal_power', curvature: 0.3 });
+   */
+  async setFadeCurve(fades: ReadonlyArray<{ readonly uid: string } | undefined>, options: { shape?: FadeShape; curvature?: number; reset?: boolean }): Promise<void> {
+    const uids = fades.map((f) => f?.uid).filter((u): u is string => typeof u === 'string' && u.length > 0);
+    if (!uids.length) throw new UAError('out_of_range', 'setFadeCurve(): give at least one fade');
+    const shape = requireFadeShape(options.shape, 'setFadeCurve()');
+    const payload: Record<string, unknown> = { session_uid: this.uid, fades: uids };
+    if (options.reset) payload['default'] = true;
+    if (shape) payload['fade_shape'] = shape;
+    if (options.curvature !== undefined) {
+      if (!Number.isFinite(options.curvature) || options.curvature < -1 || options.curvature > 1) throw new UAError('out_of_range', 'setFadeCurve(): curvature must be between -1 and 1');
+      // LUNA moves every fade by (curvature - initial[0]) from its own initial value; equal
+      // initial values make that an absolute setting for all of them.
+      payload['fade_curvature'] = options.curvature;
+      payload['initial_curvature_values'] = uids.map(() => 0);
+    }
+    if (!options.reset && !shape && options.curvature === undefined) throw new UAError('out_of_range', 'setFadeCurve(): give shape, curvature or reset');
+    await this.wire.post(`${this.path}/contexts/main/commands/change_fade_curvature`, payload);
   }
 
   /**

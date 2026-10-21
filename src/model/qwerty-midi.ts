@@ -23,9 +23,12 @@
  * document.addEventListener('keyup', (e) => qwerty.handleKeyUp(e));
  * window.addEventListener('blur', () => qwerty.releaseAll());
  * qwerty.octave.onChange(() => (label.textContent = `Octave ${qwerty.octave.value}`));
+ *
+ * To play a hardware synth instead of a track, use {@link handleKeyDownToOutput} with one of
+ * `luna.midiDevices`; `handleKeyUp` and `releaseAll` are the same for both.
  */
 import { Cell, writable, type WritableProp } from '../store/prop';
-import type { SendMidi } from './send-midi';
+import type { MidiOutputTarget, SendMidi } from './send-midi';
 
 const NOTE_OFFSETS: Readonly<Record<string, number>> = {
   A: 0,
@@ -57,10 +60,11 @@ const VELOCITY_MAX = 127;
 export type QwertyKeyEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'preventDefault'> & Partial<Pick<KeyboardEvent, 'target' | 'isComposing'>>;
 
 interface HeldNote {
-  note: number;
-  sessionUid: string;
-  trackUid: string;
+  /** Sends this note's note-off to wherever its note-on went. */
+  release(): Promise<void>;
 }
+
+type NoteSender = (note: number, velocity: number, noteOn: boolean) => Promise<void>;
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(v)));
 
@@ -105,6 +109,26 @@ export class QwertyMidi {
    * document.addEventListener('keydown', (e) => qwerty.handleKeyDown(e, session.uid, track.id));
    */
   handleKeyDown(e: QwertyKeyEvent, sessionUid: string, trackUid: string): boolean {
+    return this.keyDown(e, (note, velocity, noteOn) => this.sendMidi.sendMidiNote(sessionUid, trackUid, note, velocity, noteOn));
+  }
+
+  /**
+   * Handle a keydown, playing the note out of a MIDI device's output port rather than on a
+   * track (fact 124). Same keys and return value as {@link handleKeyDown}; the note-off on
+   * keyup goes to the same port.
+   *
+   * @param channel MIDI channel, 0-15. Default 0.
+   *
+   * @example
+   * await luna.midiDevices.load();
+   * const synth = luna.midiDevices.items.find((d) => d.name.value === 'Volt 876');
+   * document.addEventListener('keydown', (e) => synth?.outputPort && qwerty.handleKeyDownToOutput(e, synth));
+   */
+  handleKeyDownToOutput(e: QwertyKeyEvent, output: MidiOutputTarget, channel = 0): boolean {
+    return this.keyDown(e, (note, velocity, noteOn) => this.sendMidi.sendNoteToOutput(output, note, velocity, noteOn, channel));
+  }
+
+  private keyDown(e: QwertyKeyEvent, send: NoteSender): boolean {
     if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || isEditable(e.target)) return false;
     const key = keyOf(e);
     const octave = this.octaveCell.value ?? 4;
@@ -135,15 +159,15 @@ export class QwertyMidi {
     if (this.heldNotes.has(key)) return true; // key repeat
 
     const note = octave * 12 + offset;
-    this.heldNotes.set(key, { note, sessionUid, trackUid });
-    void this.sendMidi.sendMidiNote(sessionUid, trackUid, note, velocity, true).catch(warn);
+    this.heldNotes.set(key, { release: () => send(note, 0, false) });
+    void send(note, velocity, true).catch(warn);
     return true;
   }
 
   /**
    * Handle a keyup. Returns true, having called `preventDefault()`, when it released a held
-   * note. The note-off goes to the track and pitch the note-on went to, even if the octave
-   * changed while it was held.
+   * note. The note-off goes to the track or output and pitch the note-on went to, even if the
+   * octave or the target changed while it was held.
    *
    * @example
    * document.addEventListener('keyup', (e) => qwerty.handleKeyUp(e));
@@ -154,7 +178,7 @@ export class QwertyMidi {
     if (held === undefined) return false;
     this.heldNotes.delete(key);
     e.preventDefault();
-    void this.sendMidi.sendMidiNote(held.sessionUid, held.trackUid, held.note, 0, false).catch(warn);
+    void held.release().catch(warn);
     return true;
   }
 
@@ -168,7 +192,7 @@ export class QwertyMidi {
   releaseAll(): void {
     const held = [...this.heldNotes.values()];
     this.heldNotes.clear();
-    for (const h of held) void this.sendMidi.sendMidiNote(h.sessionUid, h.trackUid, h.note, 0, false).catch(warn);
+    for (const h of held) void h.release().catch(warn);
   }
 
   /** Forget held notes without sending note-offs, after the connection was replaced. */

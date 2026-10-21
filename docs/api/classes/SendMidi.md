@@ -70,6 +70,39 @@ await midi.sendController(session.uid, track.id, 64, 127);  // sustain down
 
 ***
 
+### sendControllerToOutput()
+
+```ts
+sendControllerToOutput(
+   output, 
+   controller, 
+   value, 
+channel): Promise<void>;
+```
+
+Send a Control Change out of a MIDI device's output port.
+
+#### Parameters
+
+| Parameter | Type | Default value | Description |
+| ------ | ------ | ------ | ------ |
+| `output` | [`MidiOutputTarget`](../type-aliases/MidiOutputTarget.md) | `undefined` | - |
+| `controller` | `number` | `undefined` | CC number, 0-127 (7 volume, 10 pan, 64 sustain). |
+| `value` | `number` | `undefined` | CC value, 0-127. |
+| `channel` | `number` | `0` | MIDI channel, 0-15. Default 0. |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await midi.sendControllerToOutput(synth, 7, 100);  // volume
+```
+
+***
+
 ### sendDeviceNote()
 
 ```ts
@@ -81,8 +114,9 @@ noteOn): Promise<void>;
 ```
 
 Send a note-on or note-off on channel 1 to a MIDI input source by name, as though it came
-from that device, bypassing track routing. LUNA answers success for a name it does not know
-(fact 108), so a typo fails silently.
+from that device, bypassing track routing. It goes into LUNA, not out to the device; to
+play the hardware use [sendNoteToOutput](#sendnotetooutput). LUNA answers success for a name it does not
+know (fact 108), so a typo fails silently.
 
 #### Parameters
 
@@ -178,6 +212,80 @@ await midi.sendMidiNote(session.uid, track.id, 60, 0, false);   // note-off
 
 ***
 
+### sendMidiToOutput()
+
+```ts
+sendMidiToOutput(
+   output, 
+   byte0, 
+   byte1, 
+byte2): Promise<void>;
+```
+
+Send any 3-byte MIDI message out of a MIDI device's output port, to the hardware rather
+than a track (fact 124). The channel is in the status byte's low nibble. LUNA answers
+success whatever the uid, so a port that has gone (the device was unplugged, or LUNA
+restarted and gave it a new uid) fails silently: look the device up by name each session.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `output` | [`MidiOutputTarget`](../type-aliases/MidiOutputTarget.md) |
+| `byte0` | `number` |
+| `byte1` | `number` |
+| `byte2` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.midiDevices.load();
+const synth = luna.midiDevices.items.find((d) => d.name.value === 'Volt 876');
+if (synth?.outputPort) await midi.sendMidiToOutput(synth, 0xe0, 0x00, 0x40);  // pitch bend centre
+```
+
+***
+
+### sendNoteToOutput()
+
+```ts
+sendNoteToOutput(
+   output, 
+   note, 
+   velocity, 
+   noteOn, 
+channel): Promise<void>;
+```
+
+Send a note-on or note-off out of a MIDI device's output port.
+
+#### Parameters
+
+| Parameter | Type | Default value | Description |
+| ------ | ------ | ------ | ------ |
+| `output` | [`MidiOutputTarget`](../type-aliases/MidiOutputTarget.md) | `undefined` | - |
+| `note` | `number` | `undefined` | - |
+| `velocity` | `number` | `undefined` | - |
+| `noteOn` | `boolean` | `undefined` | - |
+| `channel` | `number` | `0` | MIDI channel, 0-15. Default 0. |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await midi.sendNoteToOutput(synth, 60, 100, true);  // note-on, middle C
+await midi.sendNoteToOutput(synth, 60, 0, false);   // note-off
+```
+
+***
+
 ### sendNoteToTracks()
 
 ```ts
@@ -253,4 +361,40 @@ time, so another sender on the same track could land between them.
 ```ts
 await midi.sendProgramChange(session.uid, track.id, 0);         // program only
 await midi.sendProgramChange(session.uid, track.id, 5, 0, 12);  // bank 0/12, program 5
+```
+
+***
+
+### sendProgramChangeToOutput()
+
+```ts
+sendProgramChangeToOutput(
+   output, 
+   program, 
+   bankMSB?, 
+   bankLSB?, 
+channel?): Promise<void>;
+```
+
+Send a Program Change out of a MIDI device's output port, after Bank Select MSB and LSB
+(CC 0 and CC 32) when either bank is given; the one left out is sent as 0.
+
+#### Parameters
+
+| Parameter | Type | Default value | Description |
+| ------ | ------ | ------ | ------ |
+| `output` | [`MidiOutputTarget`](../type-aliases/MidiOutputTarget.md) | `undefined` | - |
+| `program` | `number` | `undefined` | - |
+| `bankMSB?` | `number` | `undefined` | - |
+| `bankLSB?` | `number` | `undefined` | - |
+| `channel?` | `number` | `0` | MIDI channel, 0-15. Default 0. |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await midi.sendProgramChangeToOutput(synth, 5, 0, 12);  // bank 0/12, program 5
 ```

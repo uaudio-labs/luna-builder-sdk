@@ -5,6 +5,7 @@
 | Class | Description |
 | ------ | ------ |
 | [AddOn](classes/AddOn.md) | - |
+| [Assistant](classes/Assistant.md) | `/assistant`: whether UA Assistant is connected to LUNA. Preset recommendations need it (fact 121). Call `watch()` to follow it. |
 | [AudioSource](classes/AudioSource.md) | - |
 | [Automation](classes/Automation.md) | An observable ordered collection with id lookup. |
 | [Bindings](classes/Bindings.md) | - |
@@ -17,6 +18,8 @@
 | [Client](classes/Client.md) | - |
 | [Clip](classes/Clip.md) | - |
 | [Collection](classes/Collection.md) | An observable ordered collection with id lookup. |
+| [CompiledClip](classes/CompiledClip.md) | - |
+| [CompiledClips](classes/CompiledClips.md) | A playlist's compiled clips. Loading or watching turns on `enable_compiled_clips` first, since LUNA publishes nothing until a client asks (fact 116). The SDK never turns it off: the switch is shared by every client of the session. |
 | [ConnectionLost](classes/ConnectionLost.md) | The connection dropped (or was closed) while a request was in flight, or a request was made while disconnected. |
 | [Context](classes/Context.md) | - |
 | [Control](classes/Control.md) | - |
@@ -37,6 +40,10 @@
 | [Markers](classes/Markers.md) | An observable ordered collection with id lookup. |
 | [Meter](classes/Meter.md) | - |
 | [MidiClip](classes/MidiClip.md) | The MIDI of one clip, reached as `clip.midi`. Both lists notify once per frame, like every other [List](interfaces/List.md). An audio clip's table is empty. |
+| [MidiDevice](classes/MidiDevice.md) | `/devices/<LUNA>/midi/<uid>`: a MIDI device LUNA sees, as its MIDI settings list it. Besides the real devices, LUNA lists `All` and `None`, whose settings read `null`; `isPhysical` is false for those two (fact 123). |
+| [MidiDevices](classes/MidiDevices.md) | `/devices/<LUNA>/midi`: the MIDI devices LUNA sees. The folder is outside any session, so `watch()` it to follow devices plugged in or removed (fact 34). |
+| [MidiInput](classes/MidiInput.md) | Live MIDI input from the MIDI devices LUNA sees (fact 125). Use this for MIDI input in an Add On, not Web MIDI (`navigator.requestMIDIAccess()`): LUNA's macOS web view has no Web MIDI, and this works the same inside LUNA and in a browser. |
+| [MidiPort](classes/MidiPort.md) | `/devices/<LUNA>/midi/<uid>/input_ports/<n>` or `output_ports/<n>`: one of a MIDI device's ports. `uid` is the engine node MIDI from the device (an input port) or to it (an output port) passes through (fact 123). |
 | [MockEngine](classes/MockEngine.md) | - |
 | [MockPort](classes/MockPort.md) | One client connection to a [MockEngine](classes/MockEngine.md). |
 | [Musical](classes/Musical.md) | The musical structure of one session. |
@@ -50,6 +57,7 @@
 | [PreferenceContext](classes/PreferenceContext.md) | `/sessions/<uid>/preferences/<context>`: one context's preferences. Get one with `session.preferences.context(name)`. |
 | [Preferences](classes/Preferences.md) | `/preferences`: engine preferences as writable properties by name. |
 | [Presets](classes/Presets.md) | - |
+| [PresetSelection](classes/PresetSelection.md) | Created by [Presets.selection](classes/Presets.md#selection). |
 | [QwertyMidi](classes/QwertyMidi.md) | - |
 | [Render](classes/Render.md) | `/renders/<uid>`: a bounce or an export. `state` runs `created` -> `running` -> `completed` | `aborted`, and LUNA drops the node shortly after it settles, so latch anything you still need rather than reading it later (fact 44). |
 | [Renders](classes/Renders.md) | An observable ordered collection with id lookup. |
@@ -89,6 +97,9 @@
 | [ClipNote](interfaces/ClipNote.md) | One note for [Clip.addNotes](classes/Clip.md#addnotes). `tick` is relative to the clip start. |
 | [ClipSnapshot](interfaces/ClipSnapshot.md) | A clip's state at one moment, as plain data: what a view draws from. |
 | [ClockOptions](interfaces/ClockOptions.md) | - |
+| [CompiledClipLike](interfaces/CompiledClipLike.md) | - |
+| [CompiledClipSnapshot](interfaces/CompiledClipSnapshot.md) | A compiled clip's state at one moment, as plain data: what a view draws from. |
+| [CompiledFade](interfaces/CompiledFade.md) | One fade of a compiled clip, as LUNA applies it (fact 116). Ticks are absolute. |
 | [ConnectOptions](interfaces/ConnectOptions.md) | - |
 | [ControlBinding](interfaces/ControlBinding.md) | What [bindRange](functions/bindRange.md) and [bindDrag](functions/bindDrag.md) return. |
 | [CreateSessionOptions](interfaces/CreateSessionOptions.md) | - |
@@ -106,6 +117,8 @@
 | [LocationOptions](interfaces/LocationOptions.md) | - |
 | [MidiEvent](interfaces/MidiEvent.md) | One MIDI event to add to a clip. `tick` is relative to the clip start. |
 | [MidiHost](interfaces/MidiHost.md) | What a MIDI edit needs to reach LUNA's edit context: the session it lives in, the playlist that holds the clip, and the clip's own start tick (the selection is in absolute ticks). |
+| [MidiInputListenOptions](interfaces/MidiInputListenOptions.md) | Options for [MidiInput.listen](classes/MidiInput.md#listen). |
+| [MidiInputMessage](interfaces/MidiInputMessage.md) | One message a MIDI device sent LUNA. |
 | [MidiRow](interfaces/MidiRow.md) | One row of a clip's MIDI table: a single MIDI message at a clip-relative tick. |
 | [MidiRowData](interfaces/MidiRowData.md) | The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). |
 | [MockEngineOptions](interfaces/MockEngineOptions.md) | - |
@@ -128,7 +141,10 @@
 | [Port](interfaces/Port.md) | A connection to one engine. |
 | [PreferenceEditOptions](interfaces/PreferenceEditOptions.md) | Options for an edit of a session preference. |
 | [PresetQueryOptions](interfaces/PresetQueryOptions.md) | - |
+| [PresetRecommendation](interfaces/PresetRecommendation.md) | One preset UA Assistant recommends for a search, best first (fact 121). |
 | [PresetRow](interfaces/PresetRow.md) | - |
+| [PresetSelectionOptions](interfaces/PresetSelectionOptions.md) | - |
+| [PresetTagGroup](interfaces/PresetTagGroup.md) | A named group of a plugin's preset tags, for example Paradise's `TYPE`, `GENRE` and `DESCRIPTION`. LUNA keeps them as categories holding sub-categories holding tags (fact 120); a group is one sub-category. |
 | [ProgressTask](interfaces/ProgressTask.md) | - |
 | [Prop](interfaces/Prop.md) | A readable, observable value. `value` is `undefined` until the first load or push. |
 | [QueryOptions](interfaces/QueryOptions.md) | - |
@@ -170,13 +186,18 @@
 | [CommandHandler](type-aliases/CommandHandler.md) | - |
 | [ContextType](type-aliases/ContextType.md) | - |
 | [ControlType](type-aliases/ControlType.md) | - |
+| [CrossfadeAlign](type-aliases/CrossfadeAlign.md) | Where a crossfade sits on the edit between two clips, for [Clip.crossfade](classes/Clip.md#crossfade). |
 | [EventHandler](type-aliases/EventHandler.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [FadeShape](type-aliases/FadeShape.md) | LUNA's fade shapes. Another string is passed through as LUNA sent it. |
 | [FolderMode](type-aliases/FolderMode.md) | - |
 | [GuiPage](type-aliases/GuiPage.md) | - |
 | [InsertSlot](type-aliases/InsertSlot.md) | - |
 | [KeyCombo](type-aliases/KeyCombo.md) | A key combination as `Modifier+...+Key`. Modifiers are `Mod` (Cmd on a Mac, Ctrl elsewhere), `Cmd`, `Ctrl`, `Alt` and `Shift`, and the ones named must be exactly the ones held. The key is a `KeyboardEvent.key` (`z`, case-insensitive) or `KeyboardEvent.code` (`Space`, `Numpad0`, `KeyZ`). |
 | [LogFn](type-aliases/LogFn.md) | Where a port reports what it does: status changes, reconnect attempts, timeouts, and listeners that threw. The default sends `warn` and `error` to the console. |
 | [LogLevel](type-aliases/LogLevel.md) | Severity of a [LogFn](type-aliases/LogFn.md) message. |
+| [MidiInputTarget](type-aliases/MidiInputTarget.md) | Where [MidiInput.listen](classes/MidiInput.md#listen) listens: a device (its input port), an input port, or every device. |
+| [MidiInputType](type-aliases/MidiInputType.md) | What a channel message is, from its status byte. A note-on with velocity 0 is a `noteOff`. |
+| [MidiOutputTarget](type-aliases/MidiOutputTarget.md) | Where a `...ToOutput` method sends: a MIDI device (its output port), one of its output ports, or an output port's `uid`. |
 | [Operation](type-aliases/Operation.md) | Structural change carried by an [Event](interfaces/Event.md). Absent for a property value change. |
 | [OverviewKind](type-aliases/OverviewKind.md) | `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. |
 | [PortStatus](type-aliases/PortStatus.md) | Connection state as reported by [Port.onStatus](interfaces/Port.md#onstatus). |
@@ -214,6 +235,7 @@
 | [EDIT\_TIMEOUT\_MS](variables/EDIT_TIMEOUT_MS.md) | How long [settle](functions/settle.md) waits by default for the model to reflect an edit. |
 | [EIGHTH\_NOTE](variables/EIGHTH_NOTE.md) | - |
 | [HALF\_NOTE](variables/HALF_NOTE.md) | - |
+| [LUNA\_DEVICE\_UID](variables/LUNA_DEVICE_UID.md) | The uid of LUNA's own device under `/devices`, which holds its MIDI devices (fact 123). |
 | [MAX\_SECRET\_BYTES](variables/MAX_SECRET_BYTES.md) | Largest secret value, in UTF-8 bytes (Windows Credential Manager's limit, applied everywhere). |
 | [MAX\_SECRET\_NAME\_LENGTH](variables/MAX_SECRET_NAME_LENGTH.md) | Longest secret name, in characters. |
 | [OVERVIEW\_PAIR\_NS](variables/OVERVIEW_PAIR_NS.md) | Nanoseconds per fine overview pair: 125 samples at 48 kHz (fact 72). |
@@ -242,11 +264,13 @@
 | [bindShortcuts](functions/bindShortcuts.md) | Give a page LUNA's standard shortcuts for undo, redo, play and record, as a fallback behind its own key handling, when LUNA is not there to handle them. |
 | [canDropPaths](functions/canDropPaths.md) | True when native path drops can be used: the page is in LUNA's webview, which publishes `window.lunaAPI.setAcceptsFileDrops`. False in a browser and in tests. |
 | [clients](functions/clients.md) | Every [Client](classes/Client.md) this page has made and not closed, in creation order. A tooling hook: `ua-builder probe` waits on `Luna.clients().some((c) => c.connected)` to know an Add On's page has finished connecting before it reads the DOM. |
-| [clipAudio](functions/clipAudio.md) | Which audio a clip plays, or `undefined` when there is nothing safe to draw: no source, or a render LUNA has named but not yet announced. In that second case draw the clip's outline rather than the unstretched original at the wrong scale. |
+| [clipAudio](functions/clipAudio.md) | - |
 | [clipTypeFrom](functions/clipTypeFrom.md) | The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. |
+| [compiledClipAudio](functions/compiledClipAudio.md) | Which audio one compiled segment plays, over the segment only, or `undefined` when there is nothing safe to draw (see [clipAudio](functions/clipAudio.md)). `clip` is the raw clip the segment is cut from (`playlist.clips.byId(segment.clipUid.value)`): it names the source. Map ticks with [audioNsAtTick](functions/audioNsAtTick.md) anchored at the segment, which also reaches into a crossfade's `fullStart`..`fullStop`. |
 | [connect](functions/connect.md) | - |
 | [decodeMessage](functions/decodeMessage.md) | Decode one frame. Tolerates an 8-byte `JSON` header (magic + length) and a trailing NUL, and returns `undefined` for anything unparseable so the receive loop survives a bad frame. |
 | [decodeMidiData](functions/decodeMidiData.md) | Unpack the three MIDI bytes the engine packs into one number (fact 39). |
+| [decodeMidiEvents](functions/decodeMidiEvents.md) | Turn one batch into messages, skipping anything that is not a channel message. Exported for tests. |
 | [derived](functions/derived.md) | A read-only [Prop](interfaces/Prop.md) computed from other props. Recomputes lazily on read and notifies when any source notifies. With `distinct: true` it notifies only when the computed value actually moved ([shallowEquals](functions/shallowEquals.md)) — for a value carved out of a chatty source, such as the tempo on `location` pushes. |
 | [encodeMidiData](functions/encodeMidiData.md) | Pack three MIDI bytes the way the engine's table stores them (fact 39). |
 | [encodePayload](functions/encodePayload.md) | Encode a payload the way the engine parses it: JSON for everything. Strings are quoted so the engine can tell `"1234"` from `1234` (the ambiguity the deprecated String dialect suffers from). [FloatLiteral](classes/FloatLiteral.md)s are written as float literals. |

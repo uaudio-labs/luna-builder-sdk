@@ -108,9 +108,12 @@ function snapshotOf(clip: ClipLike | Clip): ClipLike {
  * @example
  * const audio = Luna.clipAudio(clip, session.sources!);
  */
+function lookup(sources: SourceLookup, uid: string): AudioSource | undefined {
+  return Array.isArray(sources) ? (sources as readonly AudioSource[]).find((s) => s.id === uid) : (sources as { byId(uid: string): AudioSource | undefined }).byId(uid);
+}
+
 export function clipAudio(clip: ClipLike | Clip, sources: SourceLookup): ClipAudio | undefined {
-  const find = (uid: string): AudioSource | undefined =>
-    Array.isArray(sources) ? (sources as readonly AudioSource[]).find((s) => s.id === uid) : (sources as { byId(uid: string): AudioSource | undefined }).byId(uid);
+  const find = (uid: string): AudioSource | undefined => lookup(sources, uid);
   const snap = snapshotOf(clip);
   if (snap.renderState === 'current' && snap.renderSourceUid) {
     const render = find(snap.renderSourceUid);
@@ -122,6 +125,89 @@ export function clipAudio(clip: ClipLike | Clip, sources: SourceLookup): ClipAud
   const source = find(snap.sourceUid);
   if (!source) return undefined;
   return Object.freeze({ source, startNs: snap.sourceStartNs, stopNs: snap.sourceStopNs, stretched: false });
+}
+
+/** The compiled-clip fields placement needs. A {@link CompiledClip} satisfies it, as does its snapshot. */
+type Value<T> = T | undefined | { readonly value: T | undefined };
+
+export interface CompiledClipLike {
+  readonly start: number | undefined | { readonly value: number | undefined };
+  readonly stop: number | undefined | { readonly value: number | undefined };
+  readonly sourceStart: number | undefined | { readonly value: number | undefined };
+  readonly sourceStop: number | undefined | { readonly value: number | undefined };
+  /** The segment's own rendering: a uid, `null` for none, `undefined` when LUNA does not say. */
+  readonly renderSourceUid?: string | null | undefined | { readonly value: string | null | undefined };
+  readonly renderSourceStart?: number | null | undefined | { readonly value: number | null | undefined };
+  readonly renderSourceStop?: number | null | undefined | { readonly value: number | null | undefined };
+  /** True when the segment plays a rendering, made or still being made. */
+  readonly needsRender?: boolean | undefined | { readonly value: boolean | undefined };
+}
+
+function valueOf<T>(v: Value<T>): T | undefined {
+  return typeof v === 'object' && v !== null && 'value' in (v as object) ? (v as { readonly value: T | undefined }).value : (v as T | undefined);
+}
+
+/**
+ * Which audio one compiled segment plays, over the segment only, or `undefined` when there is
+ * nothing safe to draw (see {@link clipAudio}). `clip` is the raw clip the segment is cut from
+ * (`playlist.clips.byId(segment.clipUid.value)`): it names the source. Map ticks with
+ * {@link audioNsAtTick} anchored at the segment, which also reaches into a crossfade's
+ * `fullStart`..`fullStop`.
+ *
+ * A time-stretched clip plays LUNA's renders, one per compiled piece (fact 116), so a segment
+ * draws its own `renderSourceUid` over `renderSourceStart`..`renderSourceStop`. On a LUNA that
+ * does not report those, only the clip's first piece can be placed, by cutting the clip's own
+ * render by time; a later piece is `undefined`, an outline rather than the wrong audio. While
+ * LUNA makes a segment's rendering (after an edit that changes it, such as a crossfade) the
+ * answer is `undefined` too, not the original file at the wrong scale.
+ *
+ * @example
+ * for (const seg of lane.compiledClips.inOrder()) {
+ *   const clip = lane.clips.byId(seg.clipUid.value);
+ *   const audio = clip && Luna.compiledClipAudio(timeline, seg, clip, session.sources);
+ *   if (!audio) continue;
+ *   const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
+ *   const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(timeline, seg, audio, tickAtPx(i)));
+ * }
+ */
+export function compiledClipAudio(
+  timeline: Timeline,
+  segment: CompiledClipLike,
+  clip: (ClipLike & { readonly startTicks: number | undefined }) | Clip,
+  sources: SourceLookup,
+): ClipAudio | undefined {
+  const start = valueOf(segment.start);
+  const stop = valueOf(segment.stop);
+  if (start === undefined || stop === undefined) return undefined;
+  const render = valueOf(segment.renderSourceUid);
+  if (typeof render === 'string' && render) {
+    const source = lookup(sources, render);
+    const from = valueOf(segment.renderSourceStart);
+    const to = valueOf(segment.renderSourceStop);
+    const length = source?.length.value;
+    if (!source || typeof from !== 'number' || typeof to !== 'number') return undefined;
+    return Object.freeze({ source, startNs: Math.max(0, from), stopNs: length === undefined ? to : Math.min(length, to), stretched: true });
+  }
+  // A segment that plays a rendering LUNA has not made yet: nothing safe to draw (fact 116).
+  if (valueOf(segment.needsRender) === true) return undefined;
+  const whole = clipAudio(clip, sources);
+  const stretchedClip = snapshotOf(clip).renderState === 'current';
+  // LUNA reports per-segment renders and this one has none yet: a stretched clip's original
+  // source would be at the wrong scale, so draw an outline until the render arrives.
+  if (render === null && stretchedClip) return undefined;
+  if (!whole) return undefined;
+  if (whole.stretched) {
+    // An older LUNA: the clip's render is its first piece's, starting at the clip start.
+    const clipStart = 'startTicks' in clip ? clip.startTicks : clip.start.value;
+    if (clipStart === undefined || start !== clipStart) return undefined;
+    const at = (tick: number) => Math.max(0, (timeline.seconds(tick) - timeline.seconds(clipStart)) * 1e9);
+    return Object.freeze({ source: whole.source, startNs: at(start), stopNs: Math.min(whole.stopNs, at(stop)), stretched: true });
+  }
+  // LUNA rewrites a segment's source range to cover only that segment (fact 116).
+  const startNs = valueOf(segment.sourceStart);
+  const stopNs = valueOf(segment.sourceStop);
+  if (startNs === undefined || stopNs === undefined) return undefined;
+  return Object.freeze({ source: whole.source, startNs, stopNs, stretched: false });
 }
 
 /**

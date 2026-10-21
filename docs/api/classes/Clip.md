@@ -248,6 +248,43 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### crossfade()
+
+```ts
+crossfade(
+   next, 
+   lengthTicks, 
+options): Promise<void>;
+```
+
+Crossfade from this clip into `next`, which must start where this one stops on the same
+playlist. For clips that overlap, such as one on top over the middle of another, crossfade
+the segments either side of the edit with [CompiledClip.crossfade](CompiledClip.md#crossfade). `align` puts the fade across the edit (`center`, the default), before it or
+after it. Calling again changes the length. Each clip's source must reach past the edit by
+the part of the fade on the other side; LUNA does not check (fact 117).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `next` | `Clip` |
+| `lengthTicks` | `number` |
+| `options` | \{ `align?`: [`CrossfadeAlign`](../type-aliases/CrossfadeAlign.md); `shape?`: [`FadeShape`](../type-aliases/FadeShape.md); \} |
+| `options.align?` | [`CrossfadeAlign`](../type-aliases/CrossfadeAlign.md) |
+| `options.shape?` | [`FadeShape`](../type-aliases/FadeShape.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await left.crossfade(right, Luna.EIGHTH_NOTE);
+```
+
+***
+
 ### delete()
 
 ```ts
@@ -265,6 +302,26 @@ same whether or not anything was deleted (fact 71), so the model is the proof.
 
 ```ts
 await clip.delete();
+```
+
+***
+
+### duplicate()
+
+```ts
+duplicate(): Promise<Clip>;
+```
+
+Copy the clip to start where it ends. One undo step; resolves to the copy.
+
+#### Returns
+
+`Promise`\<`Clip`\>
+
+#### Example
+
+```ts
+const again = await clip.duplicate();
 ```
 
 ***
@@ -291,6 +348,40 @@ Pushes keep the cells current afterwards as long as an ancestor is watched.
 #### Inherited from
 
 [`Node`](Node.md).[`load`](Node.md#load)
+
+***
+
+### move()
+
+```ts
+move(toTick, options): Promise<Clip>;
+```
+
+Move the clip so it starts at `toTick`, keeping its length, on its own playlist. One undo
+step. Resolves to this clip, or with `copy` to the new copy once it is listed. LUNA's
+`move_clips` moves a range (fact 117): this is the clip's whole span, so a clip lying
+wholly on top of this one moves with it. To move what shows of a clip that others overlap,
+the way dragging it in LUNA does, move its pieces from [Playlist.compiledClips](Playlist.md#compiledclips) with
+[CompiledClip.move](CompiledClip.md#move). The user's selection is put back afterwards.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `toTick` | `number` |
+| `options` | \{ `copy?`: `boolean`; \} |
+| `options.copy?` | `boolean` |
+
+#### Returns
+
+`Promise`\<`Clip`\>
+
+#### Example
+
+```ts
+await clip.move(clip.start.value! + Luna.WHOLE_NOTE);
+const copy = await clip.move(clip.stop.value!, { copy: true });
+```
 
 ***
 
@@ -386,6 +477,73 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ***
 
+### removeCrossfade()
+
+```ts
+removeCrossfade(next): Promise<void>;
+```
+
+Remove the crossfade from this clip into `next`, both halves. Resolves at once when there
+is none.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `next` | `Clip` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await left.removeCrossfade(right);
+```
+
+***
+
+### removeFadeIn()
+
+```ts
+removeFadeIn(): Promise<void>;
+```
+
+Remove the clip's plain fade-in. Resolves at once when there is none.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await clip.removeFadeIn();
+```
+
+***
+
+### removeFadeOut()
+
+```ts
+removeFadeOut(): Promise<void>;
+```
+
+Remove the clip's plain fade-out. Resolves at once when there is none.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await clip.removeFadeOut();
+```
+
+***
+
 ### sendToBack()
 
 ```ts
@@ -395,6 +553,122 @@ sendToBack(): Promise<unknown>;
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### setFadeIn()
+
+```ts
+setFadeIn(lengthTicks, options): Promise<void>;
+```
+
+Fade the clip in over its first `lengthTicks`, or change the length of its fade-in. One
+undo step, or two when `shape` changes an existing fade's shape. Without `shape` a new
+fade is `log`, LUNA's default. Audio clips only: a MIDI or video clip rejects with
+`unavailable`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `lengthTicks` | `number` |
+| `options` | \{ `shape?`: [`FadeShape`](../type-aliases/FadeShape.md); \} |
+| `options.shape?` | [`FadeShape`](../type-aliases/FadeShape.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await clip.setFadeIn(Luna.QUARTER_NOTE, { shape: 'equal_power' });
+```
+
+***
+
+### setFadeOut()
+
+```ts
+setFadeOut(lengthTicks, options): Promise<void>;
+```
+
+Fade the clip out over its last `lengthTicks`, or change the length of its fade-out.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `lengthTicks` | `number` |
+| `options` | \{ `shape?`: [`FadeShape`](../type-aliases/FadeShape.md); \} |
+| `options.shape?` | [`FadeShape`](../type-aliases/FadeShape.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await clip.setFadeOut(Luna.HALF_NOTE);
+```
+
+***
+
+### setMuted()
+
+```ts
+setMuted(muted): Promise<void>;
+```
+
+Mute or unmute the clip. One undo step. (LUNA's `mute_clips` toggles a range instead.)
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `muted` | `boolean` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await clip.setMuted(true);
+```
+
+***
+
+### slip()
+
+```ts
+slip(byNs): Promise<void>;
+```
+
+Slide the audio inside the clip without moving the clip: positive `byNs` moves the audio
+later, so an earlier part of the source plays at the clip start. LUNA's own content nudge,
+so warps move with it; one undo step. The step is one sample at the engine rate. Only a
+clip on its track's active playlist can be slipped. A slip that would run past either end
+of the source does nothing in LUNA (fact 117); one past the start is refused here with
+`out_of_range`, one past the end rejects with `no_effect`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `byNs` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await clip.slip(-10_000_000);   // 10 ms earlier
+```
 
 ***
 
@@ -415,6 +689,34 @@ rather than reading props across a push.
 
 ```ts
 playlist.clips.onChange(() => draw(playlist.clips.items.map((c) => c.snapshot())));
+```
+
+***
+
+### split()
+
+```ts
+split(at): Promise<Clip[]>;
+```
+
+Cut the clip at one or more ticks inside it (LUNA's `separate_clips`). One undo step.
+Resolves to the pieces in time order; this clip keeps the first. A fade-out moves to the
+last piece, and a crossfade at a cut is not kept (fact 117).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `at` | `number` \| readonly `number`[] |
+
+#### Returns
+
+`Promise`\<`Clip`[]\>
+
+#### Example
+
+```ts
+const [left, right] = await clip.split(clip.start.value! + Luna.WHOLE_NOTE);
 ```
 
 ***

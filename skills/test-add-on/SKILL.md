@@ -20,6 +20,8 @@ const session = await luna.session();
 
 Drive the engine side with `engine.setValue(nodePath, prop, value)`, `engine.addNode(...)`,
 `engine.removeNode(...)`, `engine.addTrack(sessionUid, id, {...})`, `engine.fail(path, code, times)`.
+For live MIDI input, `engine.addMidiDevice(name, { uid })` then
+`engine.receiveMidi(uid, [[0x90, 60, 100]])` once the page listens with `Luna.MidiInput`.
 
 Wait correctly:
 - `await engine.settled()` after anything that pushes (engine-side changes, commands that
@@ -53,6 +55,22 @@ Assert on:
   in jsdom and expect `playing`, or call `new Luna.Shortcuts(luna).run('undo')` without a DOM
   and expect a `/undo` in `engine.requests`.
 
+Make a test prove something:
+- Wait on state, never on a fixed delay: `engine.settled()`, `luna.settled()`, a
+  collection's `membersReady()`, or (for a page) what the page itself shows, such as a button
+  enabled again after an edit. Delays pass alone and fail under a loaded test run.
+- An edit resolves when LUNA shows it, so assert after `await`ing it; assert on the model or
+  `engine.value`, not on the reply (fact 71).
+- Run a new test once against the code before the fix and see it fail. A test that passes on
+  the broken code is not testing the bug.
+- Clips: the mock compiles clips (`lane.compiledClips`), renders per piece, fades,
+  crossfades at edits and LUNA's split/trim on a move (docs/CLIPS.md §9). Setting a clip's
+  property recompiles its lane; to imitate a state of LUNA's compiled clips, set the compiled
+  clip's properties alone. `new Luna.MockEngine({ compiledClipFades: false })` has no fade data.
+- Presets: `engine.addPreset(pluginId, name, { tags })`, `engine.addPresetTagGroup(pluginId,
+  group, tags)`, `engine.setAssistantEnabled(true)` (off by default, as when UA Assistant is
+  not connected), and `engine.setPresetRecommendations(pluginId, fn)` to script its answer.
+
 Gotchas the mock reproduces on purpose: the writer does not get its own `set` pushed back;
 pushes are asynchronous; a missing path answers `{}`; `set` on a node is
 `uasrv.invalid_property`; read-only is `uasrv.read_only`; a `set_touch` release with no
@@ -63,7 +81,9 @@ touch open is `uasrv.invalid_value`.
 Gate with `describe.skipIf(process.env.UA_LIVE !== '1')`, run with `UA_LIVE=1 npx vitest run`
 (or `ua-builder test --live`). Rules: read mostly; every write restores what it changed;
 never create or delete tracks in a user's session; use `session.visibleTracks[0]`; allow
-300 ms for pushes. Check facts you rely on against `docs/EVIDENCE.md` and add new ones.
+300 ms for pushes. When a check needs clips of its own and the user agrees, add a
+temporary track, place clips past the end of the session, and remove the track, its clips
+and the files it created in a `finally` (skills/verify-add-on, step 4). Check facts you rely on against `docs/EVIDENCE.md` and add new ones.
 
 ## Structure
 

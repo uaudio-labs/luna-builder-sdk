@@ -4,14 +4,16 @@
 
 | Property | Modifier | Type | Description |
 | ------ | ------ | ------ | ------ |
+| <a id="assistant"></a> `assistant` | `readonly` | [`Assistant`](Assistant.md) | Whether UA Assistant is connected to LUNA (`/assistant`); preset recommendations need it. |
 | <a id="devices"></a> `devices` | `readonly` | [`Devices`](Devices.md) | - |
 | <a id="drivers"></a> `drivers` | `readonly` | [`Drivers`](Drivers.md) | - |
 | <a id="engine"></a> `engine` | `readonly` | `Engine` | Which engine this client is talking to: `'luna'` or `'mock'`. |
 | <a id="gui"></a> `gui` | `readonly` | [`Gui`](Gui.md) | LUNA's host surface (dialogs, pages, Add Ons). Only present inside LUNA. |
 | <a id="jobs"></a> `jobs` | `readonly` | [`Jobs`](Jobs.md) | - |
+| <a id="mididevices"></a> `midiDevices` | `readonly` | [`MidiDevices`](MidiDevices.md) | The MIDI devices LUNA sees (`/devices/<LUNA>/midi`), `All` and `None` included. |
 | <a id="plugins"></a> `plugins` | `readonly` | [`Plugins`](Plugins.md) | The plugin catalog (`/plugins`). Call `load()` once before reading. |
 | <a id="preferences"></a> `preferences` | `readonly` | [`Preferences`](Preferences.md) | - |
-| <a id="presets"></a> `presets` | `readonly` | [`Presets`](Presets.md) | The preset library query (`/presets`). |
+| <a id="presets"></a> `presets` | `readonly` | [`Presets`](Presets.md) | The preset library (`/presets`): query, tag groups, recommendations, live selection. |
 | <a id="raw"></a> `raw` | `readonly` | [`Port`](../interfaces/Port.md) | The transport. Escape hatch: `luna.raw.get('/sessions')`. |
 | <a id="renders"></a> `renders` | `readonly` | [`Renders`](Renders.md) | - |
 | <a id="secrets"></a> `secrets` | `readonly` | [`Secrets`](Secrets.md) | API keys and tokens in the OS credential store, scoped to this Add On (page memory outside LUNA). |

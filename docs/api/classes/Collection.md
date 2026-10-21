@@ -5,11 +5,13 @@ An observable ordered collection with id lookup.
 ## Extended by
 
 - [`Controls`](Controls.md)
+- [`CompiledClips`](CompiledClips.md)
 - [`Markers`](Markers.md)
 - [`Chords`](Chords.md)
 - [`Automation`](Automation.md)
 - [`Plugins`](Plugins.md)
 - [`Devices`](Devices.md)
+- [`MidiDevices`](MidiDevices.md)
 - [`Renders`](Renders.md)
 - [`Jobs`](Jobs.md)
 

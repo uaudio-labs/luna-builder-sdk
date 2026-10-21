@@ -1,6 +1,6 @@
 # LUNA Add On ideas
 
-Eleven things to ask a coding agent for, with the `ua-luna-builder` plugin installed and
+Thirteen things to ask a coding agent for, with the `ua-luna-builder` plugin installed and
 LUNA running. They work in Claude Code or Codex.
 
 Paste one into your agent. Every prompt but the second works in whatever session you have
@@ -8,8 +8,10 @@ open; the second creates a session of its own, the way LUNA's factory templates 
 ("Songwriter"), and LUNA is single-session, so the agent will ask before it closes the one
 you have open. Prompts 3, 4 and 6–11 want a session with a few audio tracks and clips in it;
 prompt 5 makes itself a MIDI clip if you have none; prompt 6 arms a track and rolls the
-transport, and asks first. Plugins are named by category so the agent picks from what you
-have licensed.
+transport, and asks first; prompt 12 wants a plugin with tagged presets on a track (UA
+Paradise Guitar Studio is one) and UA Assistant running; prompt 13 wants a MIDI keyboard or
+controller connected to the computer. Plugins are named by category so the
+agent picks from what you have licensed.
 
 1. **Hello, LUNA.**
    > Build a LUNA Add On with one big button that mutes and unmutes the main output and
@@ -109,6 +111,24 @@ have licensed.
     > the file went. Verify from a second client that the renders LUNA lists match the
     > page and that a bounce added nothing to my session but its sources.
 
+12. **Preset picker.**
+    > Build a LUNA Add On that picks presets for the plugin on any insert in my session: a
+    > search box that filters presets by name as I type, the plugin's preset tags as chips
+    > grouped the way LUNA groups them (selecting several narrows to presets carrying all
+    > of them, with a switch for any), and a row of up to five presets UA Assistant
+    > recommends for what I typed, kept within the selected tags. Clicking a preset or a
+    > recommendation loads it onto the slot and marks it as current, and the mark follows
+    > a preset change made in LUNA. If UA Assistant is not connected, or cannot search
+    > that plugin yet, say so in the page and keep the search and tags working. Prove from
+    > a second client that a click loaded the preset, and install it.
+
+13. **MIDI monitor.**
+    > Build a LUNA Add On that shows what my MIDI keyboard and controllers are playing,
+    > live: a piano keyboard that lights the keys I hold with their velocity, a row of
+    > knobs that follow each controller I move, and a log of every message. Let me pick
+    > one device or all of them, and keep working when I plug a device in or out. Use the
+    > SDK's MIDI input, not Web MIDI. Test it on the mock engine and install it.
+
 Each of these ends with the agent serving the page or running the script, proving it against
 LUNA from a second client, and for an add-on handing you a folder to symlink into LUNA's Add
 Ons directory (the first install may need one `sudo` command, which the agent will give you
@@ -126,8 +146,8 @@ Pointers for an agent that wants the shortest path. The API reference is `docs/a
 |---|---|
 | 1 Hello | `session.master.mute`, `examples/addon/` as the starting point |
 | 2 Songwriter | `luna.sessions.create`, `session.newTrack`, `channel.insert`, `luna.plugins`, `effect.controls` |
-| 3 Arrangement | `session.playlists`, `Luna.clipAudio`, `Luna.Waveforms`, `Luna.audioNsAtTick`, `Luna.kindForScale`, `Luna.waveformColumns`, `Luna.waveformLanes`, `session.musical.timeline`; `examples/arrangement.html` |
-| 4 Markers and clips | `session.markers`, `clip.trim`, `session.moveClips`, `session.transaction`, `context.snapshot`/`restore`; `examples/editor.html` |
+| 3 Arrangement | `session.playlists`, `playlist.compiledClips`, `Luna.compiledClipAudio`, `Luna.Waveforms`, `Luna.audioNsAtTick`, `Luna.kindForScale`, `Luna.waveformColumns`, `Luna.waveformLanes`, `session.musical.timeline`; `examples/arrangement.html`, `docs/CLIPS.md` |
+| 4 Markers and clips | `session.markers`, `clip.trim`, `clip.move`/`split`/`duplicate`/`slip`/`setMuted`, `clip.setFadeIn`/`setFadeOut`/`crossfade`, `session.setFadeCurve`, `playlist.heal`/`addFades`/`deleteFades`, `session.moveClips`, `session.transaction`, `context.snapshot`/`restore`; `examples/editor.html`, `examples/clip-editor.html`, `docs/CLIPS.md` |
 | 5 Piano roll | `clip.midi.notes`, `midi.setVelocities`, `midi.setMuted`, `midi.deleteNotes`; `examples/pianoroll.html`, `examples/editor.html` |
 | 6 Tracking | `luna.audioInputs`, `session.record`, `track.recordEnabled`, `session.uploadFile` (a `File`), `session.importPath` (a path; see FILES.md); `examples/import.html` |
 | 7 Auto-pan | `control.automation` (`insert`/`clear`/`move`/`setValue`), `track.setAutomationMode`; `examples/automation.html` |
@@ -135,6 +155,8 @@ Pointers for an agent that wants the shortest path. The API reference is `docs/a
 | 9 Scenes | `channel.controls`, `effect.controls`, `session.transaction`, browser `localStorage` |
 | 10 Report | every read-only surface, plus `luna.renders`; the `check-*.mjs` scripts are the model |
 | 11 Stems | `session.bounce`, `session.exportMain`, `render.progress`, `render.done`, `render.abort`; `examples/jobs.html` |
+| 12 Preset picker | `luna.presets.selection` (`search`, `tags`, `matchAnyTag`, `presets`, `recommendations`, `groups`, `recommendationError`), `luna.assistant.enabled`, `slot.loadPreset`, `slot.presetUid`; `examples/presets.html`, facts 120-122 |
+| 13 MIDI monitor | `Luna.MidiInput` (`listen`, `onNote`, `onControlChange`, `onGap`; never Web MIDI), `luna.midiDevices` (`watch`, `onChange`, `inputPort`), `Luna.MockEngine.receiveMidi`; `examples/midi-input.html`, fact 125 |
 
 ## Proving it
 

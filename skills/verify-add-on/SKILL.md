@@ -94,6 +94,18 @@ Restore every value the checks changed and remove anything they created. Undo en
 say so in your report. The `examples/check-*.mjs` scripts show the pattern: record, change,
 assert against an independent read, restore in `finally`.
 
+- Ask before editing the user's open session. Prefer a throwaway session; otherwise a
+  temporary track, with clips placed past the end of the session, never the user's clips.
+- Before changing anything, record the ids of tracks and `session.sources`; afterwards remove
+  only ids that were not there before. Never delete something you cannot prove your checks
+  made, even if it looks like theirs.
+- Clip edits make LUNA render (time-stretch, clip effects, another sample rate), and each
+  rendering is announced seconds later. Wait until `session.sources` stops growing before
+  deleting the files your checks created (`post /workspace/delete_audio_files
+  { session_package_uid, files, move_to_trash: true }`), or some are left behind.
+- Put the cleanup in `finally`, so a check that throws still cleans up, and check the track
+  and source counts at the end.
+
 ## Report
 
 State the LUNA build (`get /status`), what was checked from the second client, the undo

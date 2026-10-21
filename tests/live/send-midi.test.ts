@@ -53,3 +53,31 @@ describe.skipIf(!live)('live: send_midi', () => {
     await midi.sendAllNotesOff();
   });
 });
+
+// Sends real MIDI out of a hardware port, so it runs only when UA_MIDI_OUT names a MIDI device
+// LUNA lists (for example `UA_MIDI_OUT="Volt 876"`). It plays one soft middle C and releases it.
+const outName = process.env['UA_MIDI_OUT'];
+
+describe.skipIf(!live || !outName)('live: send_midi to a MIDI output port (fact 124)', () => {
+  let luna: Luna.Client;
+  let midi: Luna.SendMidi;
+
+  beforeAll(async () => {
+    luna = await Luna.connect({ requestTimeoutMs: 8000 });
+    midi = new Luna.SendMidi(luna);
+    await luna.midiDevices.load();
+  });
+
+  afterAll(async () => {
+    await luna?.close();
+  });
+
+  it('sends a note-on and note-off out of the named device', async () => {
+    const device = luna.midiDevices.items.find((d) => d.name.value === outName);
+    if (!device) throw new Error(`LUNA lists no MIDI device named ${outName}`);
+    expect(device.outputPort?.uid.value).toMatch(/^[0-9a-f]{32}$/);
+    await midi.sendNoteToOutput(device, 60, 40, true);
+    await new Promise((r) => setTimeout(r, 300));
+    await midi.sendNoteToOutput(device, 60, 0, false);
+  });
+});

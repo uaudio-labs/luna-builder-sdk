@@ -74,8 +74,9 @@ await Luna.settle(() => thing.value.value === expected, 'some edit', { refresh: 
 - Optional fields are omitted, never sent as `null`.
 - A `get` on a missing path answers `{}` with no error; do not treat `{}` as data.
 - Streaming audio is out of scope: do not wrap a path to fake one. Live MIDI out is
-  `Luna.SendMidi` (one message per call); live MIDI input belongs in the Add On, through
-  Web MIDI (`navigator.requestMIDIAccess()`).
+  `Luna.SendMidi` (one message per call); live MIDI input from hardware is `Luna.MidiInput`,
+  never Web MIDI (`navigator.requestMIDIAccess()`).
+  Do not read `<input port>/midi_events` through `luna.raw` yourself.
 
 ## SDK feedback
 

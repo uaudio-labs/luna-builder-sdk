@@ -3,6 +3,27 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 0.2.0 — 2026-10-21
+
+- New `Luna.SendMidi` and `Luna.QwertyMidi` play MIDI on a track live without writing to a clip.
+- New `luna.midiDevices` lists LUNA's MIDI devices and their ports; `Luna.SendMidi` and
+  `Luna.QwertyMidi` can send out of a device's MIDI out.
+- New `Luna.MidiInput` receives live MIDI from MIDI hardware; use it instead of Web MIDI, which
+  LUNA's web view does not have.
+- New preset selection: `luna.presets` searches by tags, reads tag groups, asks UA Assistant for
+  recommendations, and `slot.loadPreset` loads one.
+- New `playlist.compiledClips` gives what each lane actually plays, with its fades and crossfades.
+- New clip and fade editing (move, duplicate, split, slip, mute, heal, fades, crossfades, fade
+  curves), each one undo step, plus a `docs/CLIPS.md` guide, an `edit-clips` skill and an
+  `examples/clip-editor.html` example.
+- New `session.preferences` keeps an Add On's settings with the session.
+- New `luna.gui.serveMediaFile` gives a URL to play a local audio or video file by its path.
+- New `session.musical.keySignatureAt` and `session.transactionMode`.
+- Note edits work inside batch transactions, and a continuous transaction replaces each take
+  rather than leaving it behind.
+- `Luna.MockEngine` matches LUNA for `create_note`, `insert_clip` and key signatures.
+- `npm install` of a scaffolded Add On works with npm 10 and on Windows.
+
 ## 0.1.1 — 2026-10-15
 
 - New `luna.secrets` keeps API keys and tokens in the OS keychain, scoped to the Add On.

@@ -117,17 +117,25 @@ export class Context extends Node {
     this.waveformZoom = derived([settings], () => waveformZoomFrom(settings.value));
   }
 
-  /** Set range and/or tracks in one go; omitted parts are left alone. */
-  async select(options: { startTick?: number; stopTick?: number; trackUids?: string[] }): Promise<void> {
+  /**
+   * Set range, tracks, playlists and/or focus in one go; omitted parts are left alone. `focus`
+   * is what LUNA's selection commands act on: `timeline` for clips (fact 117).
+   *
+   * @example
+   * await ctx.select({ startTick: 0, stopTick: Luna.WHOLE_NOTE, playlistUids: [lane.id], focus: 'timeline' });
+   */
+  async select(options: { startTick?: number; stopTick?: number; trackUids?: string[]; playlistUids?: string[]; focus?: string }): Promise<void> {
     const writes: Promise<void>[] = [];
+    if (options.focus !== undefined) writes.push(this.client.store.set(this.path, 'focus', options.focus));
     if (options.startTick !== undefined) writes.push(this.selectionStart.set(options.startTick));
     if (options.stopTick !== undefined) writes.push(this.selectionStop.set(options.stopTick));
     if (options.trackUids !== undefined) writes.push(this.selectionTracks.set(options.trackUids));
+    if (options.playlistUids !== undefined) writes.push(this.client.store.set(this.path, 'selection_playlists', options.playlistUids));
     await Promise.all(writes);
     // One read behind the writes before resolving: on 3.0 a command posted straight after a
     // selection write (a bounce) still sees the previous selection, and a read-back is enough
     // to order them (fact 87). The reply is not applied, so it cannot undo the optimistic write.
-    if (writes.length) await this.wire.get(this.path, { children: false, commands: false, flatvalue: true, propfilter: ['selection_start', 'selection_stop', 'selection_tracks'] });
+    if (writes.length) await this.wire.get(this.path, { children: false, commands: false, flatvalue: true, propfilter: ['focus', 'selection_start', 'selection_stop', 'selection_tracks', 'selection_playlists'] });
   }
 
   /** The selected notes, decoded. Empty when nothing is selected. */
