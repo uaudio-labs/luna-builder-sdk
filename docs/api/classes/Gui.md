@@ -146,7 +146,8 @@ chooseFolders(options): Promise<string[]>;
 
 LUNA's native folder dialog. Resolves to the chosen folders' **absolute paths**, or `[]`
 if cancelled. A path route like [chooseFiles](#choosefiles): hand the paths to
-[listFiles](#listfiles) or the engine, not to `fetch`. Needs `/gui` ([Gui.available](#available)) and a
+[listFiles](#listfiles) or the engine, not to `fetch`. Picking a folder lets [listFiles](#listfiles)
+read it and every folder inside it, from now on and after LUNA restarts. Needs `/gui` ([Gui.available](#available)) and a
 LUNA that has the dialog (fact 106); an older one rejects with `Luna.Unsupported`.
 
 #### Parameters
@@ -266,9 +267,18 @@ The files and folders directly inside the folder at `path`, as LUNA sees the dis
 sort: case ignored, and numbers by value, so `take2` comes before `take10`. `path` must
 be absolute.
 
-Rejects with a `Luna.Error` whose `code` is `uasrv.filesystem_error` when nothing is at
-`path` or it cannot be read, and `uasrv.invalid_value` when `path` is relative or names
-a file. An older LUNA without the command rejects with `Luna.Unsupported`.
+LUNA lists only folders the user gave it: one picked with [chooseFolders](#choosefolders) or
+dropped on an Add On (`Luna.onPathDrop()`), or a folder inside one. LUNA remembers
+them across restarts, at most 64 (the oldest are forgotten first), until the user
+clicks FORGET FOLDERS in Settings > Add Ons. They are LUNA-wide, not per Add On. A
+path is judged where it really is, so `..` or a link out of a granted folder is
+refused.
+
+Rejects with a `Luna.Error` whose `code` is `uasrv.not_permitted` when `path` is not in
+a granted folder (whether or not anything is there: ask with [chooseFolders](#choosefolders)),
+`uasrv.filesystem_error` when nothing is at `path` or it cannot be read, and
+`uasrv.invalid_value` when `path` is relative or names a file. An older LUNA without
+the command rejects with `Luna.Unsupported`; an older LUNA lists any folder.
 
 #### Parameters
 
@@ -283,7 +293,8 @@ a file. An older LUNA without the command rejects with `Luna.Unsupported`.
 #### Example
 
 ```ts
-for (const entry of await luna.gui.listFiles('/Users/me/Samples')) {
+const [folder] = await luna.gui.chooseFolders({ title: 'Choose a sample folder' });
+for (const entry of folder ? await luna.gui.listFiles(folder) : []) {
   if (!entry.isDirectory && entry.name.endsWith('.wav')) await session.importPath(entry.path);
 }
 ```

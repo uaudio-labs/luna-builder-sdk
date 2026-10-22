@@ -1,5 +1,6 @@
 /**
- * Live lane for getting files in: `/gui` presence (fact 103), `listFiles` (fact 106), `serveMediaFile` (fact 114) and the
+ * Live lane for getting files in: `/gui` presence (fact 103), `listFiles` (fact 106; the listing
+ * itself needs UA_LIVE_LIST_FOLDER, below), `serveMediaFile` (fact 114) and the
  * path route's `importPath` (fact 42, `local_copy`). Needs LUNA on 4718 with a session open. It writes a
  * quarter-second WAV to the temp folder, imports it as a source and trashes the source again;
  * nothing is placed on the timeline.
@@ -28,10 +29,15 @@ function wav(seconds = 0.25, rate = 48000): Uint8Array {
   return new Uint8Array(view.buffer);
 }
 
-// Needs no session: /gui answers with LUNA on its home page.
+// Needs no session: /gui answers with LUNA on its home page. LUNA lists only folders the user
+// gave it, which a test cannot do without a person, so the listing itself needs
+// UA_LIVE_LIST_FOLDER: a folder you picked once with chooseFolders (examples/browse.html) or
+// dropped on an Add On. The test writes its fixture inside it and removes it again.
 describe.skipIf(!live)('live: listing a folder', () => {
+  const granted = process.env['UA_LIVE_LIST_FOLDER'];
   let luna: Luna.Client;
   let dir: string;
+  let fixture: string | undefined;
 
   beforeAll(async () => {
     luna = await Luna.connect({ requestTimeoutMs: 8000 });
@@ -40,11 +46,19 @@ describe.skipIf(!live)('live: listing a folder', () => {
 
   afterAll(async () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
+    if (fixture) rmSync(fixture, { recursive: true, force: true });
     await luna?.close();
   });
 
-  it('fact 106: listFiles lists a folder without hidden entries, in natural order', async () => {
-    const folder = join(dir, 'listing');
+  it('fact 106: listFiles refuses a folder nobody granted, existing or not', async () => {
+    await expect(luna.gui.listFiles(dir)).rejects.toMatchObject({ code: 'uasrv.not_permitted' });
+    await expect(luna.gui.listFiles(join(dir, 'missing'))).rejects.toMatchObject({ code: 'uasrv.not_permitted' });
+    await expect(luna.gui.listFiles('relative/path')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+  });
+
+  it.skipIf(!granted)('fact 106: listFiles lists a granted folder without hidden entries, in natural order', async () => {
+    fixture = mkdtempSync(join(granted!, 'ua-live-list-'));
+    const folder = join(fixture, 'listing');
     mkdirSync(join(folder, 'Sub'), { recursive: true });
     for (const name of ['b.txt', 'A.wav', 'c.aif', '.hidden', 'Ünïcode.txt', 'take10.wav', 'take2.wav']) writeFileSync(join(folder, name), '');
     const entries = await luna.gui.listFiles(folder);
@@ -53,7 +67,7 @@ describe.skipIf(!live)('live: listing a folder', () => {
     expect(entries.find((e) => e.name === 'A.wav')?.path.endsWith('/listing/A.wav')).toBe(true);
     await expect(luna.gui.listFiles(join(folder, 'missing'))).rejects.toMatchObject({ code: 'uasrv.filesystem_error' });
     await expect(luna.gui.listFiles(join(folder, 'b.txt'))).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
-    await expect(luna.gui.listFiles('relative/path')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.listFiles(join(granted!, '..', 'not-granted-sibling'))).rejects.toMatchObject({ code: 'uasrv.not_permitted' });
   });
 });
 

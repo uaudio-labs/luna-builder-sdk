@@ -7,7 +7,7 @@ folder, their identity, their page and how they open. `ua-builder new` writes on
 This page describes what LUNA does with the manifest. `ua-builder` is stricter: it refuses
 to install or pack a manifest that LUNA would partly drop or silently correct (a missing
 required field, an unknown `target`, a `floating` or `show_with_session` that is not a boolean, a
-`manufacturer` that is not a string, an `html` file that does not exist), so you see the problem before LUNA does.
+`manufacturer` that is not a string, a `description` that is not a string or array of strings, an `html` file that does not exist), so you see the problem before LUNA does.
 
 ## Where it lives
 
@@ -32,6 +32,7 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
     "title": "My Add On",
     "version": "0.1.0",
     "manufacturer": "Example Audio",
+    "description": ["Does one thing well. ", "Opens in its own window."],
     "min_luna_version": "3.1.1",
     "engines": ["luna"],
     "html": "index.html",
@@ -57,7 +58,8 @@ Either the top-level object is one Add On, or it has an `add_ons` array of them:
 The presence of `add_ons` picks the shape. If it is there and is an array, its elements are
 the Add Ons and the top level is not one. If it is missing, the top-level object is the Add
 On. An `add_ons` that is present but not an array yields no Add Ons at all. In this shape the
-only top-level field LUNA applies to the entries is `manufacturer`, as their default.
+only top-level fields LUNA applies to the entries are `manufacturer` and `description`, as
+their defaults.
 
 One bad entry in an array is dropped without affecting the others.
 
@@ -84,6 +86,7 @@ size; see `width`, `height` below.
 | `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
 | `manufacturer` | string | none | Who makes the Add On: your company or your own name. LUNA shows it in the **MANUFACTURER** column of **Settings > Add Ons**, where it also sorts and is matched by the search field; the column is blank without it. LUNA reports it as the `manufacturer` property under `/gui/add_ons/<id>` (`manufacturer` on `luna.gui.addOns` items in the SDK), `""` when there is none. A non-string value is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value that is not a string is ignored. |
+| `description` | string or string[] | none | What the Add On does. An array of strings is concatenated with no separator, so a long description can be split across lines of JSON; the text carries its own line breaks: write `\n` where a new line should start (`["First sentence. ", "Second sentence.\n", "A new line."]`). LUNA reports the concatenated text as the `description` property under `/gui/add_ons/<id>` (`description` on `luna.gui.addOns` items in the SDK), `""` when there is none. It is not yet shown in LUNA's UI. Any other value, including an array holding something that is not a string, is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, describing the Add Ons together, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value LUNA cannot read is ignored. |
 | `icon` | string | none | Image path, resolved like `html`. Works for `url` entries too. See below. |
 | `local_content_offset` | string | none | `html` only. Relative path from the manifest folder to the folder your page loads resources from. See below. |
 
@@ -177,7 +180,7 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 - LUNA does not check that the file exists or read it when the manifest loads; a bad path is
   not an error, and an empty string is the same as leaving it out.
 - LUNA reports the resolved absolute path as the `icon` property under `/gui/add_ons/<id>`
-  (next to `id`, `name`, `target`, `floating`, `show_with_session` and `manufacturer`), or an empty string when there is none. It is not yet
+  (next to `id`, `name`, `target`, `floating`, `show_with_session`, `manufacturer` and `description`), or an empty string when there is none. It is not yet
   drawn in LUNA's menus.
 
 `local_content_offset`:
@@ -301,7 +304,7 @@ await luna.secrets.delete('openai.api_key'); // a "Disconnect" button
    float with the plugin windows, and `show_with_session: true` if it only makes sense with
    a session open. Leave `floating`, `show_with_session`, `width` and `height` out of browser,
    editor and app entries.
-5. Fill `version`, `manufacturer`, `sdk_version`, `min_luna_version`, `engines`.
+5. Fill `version`, `manufacturer`, `description`, `sdk_version`, `min_luna_version`, `engines`.
 6. Add `icon` with a relative path if the Add On ships one.
 7. Add `package_name` if the folder name is not what the Add Ons folder should show.
 8. `ua-builder install` and look in LUNA's **Add Ons** menu, under **Windows**, **Browsers**,

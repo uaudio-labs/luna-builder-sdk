@@ -579,6 +579,7 @@ describe('examples/browse.html', () => {
     const engine = engineWithSession(['Vocal']);
     engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store', 'notes.txt'];
     engine.folders['/Samples/Loops'] = ['beat.aif'];
+    engine.grantFolder('/Samples');   // chosen or dropped in an earlier run
     return engine;
   }
   const names = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.all('#list .name').map((n) => n.textContent);
@@ -630,15 +631,24 @@ describe('examples/browse.html', () => {
 
   it('browses the folder chosen in LUNA’s dialog, and explains a bad path', async () => {
     const engine = engineWithDisk();
+    engine.grantedFolders = [];
     engine.nextDialogFiles = ['/Samples/Loops'];
     const page = await loadExamplePage('browse.html', engine);
     await page.waitFor(() => !(page.document.querySelector('#choose') as HTMLButtonElement).disabled, 'the page to connect');
     (page.document.querySelector('#choose') as HTMLButtonElement).click();
     await page.waitFor(() => names(page).join() === 'beat.aif', 'the chosen folder');
-    (page.document.querySelector('#path') as HTMLInputElement).value = '/Nope';
-    page.document.querySelector('#go')!.dispatchEvent(new page.window.Event('submit', { cancelable: true }));
+    const go = (path: string) => {
+      (page.document.querySelector('#path') as HTMLInputElement).value = path;
+      page.document.querySelector('#go')!.dispatchEvent(new page.window.Event('submit', { cancelable: true }));
+    };
+    go('/Samples/Loops/Nope');
     await page.waitFor(() => page.text('#status').includes('uasrv.filesystem_error'), 'the error');
     expect(names(page).join()).toBe('beat.aif'); // the last good listing stays
+    // Only the chosen folder was granted, not the one above it.
+    go('/Samples');
+    await page.waitFor(() => page.text('#status').includes('uasrv.not_permitted'), 'the refusal');
+    expect(page.text('#status')).toContain('only folders you gave it');
+    expect(names(page).join()).toBe('beat.aif');
     page.close();
   });
 

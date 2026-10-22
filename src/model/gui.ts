@@ -11,7 +11,8 @@
  * await luna.gui.setPage('mixer');
  * await luna.gui.openUrl('https://uaudio.com');
  * const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
- * const entries = await luna.gui.listFiles('/Users/me/Music');
+ * const [folder] = await luna.gui.chooseFolders();
+ * if (folder) console.log(await luna.gui.listFiles(folder));
  */
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
@@ -36,6 +37,8 @@ export class AddOn extends Node {
   readonly showWithSession: Prop<boolean>;
   /** The manifest's `manufacturer`, or `''` when it has none. */
   readonly manufacturer: Prop<string>;
+  /** The manifest's `description`, an array of strings already concatenated, or `''` when it has none. */
+  readonly description: Prop<string>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -47,6 +50,7 @@ export class AddOn extends Node {
     this.floating = this.prop<boolean>('floating');
     this.showWithSession = this.prop<boolean>('show_with_session');
     this.manufacturer = this.prop<string>('manufacturer');
+    this.description = this.prop<string>('description');
   }
 
   /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
@@ -207,7 +211,8 @@ export class Gui extends Node {
   /**
    * LUNA's native folder dialog. Resolves to the chosen folders' **absolute paths**, or `[]`
    * if cancelled. A path route like {@link chooseFiles}: hand the paths to
-   * {@link listFiles} or the engine, not to `fetch`. Needs `/gui` ({@link Gui.available}) and a
+   * {@link listFiles} or the engine, not to `fetch`. Picking a folder lets {@link listFiles}
+   * read it and every folder inside it, from now on and after LUNA restarts. Needs `/gui` ({@link Gui.available}) and a
    * LUNA that has the dialog (fact 106); an older one rejects with `Luna.Unsupported`.
    *
    * @example
@@ -228,12 +233,22 @@ export class Gui extends Node {
    * sort: case ignored, and numbers by value, so `take2` comes before `take10`. `path` must
    * be absolute.
    *
-   * Rejects with a `Luna.Error` whose `code` is `uasrv.filesystem_error` when nothing is at
-   * `path` or it cannot be read, and `uasrv.invalid_value` when `path` is relative or names
-   * a file. An older LUNA without the command rejects with `Luna.Unsupported`.
+   * LUNA lists only folders the user gave it: one picked with {@link chooseFolders} or
+   * dropped on an Add On (`Luna.onPathDrop()`), or a folder inside one. LUNA remembers
+   * them across restarts, at most 64 (the oldest are forgotten first), until the user
+   * clicks FORGET FOLDERS in Settings > Add Ons. They are LUNA-wide, not per Add On. A
+   * path is judged where it really is, so `..` or a link out of a granted folder is
+   * refused.
+   *
+   * Rejects with a `Luna.Error` whose `code` is `uasrv.not_permitted` when `path` is not in
+   * a granted folder (whether or not anything is there: ask with {@link chooseFolders}),
+   * `uasrv.filesystem_error` when nothing is at `path` or it cannot be read, and
+   * `uasrv.invalid_value` when `path` is relative or names a file. An older LUNA without
+   * the command rejects with `Luna.Unsupported`; an older LUNA lists any folder.
    *
    * @example
-   * for (const entry of await luna.gui.listFiles('/Users/me/Samples')) {
+   * const [folder] = await luna.gui.chooseFolders({ title: 'Choose a sample folder' });
+   * for (const entry of folder ? await luna.gui.listFiles(folder) : []) {
    *   if (!entry.isDirectory && entry.name.endsWith('.wav')) await session.importPath(entry.path);
    * }
    */

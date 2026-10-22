@@ -23,6 +23,7 @@ new MockEngine(options): MockEngine;
 | Property | Modifier | Type | Default value | Description |
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
+| <a id="grantedfolders"></a> `grantedFolders` | `public` | `string`[] | `[]` | The folders `/gui/list_files` may read, it and every folder inside them (fact 106). LUNA grants a folder the user picks in `show_folder_dialog` (the mock does too, for each of `nextDialogFiles`) or drops on an Add On; set this, or call [grantFolder](#grantfolder), to model a drop or a grant saved from an earlier run. Anything else is `uasrv.not_permitted`. The mock does not model links or LUNA's cap on how many folders it keeps. **Example** `engine.folders['/Samples'] = ['kick.wav']; engine.grantFolder('/Samples');` |
 | <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio or video file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
 | <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
 | <a id="midisent"></a> `midiSent` | `readonly` | [`MockMidiSent`](../interfaces/MockMidiSent.md)[] | `[]` | Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. |
@@ -567,6 +568,26 @@ finalized take clip on the track's active playlist with a source to match (fact 
 ```ts
 engine.onRecord(({ sessionUid, trackUid }) => engine.finishTake(sessionUid, trackUid, { startTick: 0, stopTick: Luna.WHOLE_NOTE }));
 ```
+
+***
+
+### grantFolder()
+
+```ts
+grantFolder(path): void;
+```
+
+Let `/gui/list_files` read the folder at `path` and the folders inside it.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`void`
 
 ***
 

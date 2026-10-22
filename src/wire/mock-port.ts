@@ -511,6 +511,8 @@ export class MockEngine {
           engine.addNode(`/gui/file_chooser/${uid}`, { properties: { status: 'pending', files: [] } });
           setTimeout(() => {
             if (!engine.has(`/gui/file_chooser/${uid}`)) return;
+            // Fact 106: LUNA grants the picked folders to list_files before it reports them.
+            for (const p of engine.nextDialogFiles) engine.grantFolder(p);
             engine.setValue(`/gui/file_chooser/${uid}`, 'files', engine.nextDialogFiles.map((p) => ({ path: p })));
             engine.setValue(`/gui/file_chooser/${uid}`, 'status', engine.nextDialogFiles.length ? 'selected' : 'cancelled');
           }, 5);
@@ -522,7 +524,11 @@ export class MockEngine {
           const path = typeof data === 'object' && data !== null ? (data as { path?: unknown }).path : undefined;
           if (path === undefined || path === null) throw fail('uasrv.missing_field', 'path is required');
           if (typeof path !== 'string' || !/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
-          const dir = path.length > 1 ? path.replace(/[\\/]+$/, '') : path;
+          const dir = normalizeFolder(path);
+          // Before the path is looked at, as in LUNA: a refusal does not tell whether it exists.
+          if (!engine.grantedFolders.some((root) => dir === root || dir.startsWith(root === '/' ? '/' : `${root}/`))) {
+            throw fail('uasrv.not_permitted', 'path is not in a folder the user granted');
+          }
           const names = engine.folders[dir];
           if (!names) {
             const cut = dir.lastIndexOf('/');
@@ -567,7 +573,7 @@ export class MockEngine {
     });
     this.addNode('/gui/windows/main', { properties: { page: 'timeline' } });
     this.addNode('/gui/transport', { properties: { arm_mode: false } });
-    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, manufacturer: 'Example Co' } });
+    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, manufacturer: 'Example Co', description: 'A demo Add On.' } });
     this.addNode('/gui/file_chooser');
     if (options.gui === false) this.removeNode('/gui');
   }
@@ -598,6 +604,25 @@ export class MockEngine {
    * engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];
    */
   folders: Record<string, string[]> = {};
+
+  /**
+   * The folders `/gui/list_files` may read, it and every folder inside them (fact 106). LUNA
+   * grants a folder the user picks in `show_folder_dialog` (the mock does too, for each of
+   * `nextDialogFiles`) or drops on an Add On; set this, or call {@link grantFolder}, to model
+   * a drop or a grant saved from an earlier run. Anything else is `uasrv.not_permitted`.
+   * The mock does not model links or LUNA's cap on how many folders it keeps.
+   *
+   * @example
+   * engine.folders['/Samples'] = ['kick.wav'];
+   * engine.grantFolder('/Samples');
+   */
+  grantedFolders: string[] = [];
+
+  /** Let `/gui/list_files` read the folder at `path` and the folders inside it. */
+  grantFolder(path: string): void {
+    const dir = normalizeFolder(path);
+    if (!this.grantedFolders.includes(dir)) this.grantedFolders.push(dir);
+  }
 
   private rowCounter = 100;
   /** @internal */
@@ -2835,6 +2860,18 @@ function encodeMediaPath(path: string): string {
     out += /[A-Za-z0-9\-._~/]/.test(c) ? c : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
   }
   return out.startsWith('/') ? out : `/${out}`;
+}
+
+/** `path` with `.` and `..` resolved and no trailing separator, as LUNA judges a list_files path. */
+function normalizeFolder(path: string): string {
+  const drive = /^[A-Za-z]:/.exec(path)?.[0] ?? '';
+  const parts: string[] = [];
+  for (const part of path.slice(drive.length).split(/[\\/]+/).slice(1)) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return `${drive}/${parts.join('/')}`;
 }
 
 /**

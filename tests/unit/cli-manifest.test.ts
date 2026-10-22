@@ -90,6 +90,28 @@ describe('readManifest', () => {
     expect(() => readManifest(addOn({ manufacturer: 42 }))).toThrow(/"manufacturer" must be a string/);
   });
 
+  it('accepts a description as a string, an array of strings, or none, and rejects anything else, which LUNA would ignore', () => {
+    expect(readManifest(addOn({ description: 'Does things.' })).entries[0]!.description).toBe('Does things.');
+    expect(readManifest(addOn({ description: ['Does ', 'things.\n', 'Well.'] })).entries[0]!.description).toEqual(['Does ', 'things.\n', 'Well.']);
+    expect(readManifest(addOn({ description: [] })).entries[0]!.description).toEqual([]);
+    expect(readManifest(addOn({})).entries[0]!.description).toBeUndefined();
+    expect(() => readManifest(addOn({ description: 42 }))).toThrow(/"description" must be a string or an array of strings/);
+    expect(() => readManifest(addOn({ description: ['ok', 7] }))).toThrow(/"description" must be a string or an array of strings/);
+  });
+
+  it('accepts a top-level description in the add_ons shape as a string or an array of strings, and rejects anything else', () => {
+    const shape = (description: unknown): string => {
+      const dir = addOn({});
+      const entry = { id: 'com.example.a', name: 'A', html: 'index.html', width: 400, height: 300 };
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ description, add_ons: [entry] }));
+      return dir;
+    };
+    expect(readManifest(shape('Both of them.')).manifest.description).toBe('Both of them.');
+    expect(readManifest(shape(['Both ', 'of them.'])).manifest.description).toEqual(['Both ', 'of them.']);
+    expect(() => readManifest(shape(7))).toThrow(/top level: "description" must be a string or an array of strings/);
+    expect(() => readManifest(shape(['ok', 7]))).toThrow(/top level: "description" must be a string or an array of strings/);
+  });
+
   it('accepts a top-level string manufacturer in the add_ons shape, and rejects a non-string', () => {
     const shape = (manufacturer: unknown): string => {
       const dir = addOn({});

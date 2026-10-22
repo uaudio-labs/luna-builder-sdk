@@ -28,7 +28,7 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 2. Scaffold with the answers as explicit flags. From the folder that should contain the
    Add On:
    ```sh
-   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600] [--template add-on-typescript]   # floating, session and size flags: window only
+   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] [--description "<what it does>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600] [--template add-on-typescript]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
    Pass `--template add-on-typescript` when the Add On is TypeScript, React or anything else
@@ -37,8 +37,10 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
    `serve` or `install`, and `npm run pack` (not `ua-builder pack`) to ship. Its README says
    how to add React.
    Pass `--manufacturer` with the author's company or name; LUNA shows it in Settings > Add
-   Ons, and without it the field is left out of the manifest.
-   See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`, `manufacturer`).
+   Ons, and without it the field is left out of the manifest. Pass `--description` with a
+   sentence or two on what the Add On does; it is likewise left out without the flag.
+   See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`, `manufacturer`,
+   `description`).
    `new` refuses an `id` or `name` that an installed Add On already uses; pass a different
    `--id` or `--name`, and do not remove the other Add On without asking.
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,

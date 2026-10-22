@@ -61,7 +61,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--description "Text"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
@@ -86,6 +86,7 @@ export async function newAddOn(args: Args): Promise<number> {
   // --title is the flag's old spelling, kept as an alias.
   const displayName = flagString(args, 'name') ?? flagString(args, 'title') ?? titleCase(name);
   const manufacturer = flagString(args, 'manufacturer');
+  const description = flagString(args, 'description');
   const clashes = addOnClashes([{ id, name: displayName }], installedAddOns());
   if (clashes.length) {
     console.error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nPick another with --id com.x.y and/or --name "Name".`);
@@ -97,6 +98,7 @@ export async function newAddOn(args: Args): Promise<number> {
     __ID__: id,
     __TITLE__: displayName,
     __MANUFACTURER__: JSON.stringify(manufacturer ?? '').slice(1, -1),
+    __DESCRIPTION__: JSON.stringify(description ?? '').slice(1, -1),
     __TARGET__: target,
     __FLOATING__: String(!args.flags['no-floating']),
     __SHOW_WITH_SESSION__: String(!!args.flags['show-with-session']),
@@ -112,7 +114,7 @@ export async function newAddOn(args: Args): Promise<number> {
     let text = readFileSync(file, 'utf8');
     for (const [k, v] of Object.entries(replacements)) text = text.replaceAll(k, v);
     if (rel === 'manifest.json') {
-      const omit = [...(isWindow(target) ? [] : WINDOW_ONLY_FIELDS), ...(manufacturer ? [] : ['manufacturer'])];
+      const omit = [...(isWindow(target) ? [] : WINDOW_ONLY_FIELDS), ...(manufacturer ? [] : ['manufacturer']), ...(description ? [] : ['description'])];
       if (omit.length) text = withoutFields(text, omit);
     }
     writeFileSync(dest, text);

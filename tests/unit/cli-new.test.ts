@@ -65,6 +65,17 @@ describe('ua-builder new', () => {
     expect(() => readManifest(withIt.dir)).not.toThrow();
   });
 
+  it('writes description only when --description is given', async () => {
+    const without = await scaffold();
+    expect(without.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(without.dir, 'manifest.json'), 'utf8'))).not.toHaveProperty('description');
+
+    const withIt = await scaffold('--description', 'Does "one" thing.\nWell.', '--target', 'browser');
+    expect(withIt.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(withIt.dir, 'manifest.json'), 'utf8')).description).toBe('Does "one" thing.\nWell.');
+    expect(() => readManifest(withIt.dir)).not.toThrow();
+  });
+
   for (const [target, menu] of [['browser', 'Add Ons > Browsers'], ['editor', 'Add Ons > Editors'], ['app', 'Add Ons > Apps']] as const) {
     it(`leaves floating, show_with_session and the size out of a ${target} Add On`, async () => {
       const { dir, code, out } = await scaffold('--target', target);

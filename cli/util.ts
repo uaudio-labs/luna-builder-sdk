@@ -107,6 +107,8 @@ export interface Manifest {
   package_name?: string;
   /** In the `add_ons` shape, the default for every entry without its own `manufacturer`. */
   manufacturer?: string;
+  /** In the `add_ons` shape, the default for every entry without its own `description`. */
+  description?: string | string[];
   add_ons?: ManifestEntry[];
   [k: string]: unknown;
 }
@@ -131,8 +133,15 @@ export interface ManifestEntry {
   version?: string;
   /** Who makes the Add On; LUNA shows it in Settings > Add Ons. Overrides a top-level one. */
   manufacturer?: string;
+  /** What the Add On does: a string, or an array of strings LUNA concatenates with no separator. */
+  description?: string | string[];
   engines?: string[];
   [k: string]: unknown;
+}
+
+/** A manifest `description` as LUNA reads it: a string, or an array of strings it concatenates. */
+function isDescription(d: unknown): boolean {
+  return typeof d === 'string' || (Array.isArray(d) && d.every((s) => typeof s === 'string'));
 }
 
 /** True for a `"window"` Add On, which is also what a missing `target` means. */
@@ -238,6 +247,9 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
   if (Array.isArray(manifest.add_ons) && manifest.manufacturer !== undefined && typeof manifest.manufacturer !== 'string') {
     problems.push('top level: "manufacturer" must be a string');
   }
+  if (Array.isArray(manifest.add_ons) && manifest.description !== undefined && !isDescription(manifest.description)) {
+    problems.push('top level: "description" must be a string or an array of strings');
+  }
   for (const [i, e] of entries.entries()) {
     const where = `entry ${i} (${e.id ?? 'no id'})`;
     if (typeof e.id !== 'string' || !e.id) problems.push(`${where}: "id" must be a non-empty string`);
@@ -257,6 +269,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
     if (e.target !== undefined && !['window', 'app', 'page', 'browser', 'editor'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
     for (const k of ['floating', 'show_with_session'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
     if (e.manufacturer !== undefined && typeof e.manufacturer !== 'string') problems.push(`${where}: "manufacturer" must be a string`);
+    if (e.description !== undefined && !isDescription(e.description)) problems.push(`${where}: "description" must be a string or an array of strings`);
   }
   if (problems.length) throw new Error(`manifest.json problems:\n  - ${problems.join('\n  - ')}`);
   return { manifest, entries };
@@ -265,7 +278,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
 export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
-  ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--target window|app|browser|editor]
+  ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--description "Text"] [--target window|app|browser|editor]
                         [--no-floating] [--show-with-session] [--width 900 --height 600]
                         [--template add-on-basic|add-on-typescript] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]

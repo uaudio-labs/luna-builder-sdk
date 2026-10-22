@@ -29,7 +29,7 @@ page (fact 42). It is an optimization, not a way to read files.
 | `session.importFile(path, trackUid?)` | an audio, MIDI or video file path | LUNA's own import: a clip at the selection, on `trackUid` or a new track | `/gui` |
 | `luna.gui.chooseFiles()` | LUNA's open dialog | absolute paths, or `[]` if cancelled | `/gui` |
 | `luna.gui.chooseFolders()` | LUNA's folder dialog | absolute folder paths, or `[]` if cancelled | `/gui` |
-| `luna.gui.listFiles(path)` | an absolute folder path | its entries `{ name, path, isDirectory }`, hidden ones left out, in natural order (`take2` before `take10`) | `/gui` |
+| `luna.gui.listFiles(path)` | an absolute path in a folder the user gave LUNA | its entries `{ name, path, isDirectory }`, hidden ones left out, in natural order (`take2` before `take10`) | `/gui` |
 | `Luna.onPathDrop(handler)` | files dragged onto the page in LUNA | absolute paths with the drop's page `x`, `y` | LUNA's webview |
 | `luna.gui.serveMediaFile(addOnId, path)` | an audio or video file path | a URL your page loads it from (`<video src>`, XMLHttpRequest) | `/gui` |
 
@@ -87,6 +87,14 @@ if (Luna.canDropPaths()) {
   with `Luna.Unsupported` when the engine has no `/gui` (a headless engine; fact 103).
   Check `luna.gui.available()`, not `Luna.isEmbeddedInLuna()`.
 - `importPath` needs no `/gui`, but the engine must be able to open the path.
+- `listFiles` lists only folders the user gave LUNA, and the folders inside them: one picked
+  with `chooseFolders` or dropped on an Add On (`onPathDrop`). Anything else, even a path
+  where nothing exists, rejects with code `uasrv.not_permitted`; ask with `chooseFolders`.
+  LUNA keeps the folders across restarts, at most 64, the oldest forgotten first, until the
+  user clicks FORGET FOLDERS in Settings > Add Ons. They are LUNA-wide, not per Add On. A path
+  is judged where it really is: `..` or a link out of a granted folder is refused, and so is
+  a path spelled in a different case from the folder. A path you saved can stop working, so
+  handle `uasrv.not_permitted` by asking again.
 - `listFiles` reads the disk as LUNA sees it, one level deep; recurse into `isDirectory`
   entries yourself. It rejects with code `uasrv.filesystem_error` when nothing is at the
   path or LUNA cannot read it, and `uasrv.invalid_value` for a relative path or a file. A

@@ -3,6 +3,13 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 0.2.1 — 2026-10-22
+
+- `luna.gui.listFiles` now lists only folders the user picked with `chooseFolders()` or dropped
+  on the Add On, and rejects any other path with `uasrv.not_permitted`.
+- New optional `description` manifest field, shown by LUNA and read as `description` on
+  `luna.gui.addOns`; `ua-builder new --description` writes it.
+
 ## 0.2.0 — 2026-10-21
 
 - New `Luna.SendMidi` and `Luna.QwertyMidi` play MIDI on a track live without writing to a clip.

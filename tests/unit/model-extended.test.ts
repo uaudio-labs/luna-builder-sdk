@@ -479,6 +479,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(luna.gui.addOns.items[0]!.floating.value).toBe(true);
     expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.manufacturer.value).toBe('Example Co');
+    expect(luna.gui.addOns.items[0]!.description.value).toBe('A demo Add On.');
     expect(luna.gui.main.page.value).toBe('timeline');
     const w = luna.gui.main.watch(); // outside a session: subscribe explicitly to follow pushes
     await w.ready;
@@ -519,6 +520,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
   it('lists a folder: hidden entries left out, in natural order (fact 106)', async () => {
     const { engine, luna } = await connected();
     engine.folders['/Samples'] = ['zeta.wav', '.DS_Store', 'Ünïcode/', 'take10.wav', 'b.wav', 'A.wav', 'take2.wav', 'Loops/', '_tmp.txt', 'take02.wav'];
+    engine.grantFolder('/Samples');
     const entries = await luna.gui.listFiles('/Samples');
     // Digit runs by value (take2 before take10), case ignored, punctuation and non-ASCII first.
     expect(entries.map((e) => e.name)).toEqual(['_tmp.txt', 'Ünïcode', 'A.wav', 'b.wav', 'Loops', 'take02.wav', 'take2.wav', 'take10.wav', 'zeta.wav']);
@@ -531,10 +533,35 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
   it('rejects listFiles with the engine codes LUNA answers (fact 106)', async () => {
     const { engine, luna } = await connected();
     engine.folders['/Samples'] = ['kick.wav'];
+    engine.grantFolder('/Samples');
     const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
-    expect(await code(luna.gui.listFiles('/Nope'))).toBe('uasrv.filesystem_error');
+    expect(await code(luna.gui.listFiles('/Samples/Nope'))).toBe('uasrv.filesystem_error');
     expect(await code(luna.gui.listFiles('/Samples/kick.wav'))).toBe('uasrv.invalid_value');
     expect(await code(luna.gui.listFiles('Samples'))).toBe('uasrv.invalid_value');
+  });
+
+  it('lists only folders the user granted, and the folders inside them (fact 106)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Users/me'] = ['Samples/', 'Samples Old/', 'secret.txt'];
+    engine.folders['/Users/me/Samples'] = ['Loops/', 'kick.wav'];
+    engine.folders['/Users/me/Samples/Loops'] = ['loop.wav'];
+    engine.folders['/Users/me/Samples Old'] = ['old.wav'];
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    // Nothing yet, and a missing path is refused the same way, so a refusal tells nothing.
+    expect(await code(luna.gui.listFiles('/Users/me/Samples'))).toBe('uasrv.not_permitted');
+    expect(await code(luna.gui.listFiles('/Users/me/Nope'))).toBe('uasrv.not_permitted');
+    // Picking the folder grants it.
+    engine.nextDialogFiles = ['/Users/me/Samples'];
+    expect(await luna.gui.chooseFolders()).toEqual(['/Users/me/Samples']);
+    expect((await luna.gui.listFiles('/Users/me/Samples')).map((e) => e.name)).toEqual(['kick.wav', 'Loops']);
+    expect((await luna.gui.listFiles('/Users/me/Samples/Loops/')).map((e) => e.name)).toEqual(['loop.wav']);
+    // Not the folder above, a sibling sharing its name as a prefix, or '..' out of it.
+    expect(await code(luna.gui.listFiles('/Users/me'))).toBe('uasrv.not_permitted');
+    expect(await code(luna.gui.listFiles('/Users/me/Samples Old'))).toBe('uasrv.not_permitted');
+    expect(await code(luna.gui.listFiles('/Users/me/Samples/..'))).toBe('uasrv.not_permitted');
+    // Clearing them, as FORGET FOLDERS does, withdraws access.
+    engine.grantedFolders = [];
+    expect(await code(luna.gui.listFiles('/Users/me/Samples'))).toBe('uasrv.not_permitted');
   });
 
   it('serves a media file to an Add On as a URL on its own origin (fact 114)', async () => {

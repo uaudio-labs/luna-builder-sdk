@@ -2,6 +2,26 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## 0.2.1
+
+Changed
+- `luna.gui.listFiles(path)` lists only folders the user gave LUNA, and the folders inside
+  them: one picked with `chooseFolders()` or dropped on an Add On (`Luna.onPathDrop()`). Any
+  other path rejects with code `uasrv.not_permitted`, before LUNA looks at it, so a page can no
+  longer walk the disk and then serve or import what it finds. LUNA keeps the folders across
+  restarts, at most 64, until the user clicks FORGET FOLDERS in Settings > Add Ons (fact 106).
+  `Luna.MockEngine` models it: `grantedFolders`, `grantFolder()`, and `show_folder_dialog`
+  grants what it picks. `examples/browse.html` explains a refusal and opens a dropped folder.
+
+Added
+- Optional `description` manifest field: what the Add On does, as a string or an array of
+  strings that LUNA concatenates with no separator (write `\n` in the text for a new line), so
+  long text can span lines of JSON. `ua-builder install` / `pack` reject any other value. LUNA
+  reports it as the `description` property under `/gui/add_ons/<id>`, read as `description` on
+  `luna.gui.addOns` items (`''` when the manifest has none). `ua-builder new --description "Text"`
+  writes it; without the flag it is left out. In the `add_ons` shape a top-level `description`
+  is the default for every entry without its own, as `manufacturer` is.
+
 ## 0.2.0
 
 Added
