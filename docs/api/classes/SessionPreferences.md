@@ -105,6 +105,11 @@ context(name): PreferenceContext;
 One context's preferences. It need not exist yet: the first [PreferenceContext.add](PreferenceContext.md#add)
 creates it.
 
+`name` is any non-empty name without `/`, not only your Add On's id. Give each kind of data
+its own context, your id plus a suffix, then use a preference per item and a property per
+field, rather than one record in one value: each `set` replaces a value whole, and only
+whole values can be undoable or not.
+
 #### Parameters
 
 | Parameter | Type |
@@ -119,6 +124,8 @@ creates it.
 
 ```ts
 const prefs = session.preferences.context('com.example.my-add-on');
+const tracks = session.preferences.context('com.example.my-add-on.tracks');
+await tracks.add(track.id, 'channel', 0);
 ```
 
 ***

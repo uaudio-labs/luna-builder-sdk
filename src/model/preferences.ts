@@ -8,6 +8,16 @@
  * shows in LUNA's undo history; by default it is not, which suits view state such as a
  * panel height.
  *
+ * A context need not be your Add On's id alone. Any name that is not empty and has no `/`
+ * works, so one Add On can own several contexts, each your id plus a suffix:
+ * `com.example.sequencer.tracks`, `com.example.sequencer.view`. Use the three levels for what
+ * they are: the context is a kind of data, the preference one thing of that kind (a track's
+ * uid, say) and each property one field of it. Do not put a whole record in one property
+ * value. A property holds one JSON value that each `set` replaces whole, so a record kept as
+ * one value is rewritten for every field that changes, and its fields cannot differ in
+ * undo, with a note edit undoable but a view change not. One property per field fixes both.
+ * A context's {@link PreferenceContext.clear} leaves your other contexts alone.
+ *
  * @example
  * const prefs = session.preferences.context('com.example.my-add-on');
  * await prefs.load();
@@ -16,6 +26,15 @@
  * timeline.onChange(() => (panel.style.height = `${timeline.value?.height ?? 200}px`));
  * await prefs.set('layout', 'timeline', { height: 320 });
  * await prefs.set('channels', track.id, { color: 'green' }, { undoable: true });
+ *
+ * @example
+ * // One context per kind of data, one preference per track, one property per field.
+ * const tracks = session.preferences.context('com.example.sequencer.tracks');
+ * await tracks.load();
+ * await tracks.add(track.id, 'pattern', { steps: 16, notes: [] });
+ * await tracks.add(track.id, 'channel', 0);
+ * await tracks.set(track.id, 'pattern', { steps: 16, notes }, { undoable: true });
+ * await tracks.set(track.id, 'channel', 9);
  */
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
@@ -183,7 +202,15 @@ export class SessionPreferences extends Node {
    * One context's preferences. It need not exist yet: the first {@link PreferenceContext.add}
    * creates it.
    *
-   * @example const prefs = session.preferences.context('com.example.my-add-on');
+   * `name` is any non-empty name without `/`, not only your Add On's id. Give each kind of data
+   * its own context, your id plus a suffix, then use a preference per item and a property per
+   * field, rather than one record in one value: each `set` replaces a value whole, and only
+   * whole values can be undoable or not.
+   *
+   * @example
+   * const prefs = session.preferences.context('com.example.my-add-on');
+   * const tracks = session.preferences.context('com.example.my-add-on.tracks');
+   * await tracks.add(track.id, 'channel', 0);
    */
   context(name: string): PreferenceContext {
     requireName(name, 'context');

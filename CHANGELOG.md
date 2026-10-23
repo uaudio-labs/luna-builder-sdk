@@ -2,6 +2,13 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## Unreleased
+
+Documentation
+- Session preferences: a context is any name without `/`, not only the Add On's id. The docs
+  now show an Add On using one context per kind of data (`com.example.seq.tracks`), a
+  preference per item and a property per field, instead of one record in one value (fact 110).
+
 ## 0.2.1
 
 Changed
