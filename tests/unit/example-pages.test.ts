@@ -211,6 +211,134 @@ describe('examples/inserts.html', () => {
     expect(page.all('#channel option').map((o) => o.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Vocal')]));
     page.close();
   });
+
+  it("opens and closes a plugin's editor from its name, and follows LUNA (fact 126)", async () => {
+    const engine = engineWithSession(['Vocal']);
+    engine.addPlugin('com.uaudio.uadx.1176', { name: 'UA 1176', manufacturer: 'Universal Audio', categories: ['Compressor'] });
+    const page = await loadExamplePage('inserts.html', engine);
+    await page.waitFor(() => page.all('.slot').length > 0 && page.all('#plugin option').length > 0, 'insert slots and catalog');
+    (page.all('#add')[0] as HTMLButtonElement).click();
+    const nameButton = () => page.all('.slot button.name')[0] as HTMLButtonElement | undefined;
+    await page.waitFor(() => nameButton()?.textContent === 'UA 1176', 'the loaded plugin');
+    expect(page.all('.slot button.name')).toHaveLength(1); // empty slots have no editor to open
+    expect(nameButton()!.classList.contains('open')).toBe(false);
+
+    nameButton()!.click();
+    await page.waitFor(() => nameButton()!.classList.contains('open'), 'editor shown open');
+    expect(engine.requests.find((r) => r.path === '/gui/show_plugin')?.data).toEqual({ session_uid: 'abc', channel_uid: 'Vocal', insert_type: 'effect_0' });
+
+    nameButton()!.click();
+    await page.waitFor(() => !nameButton()!.classList.contains('open'), 'editor shown closed');
+    expect(engine.requests.some((r) => r.path === '/gui/hide_plugin')).toBe(true);
+
+    // Opened from LUNA's own mixer: the page lights the name without being asked.
+    engine.setValue('/gui/plugin_windows', 'open', [{ session_uid: 'abc', channel_uid: 'Vocal', insert_type: 'effect_0' }]);
+    await page.waitFor(() => nameButton()!.classList.contains('open'), 'editor opened in LUNA');
+    expect(nameButton()!.getAttribute('aria-pressed')).toBe('true');
+    page.close();
+  });
+
+  it("drops a removed plugin's parameters, which LUNA leaves behind as ghosts (fact 86)", async () => {
+    const engine = engineWithSession(['Vocal']);
+    engine.addPlugin('com.uaudio.uadx.1176', { name: 'UA 1176' });
+    const page = await loadExamplePage('inserts.html', engine);
+    await page.waitFor(() => page.all('#plugin option').length > 0, 'the plugin list');
+    (page.all('#add')[0] as HTMLButtonElement).click();
+    await page.waitFor(() => page.all('.slot .param').length > 0, 'the plugin parameters');
+
+    const remove = page.all('.slot .actions button').find((b) => b.textContent === 'Remove') as HTMLButtonElement;
+    remove.click();
+    await page.waitFor(() => page.all('.slot .name')[0]?.textContent === 'empty', 'the emptied slot');
+    await engine.settled();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(engine.children('/sessions/abc/tracks/Vocal/effects/effect_0/controls').length).toBeGreaterThan(0); // the ghosts are there
+    expect(page.all('.slot .param')).toHaveLength(0);
+    page.close();
+  });
+
+  describe('plugin selection (fact 127)', () => {
+    function engineWithPlugins() {
+      const engine = engineWithSession(['Vocal']); // a mono track
+      engine.addPlugin('com.uaudio.uadx.1176', { name: 'UA 1176', manufacturer: 'Universal Audio', categories: ['Compressors & Limiters'] });
+      engine.addPlugin('uaudio_pultec', { name: 'Pultec EQP-1A', manufacturer: 'Universal Audio', categories: ['Equalization'], favorite: true });
+      engine.addPlugin('com.appl.au.aufx_bpas', { name: 'AUBandpass', manufacturer: 'Apple', categories: ['Equalization'] });
+      engine.addPlugin('uaudio_maximizer', { name: 'Precision Maximizer', categories: ['Compressors & Limiters'], formats: [['stereo', 'stereo']] });
+      engine.addPlugin('uaudio_shape', { name: 'Shape', effectType: 'instrument', categories: ['Synthesizer'] });
+      return engine;
+    }
+    const options = (page: Awaited<ReturnType<typeof loadExamplePage>>, id: string) => page.all(`#${id} option`).map((o) => (o as HTMLOptionElement).value);
+    const change = (page: Awaited<ReturnType<typeof loadExamplePage>>, id: string, value: string | boolean) => {
+      const el = page.document.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+      if (typeof value === 'boolean') (el as HTMLInputElement).checked = value;
+      else el.value = value;
+      el.dispatchEvent(new page.window.Event(id === 'search' ? 'input' : 'change'));
+    };
+
+    it("offers what LUNA says the slot takes on this channel, with the slot's categories", async () => {
+      const engine = engineWithPlugins();
+      const page = await loadExamplePage('inserts.html', engine);
+      await page.waitFor(() => options(page, 'plugin').length > 0, 'the plugin list');
+      // No instrument in an effect slot, no stereo-only plugin on a mono track.
+      expect(options(page, 'plugin')).toEqual(['com.appl.au.aufx_bpas', 'uaudio_pultec', 'com.uaudio.uadx.1176']);
+      expect(page.text('#count')).toBe('3 plugins');
+      expect(page.all('#plugin option')[1]!.textContent).toBe('★ Pultec EQP-1A (Universal Audio)');
+      expect(options(page, 'category')).toEqual(['', 'Compressors & Limiters', 'Equalization']);
+      expect(engine.requests.find((r) => r.path === '/plugins/query')?.data).toMatchObject({ insert_type: 'effect_0', session_uid: 'abc', channel_uid: 'Vocal' });
+      page.close();
+    });
+
+    it('narrows the list by search, category and favorites, each asked of LUNA', async () => {
+      const engine = engineWithPlugins();
+      const page = await loadExamplePage('inserts.html', engine);
+      await page.waitFor(() => options(page, 'plugin').length === 3, 'the plugin list');
+
+      change(page, 'category', 'Equalization');
+      await page.waitFor(() => options(page, 'plugin').length === 2, 'the EQs');
+      expect(engine.requests.at(-1)?.data).toMatchObject({ categories: ['Equalization'] });
+
+      change(page, 'search', 'pult');
+      await page.waitFor(() => options(page, 'plugin').length === 1, 'the search');
+      expect(options(page, 'plugin')).toEqual(['uaudio_pultec']);
+      expect(engine.requests.at(-1)?.data).toMatchObject({ search: 'pult', categories: ['Equalization'] });
+
+      change(page, 'search', '');
+      change(page, 'category', '');
+      change(page, 'favorites', true);
+      const lastQuery = () => engine.requests.filter((r) => r.path === '/plugins/query').at(-1)?.data as Record<string, unknown> | undefined;
+      await page.waitFor(() => lastQuery()?.['favorite'] === true && lastQuery()?.['search'] === undefined && options(page, 'plugin').join() === 'uaudio_pultec', 'the favorites');
+
+      change(page, 'favorites', false);
+      change(page, 'search', 'nothing like this');
+      await page.waitFor(() => page.text('#count') === '0 plugins', 'an empty list');
+      expect((page.document.getElementById('add') as HTMLButtonElement).disabled).toBe(true);
+      page.close();
+    });
+
+    it('loads the chosen plugin into the chosen slot', async () => {
+      const engine = engineWithPlugins();
+      const page = await loadExamplePage('inserts.html', engine);
+      await page.waitFor(() => options(page, 'plugin').length === 3 && options(page, 'target').includes('effect_3'), 'the picker');
+      change(page, 'target', 'effect_3');
+      change(page, 'plugin', 'uaudio_pultec');
+      (page.all('#add')[0] as HTMLButtonElement).click();
+      await page.waitFor(() => engine.value('/sessions/abc/tracks/Vocal/effects/effect_3', 'plugin_id') === 'uaudio_pultec', 'the plugin in slot 4');
+      await page.waitFor(() => page.all('#target option').some((o) => o.textContent === 'Slot 4 (Pultec EQP-1A)'), 'the slot label');
+      expect(engine.value('/sessions/abc/tracks/Vocal/effects/effect_0', 'plugin_id') ?? '').toBe('');
+      page.close();
+    });
+
+    it('falls back to the catalog on a LUNA without the query', async () => {
+      const engine = engineWithPlugins();
+      engine.fail('/plugins/query', 'uasrv.invalid_object', 100);
+      const page = await loadExamplePage('inserts.html', engine);
+      await page.waitFor(() => options(page, 'plugin').length > 0, 'the catalog list');
+      expect(options(page, 'plugin')).toHaveLength(5); // every plugin, the slot's rules unknown
+      expect(page.text('#status')).toContain('cannot say which plugins fit a slot');
+      change(page, 'category', 'Equalization');
+      await page.waitFor(() => options(page, 'plugin').length === 2, 'the catalog EQs');
+      page.close();
+    });
+  });
 });
 
 describe('examples/presets.html', () => {
@@ -273,6 +401,77 @@ describe('examples/presets.html', () => {
   it('asks for a plugin when no insert holds one', async () => {
     const page = await loadExamplePage('presets.html', engineWithSession(['Vocal']));
     await page.waitFor(() => page.text('#status').includes('insert a plugin'), 'the empty-session message');
+    page.close();
+  });
+});
+
+describe('examples/track-presets.html', () => {
+  const SYNTH = 'uaudio_moog_minimoog';
+  function engineWithPresets() {
+    const engine = engineWithSession(['Vocal']);
+    engine.addPlugin(SYNTH, { name: 'Minimoog', effectType: 'instrument' });
+    engine.addPresetTagGroup(SYNTH, 'TYPE', ['Bass', 'Lead']);
+    engine.addPreset(SYNTH, 'Fat Bass', { uid: 'p_fat_bass', factory: true, tags: ['Bass', 'Techno'] });
+    engine.addPreset(SYNTH, 'Screaming Lead', { uid: 'p_lead', factory: true, tags: ['Lead'] });
+    engine.addTrackPresetTagGroup('TYPE', ['Bass', 'Vocal']);
+    engine.addPresetTagGroup(SYNTH, 'GENRE', ['Techno']);
+    engine.addTrackPreset('Bass Rig', { uid: 'tp_bass', trackType: 'instrument', factory: true, tags: ['Bass'] });
+    engine.addTrackPreset('Lead Vocal', { uid: 'tp_vocal', trackType: 'audio', factory: true, tags: ['Vocal'] });
+    return engine;
+  }
+  const names = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.all('.preset').map((b) => b.querySelector('.name')?.textContent);
+  const click = (el: Element | undefined) => (el as HTMLButtonElement).click();
+
+  it('filters by category and tag, makes a track from an instrument preset, then replaces presets on it until Done', async () => {
+    const engine = engineWithPresets();
+    const page = await loadExamplePage('track-presets.html', engine);
+    await page.waitFor(() => page.all('.preset').length === 4, 'track and instrument presets');
+    expect(page.all('#categories .chip').map((c) => c.textContent)).toEqual(['All', 'Audio', 'Instrument', 'Bus', 'Multi-Track']);
+    // A tab per tag group, the first open; nothing selected yet.
+    expect(page.all('#tabs button').map((t) => t.textContent)).toEqual(['TYPE', 'GENRE']);
+    expect(page.all('#groupTags .chip').map((c) => c.textContent)).toEqual(['Bass', 'Vocal', 'Lead']);
+    expect(page.text('#chosen')).toContain('none selected');
+    expect(page.all('.preset[data-instrument="true"]')).toHaveLength(2);
+    expect(page.all('.preset[data-instrument="true"] .kind').map((k) => k.textContent)).toEqual(['Instrument preset · Minimoog', 'Instrument preset · Minimoog']);
+    expect(page.all('.preset[data-instrument="false"] .kind').map((k) => k.textContent)).toEqual(['Track preset', 'Track preset']);
+
+    click(page.all('#categories .chip').find((c) => c.textContent === 'Instrument'));
+    await page.waitFor(() => page.all('.preset').length === 3, 'the Instrument category');
+    // Selecting in one tab and then another gathers both above the tabs, each tab counting its own.
+    click(page.all('#groupTags .chip').find((c) => c.textContent === 'Bass'));
+    await page.waitFor(() => page.all('.preset').length === 2, 'the Bass tag');
+    expect(names(page)).toEqual(['Bass Rig', 'Fat Bass']);
+    click(page.all('#tabs button').find((t) => t.textContent === 'GENRE'));
+    expect(page.all('#groupTags .chip').map((c) => c.textContent)).toEqual(['Techno']);
+    click(page.all('#groupTags .chip')[0]);
+    await page.waitFor(() => page.all('.preset').length === 1, 'the Techno tag');
+    expect(page.all('#chosen .chip').map((c) => c.textContent)).toEqual(['Bass', 'Techno']);
+    expect(page.all('#tabs button').map((t) => t.textContent)).toEqual(['TYPE1', 'GENRE1']);
+    // Clicking a selected tag removes it.
+    click(page.all('#chosen .chip').find((c) => c.textContent === 'Techno'));
+    await page.waitFor(() => page.all('.preset').length === 2, 'Techno removed');
+    expect(page.all('#chosen .chip').map((c) => c.textContent)).toEqual(['Bass']);
+    expect(names(page)).toEqual(['Bass Rig', 'Fat Bass']);
+
+    // The first click makes the track ...
+    click(page.all('.preset').find((b) => b.querySelector('.name')?.textContent === 'Fat Bass'));
+    await page.waitFor(() => !(page.document.getElementById('mode') as HTMLElement).hidden, 'replace mode');
+    expect(page.text('#mode')).toContain('Fat Bass');
+    const track = '/sessions/abc/tracks/t2';
+    expect(engine.value(track, 'track_type')).toBe('instrument');
+    expect(engine.value(`${track}/effects/instrument`, 'preset_uid')).toBe('p_fat_bass');
+    await page.waitFor(() => page.all('.preset[data-current="true"]').length === 1, 'the current preset to be marked');
+
+    // ... and the next ones replace its preset instead of making more tracks.
+    click(page.all('.preset').find((b) => b.querySelector('.name')?.textContent === 'Bass Rig'));
+    await page.waitFor(() => engine.value(track, 'preset_uid') === 'tp_bass', 'the preset to be replaced');
+    expect(engine.children('/sessions/abc/tracks')).toHaveLength(2);
+    expect(engine.requests.filter((r) => r.path === '/presets/devices/track/load')).toHaveLength(1);
+
+    click(page.document.getElementById('done') ?? undefined);
+    await page.waitFor(() => (page.document.getElementById('mode') as HTMLElement).hidden, 'back to new tracks');
+    click(page.all('.preset').find((b) => b.querySelector('.name')?.textContent === 'Fat Bass'));
+    await page.waitFor(() => engine.children('/sessions/abc/tracks').length === 3, 'a second new track');
     page.close();
   });
 });

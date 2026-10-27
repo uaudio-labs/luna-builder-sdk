@@ -6,6 +6,7 @@
 | ------ | ------ | ------ |
 | <a id="devicetypeid"></a> `deviceTypeId?` | `string` | A device type (for example `track`) instead of a plugin. |
 | <a id="favorite"></a> `favorite?` | `boolean` | Only favorites. |
+| <a id="includeinstrumentpresets"></a> `includeInstrumentPresets?` | `boolean` | With `deviceTypeId: 'track'`, also list the presets of every installed instrument plugin, marked `isInstrumentPreset`. An `Instrument` tag then selects instrument track presets and every instrument preset; the other tags must match either kind (fact 132). |
 | <a id="limit"></a> `limit?` | `number` | Maximum number of rows. |
 | <a id="matchanytag"></a> `matchAnyTag?` | `boolean` | With several `tags`, match presets carrying any of them rather than all. |
 | <a id="pluginid"></a> `pluginId?` | `string` | The plugin whose presets to list. One of `pluginId` or `deviceTypeId` is required. |

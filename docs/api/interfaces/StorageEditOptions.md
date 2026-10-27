@@ -1,6 +1,6 @@
-# Interface: PreferenceEditOptions
+# Interface: StorageEditOptions
 
-Options for an edit of a session preference.
+Options for an edit of session storage.
 
 ## Properties
 

@@ -115,6 +115,20 @@ preset?.uid;
 
 ***
 
+### forgetInstruments()
+
+```ts
+forgetInstruments(): void;
+```
+
+Read the installed instruments again on the next query, for example after one was installed.
+
+#### Returns
+
+`void`
+
+***
+
 ### load()
 
 ```ts
@@ -361,6 +375,66 @@ are not tagged.
 ```ts
 const groups = await luna.presets.tagGroups('uaudio_paradise_guitar_studio');
 groups.map((g) => g.name); // ['TYPE', 'GENRE', 'DESCRIPTION']
+```
+
+***
+
+### trackSelection()
+
+```ts
+trackSelection(options): TrackPresetSelection;
+```
+
+A live selection over track presets, as LUNA's track preset browser offers them: a
+`category` (one of [TRACK\_PRESET\_CATEGORIES](../variables/TRACK_PRESET_CATEGORIES.md), or `null` for all), tags, and search
+text. With no category or `Instrument`, installed instrument plugins' presets are listed
+too, marked `isInstrumentPreset` (fact 132). Pass a row to [Session.newTrackFromPreset](Session.md#newtrackfrompreset)
+to make a track from it, or to [Track.loadPreset](Track.md#loadpreset) to apply it to a track. Call
+`dispose()` when done.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`TrackPresetSelectionOptions`](../interfaces/TrackPresetSelectionOptions.md) |
+
+#### Returns
+
+[`TrackPresetSelection`](TrackPresetSelection.md)
+
+#### Example
+
+```ts
+const sel = luna.presets.trackSelection({ category: 'Instrument' });
+await sel.ready();
+await sel.search.set('piano');
+await sel.settled();
+const [track] = await session.newTrackFromPreset(sel.presets.items[0]);
+await track.loadPreset(sel.presets.items[1]);   // replace it with another
+sel.dispose();
+```
+
+***
+
+### trackTagGroups()
+
+```ts
+trackTagGroups(): Promise<PresetTagGroup[]>;
+```
+
+The tag groups LUNA's track preset browser shows: the track presets' own groups and every
+installed instrument plugin's, merged by group name, without the category tags (`Audio`,
+`Instrument`, `Bus`, `Multi-Track`), which [TRACK\_PRESET\_CATEGORIES](../variables/TRACK_PRESET_CATEGORIES.md) lists (fact 132).
+
+#### Returns
+
+`Promise`\<[`PresetTagGroup`](../interfaces/PresetTagGroup.md)[]\>
+
+#### Example
+
+```ts
+const groups = await luna.presets.trackTagGroups();
+groups.map((g) => g.name); // ['GENRE', 'TYPE', ...]
 ```
 
 ***

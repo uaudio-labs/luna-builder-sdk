@@ -29,6 +29,8 @@
 | <a id="outputs"></a> `outputs` | `readonly` | [`Collection`](Collection.md)\<[`Output`](Output.md)\> | - | [`Channel`](Channel.md).[`outputs`](Channel.md#outputs) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Channel`](Channel.md).[`path`](Channel.md#path) |
 | <a id="playlistuid"></a> `playlistUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | Uid of the active playlist; the playlist object lives under `session.playlists`. | - |
+| <a id="presetname"></a> `presetName` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | That preset's name, or null. | - |
+| <a id="presetuid"></a> `presetUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | The uid of the track preset (or instrument plugin preset) the track was made from or last had applied, or null (fact 132). | - |
 | <a id="recordenabled"></a> `recordEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="recordmute"></a> `recordMute` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | Uid of the owning session, for session-level commands that name this channel. | [`Channel`](Channel.md).[`sessionUid`](Channel.md#sessionuid) |
@@ -328,6 +330,37 @@ Pushes keep the cells current afterwards as long as an ancestor is watched.
 #### Inherited from
 
 [`Channel`](Channel.md).[`load`](Channel.md#load)
+
+***
+
+### loadPreset()
+
+```ts
+loadPreset(preset): Promise<void>;
+```
+
+Apply a preset to this track in one undo step, as LUNA's track header PRESETS > Assign
+does (fact 132). A track preset replaces the track's plugins, sends and mixer settings; an
+instrument plugin's preset replaces the instrument only, and needs an instrument track. The
+track takes the preset's name unless it was renamed in LUNA; a name set with `name.set`
+does not count, and is replaced. `presetUid` follows.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `preset` | `string` \| `Pick`\<[`PresetRow`](../interfaces/PresetRow.md), `"uid"`\> |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await track.loadPreset(sel.presets.items[0]);
+track.presetName.value; // that preset's name
+```
 
 ***
 

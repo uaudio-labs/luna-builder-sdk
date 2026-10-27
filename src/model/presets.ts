@@ -27,6 +27,18 @@ export interface PresetRow {
   path: string;
   /** The preset's tags. Present only when the query asked for them (`withTags`). */
   tags?: string[];
+  /**
+   * True for an instrument plugin's preset listed among track presets, false for a track
+   * preset. Present only when the query asked for them (`includeInstrumentPresets`, fact 132).
+   */
+  isInstrumentPreset?: boolean;
+  /**
+   * For an instrument preset, the plugin it belongs to: the instrument whose factory or user
+   * preset folder holds it (fact 132). Absent when no installed instrument's folder does.
+   */
+  pluginId?: string;
+  /** That plugin's name, for example `Moog Minimoog Synth`. */
+  pluginName?: string;
 }
 
 export interface PresetQueryOptions {
@@ -46,7 +58,26 @@ export interface PresetQueryOptions {
   favorite?: boolean;
   /** Maximum number of rows. */
   limit?: number;
+  /**
+   * With `deviceTypeId: 'track'`, also list the presets of every installed instrument plugin,
+   * marked `isInstrumentPreset`. An `Instrument` tag then selects instrument track presets and
+   * every instrument preset; the other tags must match either kind (fact 132).
+   */
+  includeInstrumentPresets?: boolean;
 }
+
+/**
+ * The categories LUNA's track preset browser offers. They are ordinary preset tags, which
+ * LUNA writes when a track preset is saved (fact 132). No category means all of them.
+ */
+export const TRACK_PRESET_CATEGORIES = ['Audio', 'Instrument', 'Bus', 'Multi-Track'] as const;
+export type TrackPresetCategory = (typeof TRACK_PRESET_CATEGORIES)[number];
+
+/** How long a read of one instrument plugin's preset details may take before it is left out. */
+const TAG_GROUP_WAIT_MS = 3000;
+
+/** Tags LUNA's track preset browser keeps out of its tag groups: the categories and `All`. */
+const HIDDEN_TRACK_TAGS = new Set<string>([...TRACK_PRESET_CATEGORIES, 'All']);
 
 /**
  * A named group of a plugin's preset tags, for example Paradise's `TYPE`, `GENRE` and
@@ -78,6 +109,8 @@ export interface PresetRecommendation {
 }
 
 export class Presets extends Node {
+  private instrumentList: Promise<InstrumentSource[]> | undefined;
+
   /** @internal */
   constructor(client: Client) {
     super(client, '/presets');
@@ -103,8 +136,59 @@ export class Presets extends Node {
     if (options.withTags) payload['tags'] = true;
     if (options.favorite !== undefined) payload['favorite'] = options.favorite;
     if (options.limit !== undefined) payload['limit'] = options.limit;
+    if (options.includeInstrumentPresets !== undefined) payload['include_instrument_presets'] = options.includeInstrumentPresets;
     const reply = (await this.post('query', payload)) as { results?: Record<string, unknown[]> & { num_rows?: number } } | null;
-    return rowsFrom(reply?.results);
+    const rows = rowsFrom(reply?.results);
+    if (rows.some((r) => r.isInstrumentPreset)) await this.namePlugins(rows);
+    return rows;
+  }
+
+  /** Give each instrument preset its plugin, by the preset folder that holds it (fact 132). */
+  private async namePlugins(rows: PresetRow[]): Promise<void> {
+    const sources = await this.instruments();
+    for (const row of rows) {
+      if (!row.isInstrumentPreset) continue;
+      let best: { source: InstrumentSource; length: number } | undefined;
+      for (const source of sources) {
+        for (const root of source.roots) {
+          const inside = row.path === root || row.path.startsWith(`${root}/`);
+          if (inside && root.length > (best?.length ?? -1)) best = { source, length: root.length };
+        }
+      }
+      if (best) {
+        row.pluginId = best.source.pluginId;
+        row.pluginName = best.source.name;
+      }
+    }
+  }
+
+  /**
+   * The installed instruments with their preset folders, read once and kept: LUNA's own
+   * browser asks for the same list. {@link forgetInstruments} reads it again next time.
+   */
+  private instruments(): Promise<InstrumentSource[]> {
+    if (!this.instrumentList) {
+      const reading = (async () => {
+        const plugins = await this.client.plugins.query({ insertType: 'instrument' }).catch(() => []);
+        return Promise.all(
+          plugins
+            .filter((p) => addressable(p.pluginId))
+            .map(async (p) => {
+              const node = await within(this.wire.get(`/presets/plugins/${p.pluginId}`, { properties: true, children: false, commands: false, flatvalue: true, propfilter: ['factory_root', 'user_root'] }) as Promise<TreeNode | null>, null);
+              const roots = [node?.properties?.['factory_root'], node?.properties?.['user_root']].filter((r): r is string => typeof r === 'string' && r !== '').map((r) => r.replace(/\/+$/, ''));
+              return { pluginId: p.pluginId, name: p.name, roots };
+            }),
+        );
+      })();
+      reading.catch(() => (this.instrumentList = undefined));
+      this.instrumentList = reading;
+    }
+    return this.instrumentList;
+  }
+
+  /** Read the installed instruments again on the next query, for example after one was installed. */
+  forgetInstruments(): void {
+    this.instrumentList = undefined;
   }
 
   /**
@@ -132,7 +216,34 @@ export class Presets extends Node {
    * groups.map((g) => g.name); // ['TYPE', 'GENRE', 'DESCRIPTION']
    */
   async tagGroups(pluginId: string): Promise<PresetTagGroup[]> {
-    const tree = (await this.wire.get(`/presets/plugins/${pluginId}/categories`, { recursive: true, children: true, properties: true, commands: false, flatvalue: true })) as TreeNode | null;
+    return this.groupsAt(`/presets/plugins/${pluginId}/categories`);
+  }
+
+  /**
+   * The tag groups LUNA's track preset browser shows: the track presets' own groups and every
+   * installed instrument plugin's, merged by group name, without the category tags (`Audio`,
+   * `Instrument`, `Bus`, `Multi-Track`), which {@link TRACK_PRESET_CATEGORIES} lists (fact 132).
+   *
+   * @example
+   * const groups = await luna.presets.trackTagGroups();
+   * groups.map((g) => g.name); // ['GENRE', 'TYPE', ...]
+   */
+  async trackTagGroups(): Promise<PresetTagGroup[]> {
+    const instruments = await this.instruments();
+    const sources = [`/presets/devices/track/categories`, ...instruments.map((p) => `/presets/plugins/${p.pluginId}/categories`)];
+    const all = (await Promise.all(sources.map((path) => within(this.groupsAt(path), [] as PresetTagGroup[])))).flat();
+    const byName = new Map<string, PresetTagGroup>();
+    for (const group of all) {
+      const tags = group.tags.filter((t) => !HIDDEN_TRACK_TAGS.has(t));
+      const seen = byName.get(group.name);
+      if (seen) seen.tags.push(...tags.filter((t) => !seen.tags.includes(t)));
+      else byName.set(group.name, { ...group, tags: [...new Set(tags)] });
+    }
+    return [...byName.values()].filter((g) => g.tags.length > 0);
+  }
+
+  private async groupsAt(path: string): Promise<PresetTagGroup[]> {
+    const tree = (await this.wire.get(path, { recursive: true, children: true, properties: true, commands: false, flatvalue: true })) as TreeNode | null;
     const groups: PresetTagGroup[] = [];
     for (const category of tree?.children ?? []) {
       const subs = category.children?.find((c) => c.path === 'sub_categories');
@@ -200,6 +311,27 @@ export class Presets extends Node {
   selection(pluginId: string, options: PresetSelectionOptions = {}): PresetSelection {
     return new PresetSelection(this.client, pluginId, options);
   }
+
+  /**
+   * A live selection over track presets, as LUNA's track preset browser offers them: a
+   * `category` (one of {@link TRACK_PRESET_CATEGORIES}, or `null` for all), tags, and search
+   * text. With no category or `Instrument`, installed instrument plugins' presets are listed
+   * too, marked `isInstrumentPreset` (fact 132). Pass a row to {@link Session.newTrackFromPreset}
+   * to make a track from it, or to {@link Track.loadPreset} to apply it to a track. Call
+   * `dispose()` when done.
+   *
+   * @example
+   * const sel = luna.presets.trackSelection({ category: 'Instrument' });
+   * await sel.ready();
+   * await sel.search.set('piano');
+   * await sel.settled();
+   * const [track] = await session.newTrackFromPreset(sel.presets.items[0]);
+   * await track.loadPreset(sel.presets.items[1]);   // replace it with another
+   * sel.dispose();
+   */
+  trackSelection(options: TrackPresetSelectionOptions = {}): TrackPresetSelection {
+    return new TrackPresetSelection(this.client, options);
+  }
 }
 
 /**
@@ -235,87 +367,84 @@ export interface PresetSelectionOptions {
   recommendDelayMs?: number;
 }
 
-/** Created by {@link Presets.selection}. */
-export class PresetSelection {
-  /** Search text. Filters `presets` by name and is what recommendations are asked for. */
+export interface TrackPresetSelectionOptions {
+  /** The category to start on. Default `null`: all of them. */
+  category?: TrackPresetCategory | null;
+  /** Most rows in `presets`. Default: all of them. */
+  limit?: number;
+  /** Quiet time after a change before the list is queried, in ms. Default 100. */
+  queryDelayMs?: number;
+}
+
+/**
+ * What {@link PresetSelection} and {@link TrackPresetSelection} share: search text and tags
+ * in, a list of presets out. Requests are debounced, and a reply that a newer request
+ * overtook is dropped.
+ */
+abstract class PresetSelectionBase {
+  /** Search text. Filters `presets` by name; for a plugin's presets, it is also what recommendations are asked for. */
   readonly search: WritableProp<string>;
   /** Selected tags. */
   readonly tags: WritableProp<readonly string[]>;
-  /** Match presets carrying any selected tag rather than all of them. Default false. */
-  readonly matchAnyTag: WritableProp<boolean>;
-  /** The plugin's tag groups, once {@link ready}. */
+  /** The tag groups, once {@link ready}. */
   readonly groups: Prop<readonly PresetTagGroup[]>;
   /** Presets matching the search text and tags, with their tags. */
   readonly presets: List<PresetRow>;
-  /** UA Assistant's picks for the search text, among presets carrying the tags. Best first. */
-  readonly recommendations: List<PresetRecommendation>;
-  /** True while UA Assistant is connected, so recommendations can come. */
-  readonly recommendationsAvailable: Prop<boolean>;
-  /** True while a list query or a recommendation request is in flight or waiting. */
+  /** True while a request is in flight or waiting. */
   readonly loading: Prop<boolean>;
   /** The last list query's failure, or `null`. */
   readonly error: Prop<UAError | null>;
-  /** The last recommendation request's failure, or `null`. */
-  readonly recommendationError: Prop<UAError | null>;
 
-  private readonly searchCell: Cell<string>;
-  private readonly tagsCell: Cell<readonly string[]>;
-  private readonly anyCell: Cell<boolean>;
+  protected readonly searchCell: Cell<string>;
+  protected readonly tagsCell: Cell<readonly string[]>;
   private readonly groupsCell: Cell<readonly PresetTagGroup[]>;
   private readonly presetsCell: Cell<readonly PresetRow[]>;
-  private readonly recsCell: Cell<readonly PresetRecommendation[]>;
   private readonly loadingCell: Cell<boolean>;
   private readonly errorCell: Cell<UAError | null>;
-  private readonly recErrorCell: Cell<UAError | null>;
-  private readonly presetsApi: Presets;
-  private readonly releases: Unsubscribe[] = [];
-  private queryTimer: ReturnType<typeof setTimeout> | undefined;
-  private recTimer: ReturnType<typeof setTimeout> | undefined;
-  private queryGen = 0;
-  private recGen = 0;
+  protected readonly presetsApi: Presets;
+  protected readonly releases: Unsubscribe[] = [];
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly gens = new Map<string, number>();
   private inFlight = 0;
   private waiters: (() => void)[] = [];
   private readyPromise: Promise<void> | undefined;
-  /** Uids carrying the selected tags, by tag selection, for filtering recommendations. */
-  private taggedUids = new Map<string, Promise<Set<string>>>();
   private isDisposed = false;
 
-  /** @internal Use {@link Presets.selection}. */
-  constructor(
-    private readonly client: Client,
-    readonly pluginId: string,
-    private readonly options: PresetSelectionOptions = {},
+  protected constructor(
+    protected readonly client: Client,
+    private readonly base: { limit?: number; queryDelayMs?: number },
   ) {
     const scheduler = client.store.scheduler;
     this.presetsApi = client.presets;
     this.searchCell = new Cell<string>(scheduler, '');
     this.tagsCell = new Cell<readonly string[]>(scheduler, []);
-    this.anyCell = new Cell<boolean>(scheduler, false);
     this.groupsCell = new Cell<readonly PresetTagGroup[]>(scheduler, []);
     this.presetsCell = new Cell<readonly PresetRow[]>(scheduler, []);
-    this.recsCell = new Cell<readonly PresetRecommendation[]>(scheduler, []);
     this.loadingCell = new Cell<boolean>(scheduler, false);
     this.errorCell = new Cell<UAError | null>(scheduler, null);
-    this.recErrorCell = new Cell<UAError | null>(scheduler, null);
-    const input = <T>(cell: Cell<T>): WritableProp<T> =>
-      writable(cell, async (value) => {
-        if (cell.update(value)) this.changed();
-      });
-    this.search = input(this.searchCell);
-    this.tags = input(this.tagsCell);
-    this.matchAnyTag = input(this.anyCell);
+    this.search = this.input(this.searchCell);
+    this.tags = this.input(this.tagsCell);
     this.groups = this.groupsCell;
     this.presets = listOf(this.presetsCell, (row) => row.uid);
-    this.recommendations = listOf(this.recsCell, (rec) => rec.uid);
-    this.recommendationsAvailable = derived([client.assistant.enabled], () => client.assistant.enabled.value === true);
     this.loading = this.loadingCell;
     this.error = this.errorCell;
-    this.recommendationError = this.recErrorCell;
+  }
+
+  /** The tag groups to offer. */
+  protected abstract loadGroups(): Promise<PresetTagGroup[]>;
+  /** The list query for the current inputs, without `limit`. */
+  protected abstract listQuery(): PresetQueryOptions;
+
+  /** A writable input over `cell`: setting a new value queries again. */
+  protected input<T>(cell: Cell<T>): WritableProp<T> {
+    return writable(cell, async (value) => {
+      if (cell.update(value)) this.changed();
+    });
   }
 
   /**
-   * Read the tag groups and the first list, and start following UA Assistant's connection.
-   * Idempotent.
+   * Read the tag groups and the first list (and, for a plugin's presets, start following UA
+   * Assistant's connection). Idempotent.
    *
    * @example
    * await sel.ready();
@@ -325,16 +454,9 @@ export class PresetSelection {
     return this.readyPromise;
   }
 
-  private async start(): Promise<void> {
-    if (this.wantsRecommendations) {
-      const watch = this.client.assistant.watch();
-      this.releases.push(watch.release);
-      // Assistant connecting (or dropping) changes what a search can recommend.
-      this.releases.push(this.client.assistant.enabled.onChange(() => this.scheduleRecommendations(0)));
-      await watch.ready.catch(() => {});
-    }
-    const groups = this.track(this.presetsApi.tagGroups(this.pluginId).catch(() => [] as PresetTagGroup[]));
-    this.scheduleQuery(0);
+  protected async start(): Promise<void> {
+    const groups = this.track(this.loadGroups().catch(() => [] as PresetTagGroup[]));
+    this.schedule('query', 0, (current) => this.runQuery(current));
     this.groupsCell.update(await groups);
     await this.settled();
   }
@@ -359,7 +481,6 @@ export class PresetSelection {
 
   /** Query again with the current inputs, for example after presets were saved or deleted. */
   refresh(): void {
-    this.taggedUids.clear();
     this.changed();
   }
 
@@ -379,11 +500,10 @@ export class PresetSelection {
   dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
-    clearTimeout(this.queryTimer);
-    clearTimeout(this.recTimer);
-    this.queryTimer = this.recTimer = undefined;
-    this.queryGen++;
-    this.recGen++;
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+    // A reply still in flight must not land after this.
+    for (const [key, gen] of this.gens) this.gens.set(key, gen + 1);
     for (const release of this.releases.splice(0)) release();
     this.wake();
   }
@@ -392,81 +512,167 @@ export class PresetSelection {
     return this.isDisposed;
   }
 
-  private get wantsRecommendations(): boolean {
-    return this.options.recommend !== false;
+  protected get started(): boolean {
+    return this.readyPromise !== undefined;
   }
 
   private get idle(): boolean {
-    return this.inFlight === 0 && this.queryTimer === undefined && this.recTimer === undefined;
+    return this.inFlight === 0 && this.timers.size === 0;
   }
 
-  private changed(): void {
-    if (this.isDisposed || !this.readyPromise) return;
-    this.scheduleQuery(this.options.queryDelayMs ?? 100);
-    this.scheduleRecommendations(this.options.recommendDelayMs ?? 300);
+  /** An input moved: query again after the quiet time. */
+  protected changed(): void {
+    if (this.isDisposed || !this.started) return;
+    this.schedule('query', this.base.queryDelayMs ?? 100, (current) => this.runQuery(current));
   }
 
-  private scheduleQuery(delayMs: number): void {
+  /**
+   * Run `job` after `delayMs`, replacing a pending job under the same `key`. `current()` turns
+   * false once a newer job for the key is scheduled, so a stale reply can be dropped.
+   */
+  protected schedule(key: string, delayMs: number, job: (current: () => boolean) => Promise<void>): void {
     if (this.isDisposed) return;
-    clearTimeout(this.queryTimer);
-    this.queryGen++;
-    this.queryTimer = setTimeout(() => {
-      this.queryTimer = undefined;
-      void this.runQuery();
-    }, delayMs);
+    clearTimeout(this.timers.get(key));
+    const gen = (this.gens.get(key) ?? 0) + 1;
+    this.gens.set(key, gen);
+    this.timers.set(
+      key,
+      setTimeout(() => {
+        this.timers.delete(key);
+        void job(() => this.gens.get(key) === gen).finally(() => this.wake());
+      }, delayMs),
+    );
     this.loadingCell.update(true);
   }
 
-  private scheduleRecommendations(delayMs: number): void {
-    if (this.isDisposed || !this.readyPromise) return;
-    clearTimeout(this.recTimer);
-    this.recGen++;
-    this.recTimer = setTimeout(() => {
-      this.recTimer = undefined;
-      void this.runRecommendations();
-    }, delayMs);
-    this.loadingCell.update(true);
-  }
-
-  private async runQuery(): Promise<void> {
-    const gen = this.queryGen;
-    const tags = this.tagsCell.value ?? [];
-    const options: PresetQueryOptions = { pluginId: this.pluginId, search: this.searchCell.value ?? '', withTags: true };
-    if (tags.length > 0) {
-      options.tags = tags;
-      options.matchAnyTag = this.anyCell.value === true;
-    }
-    if (this.options.limit !== undefined) options.limit = this.options.limit;
+  private async runQuery(current: () => boolean): Promise<void> {
+    const options: PresetQueryOptions = { ...this.listQuery(), withTags: true };
+    if (this.base.limit !== undefined) options.limit = this.base.limit;
     try {
       const rows = await this.track(this.presetsApi.query(options));
-      if (gen !== this.queryGen) return;
+      if (!current()) return;
       this.presetsCell.update(rows);
       this.errorCell.update(null);
     } catch (err) {
-      if (gen !== this.queryGen) return;
+      if (!current()) return;
       this.errorCell.update(asError(err));
     }
   }
 
-  private async runRecommendations(): Promise<void> {
-    const gen = this.recGen;
+  /** Count `work` as in flight until it settles. */
+  protected track<T>(work: Promise<T>): Promise<T> {
+    this.inFlight++;
+    return work.finally(() => {
+      this.inFlight--;
+      this.wake();
+    });
+  }
+
+  private wake(): void {
+    // A timer can fire between a reply and this check; only report idle when truly idle.
+    if (!this.idle && !this.isDisposed) return;
+    this.loadingCell.update(false);
+    const waiters = this.waiters.splice(0);
+    for (const w of waiters) w();
+  }
+}
+
+/** Created by {@link Presets.selection}. */
+export class PresetSelection extends PresetSelectionBase {
+  /** Match presets carrying any selected tag rather than all of them. Default false. */
+  readonly matchAnyTag: WritableProp<boolean>;
+  /** UA Assistant's picks for the search text, among presets carrying the tags. Best first. */
+  readonly recommendations: List<PresetRecommendation>;
+  /** True while UA Assistant is connected, so recommendations can come. */
+  readonly recommendationsAvailable: Prop<boolean>;
+  /** The last recommendation request's failure, or `null`. */
+  readonly recommendationError: Prop<UAError | null>;
+
+  private readonly anyCell: Cell<boolean>;
+  private readonly recsCell: Cell<readonly PresetRecommendation[]>;
+  private readonly recErrorCell: Cell<UAError | null>;
+  /** Uids carrying the selected tags, by tag selection, for filtering recommendations. */
+  private taggedUids = new Map<string, Promise<Set<string>>>();
+
+  /** @internal Use {@link Presets.selection}. */
+  constructor(
+    client: Client,
+    readonly pluginId: string,
+    private readonly options: PresetSelectionOptions = {},
+  ) {
+    super(client, options);
+    const scheduler = client.store.scheduler;
+    this.anyCell = new Cell<boolean>(scheduler, false);
+    this.recsCell = new Cell<readonly PresetRecommendation[]>(scheduler, []);
+    this.recErrorCell = new Cell<UAError | null>(scheduler, null);
+    this.matchAnyTag = this.input(this.anyCell);
+    this.recommendations = listOf(this.recsCell, (rec) => rec.uid);
+    this.recommendationsAvailable = derived([client.assistant.enabled], () => client.assistant.enabled.value === true);
+    this.recommendationError = this.recErrorCell;
+  }
+
+  /** Query again with the current inputs, for example after presets were saved or deleted. */
+  override refresh(): void {
+    this.taggedUids.clear();
+    super.refresh();
+  }
+
+  protected override async start(): Promise<void> {
+    if (this.wantsRecommendations) {
+      const watch = this.client.assistant.watch();
+      this.releases.push(watch.release);
+      // Assistant connecting (or dropping) changes what a search can recommend.
+      this.releases.push(this.client.assistant.enabled.onChange(() => this.scheduleRecommendations(0)));
+      await watch.ready.catch(() => {});
+    }
+    await super.start();
+  }
+
+  protected loadGroups(): Promise<PresetTagGroup[]> {
+    return this.presetsApi.tagGroups(this.pluginId);
+  }
+
+  protected listQuery(): PresetQueryOptions {
+    const tags = this.tagsCell.value ?? [];
+    const options: PresetQueryOptions = { pluginId: this.pluginId, search: this.searchCell.value ?? '' };
+    if (tags.length > 0) {
+      options.tags = tags;
+      options.matchAnyTag = this.anyCell.value === true;
+    }
+    return options;
+  }
+
+  protected override changed(): void {
+    super.changed();
+    this.scheduleRecommendations(this.options.recommendDelayMs ?? 300);
+  }
+
+  private get wantsRecommendations(): boolean {
+    return this.options.recommend !== false;
+  }
+
+  private scheduleRecommendations(delayMs: number): void {
+    if (!this.started) return;
+    this.schedule('recommend', delayMs, (current) => this.runRecommendations(current));
+  }
+
+  private async runRecommendations(current: () => boolean): Promise<void> {
     const text = (this.searchCell.value ?? '').trim();
     if (!this.wantsRecommendations || text === '' || this.client.assistant.enabled.value !== true) {
       this.recsCell.update([]);
       this.recErrorCell.update(null);
-      this.wake();
       return;
     }
     const tags = this.tagsCell.value ?? [];
     const any = this.anyCell.value === true;
     try {
       const [recs, allowed] = await this.track(Promise.all([this.presetsApi.recommend(this.pluginId, text), tags.length > 0 ? this.tagged(tags, any) : Promise.resolve(undefined)]));
-      if (gen !== this.recGen) return;
+      if (!current()) return;
       const kept = allowed ? recs.filter((r) => allowed.has(r.uid)) : recs;
       this.recsCell.update(kept.slice(0, this.options.maxRecommendations ?? 5));
       this.recErrorCell.update(null);
     } catch (err) {
-      if (gen !== this.recGen) return;
+      if (!current()) return;
       this.recsCell.update([]);
       this.recErrorCell.update(asError(err));
     }
@@ -483,23 +689,71 @@ export class PresetSelection {
     }
     return found;
   }
+}
 
-  /** Count `work` as in flight until it settles. */
-  private track<T>(work: Promise<T>): Promise<T> {
-    this.inFlight++;
-    return work.finally(() => {
-      this.inFlight--;
-      this.wake();
-    });
+/** Created by {@link Presets.trackSelection}. */
+export class TrackPresetSelection extends PresetSelectionBase {
+  /**
+   * The category, one of {@link TRACK_PRESET_CATEGORIES}, or `null` for all of them. With
+   * `null` or `Instrument`, instrument plugins' presets are listed too (fact 132).
+   */
+  readonly category: WritableProp<TrackPresetCategory | null>;
+
+  private readonly categoryCell: Cell<TrackPresetCategory | null>;
+
+  /** @internal Use {@link Presets.trackSelection}. */
+  constructor(client: Client, options: TrackPresetSelectionOptions = {}) {
+    super(client, options);
+    this.categoryCell = new Cell<TrackPresetCategory | null>(client.store.scheduler, options.category ?? null);
+    this.category = this.input(this.categoryCell);
   }
 
-  private wake(): void {
-    // A timer can fire between a reply and this check; only report idle when truly idle.
-    if (!this.idle && !this.isDisposed) return;
-    this.loadingCell.update(false);
-    const waiters = this.waiters.splice(0);
-    for (const w of waiters) w();
+  /** Query again with the current inputs, and read the installed instruments again. */
+  override refresh(): void {
+    this.presetsApi.forgetInstruments();
+    super.refresh();
   }
+
+  /** True when the current category lists instrument plugins' presets as well. */
+  get includesInstrumentPresets(): boolean {
+    const category = this.categoryCell.value ?? null;
+    return category === null || category === 'Instrument';
+  }
+
+  protected loadGroups(): Promise<PresetTagGroup[]> {
+    return this.presetsApi.trackTagGroups();
+  }
+
+  protected listQuery(): PresetQueryOptions {
+    // The category is one more tag, matched with the others: LUNA's browser does the same.
+    const category = this.categoryCell.value ?? null;
+    const tags = [...(category ? [category] : []), ...(this.tagsCell.value ?? [])];
+    const options: PresetQueryOptions = { deviceTypeId: 'track', search: this.searchCell.value ?? '', includeInstrumentPresets: this.includesInstrumentPresets };
+    if (tags.length > 0) options.tags = tags;
+    return options;
+  }
+}
+
+interface InstrumentSource {
+  pluginId: string;
+  name: string;
+  /** Its factory and user preset folders, without a trailing slash. */
+  roots: string[];
+}
+
+/**
+ * LUNA cannot address a plugin id with leading or trailing spaces by path, and never answers a
+ * read of one (an Apple AU, fact 132).
+ */
+function addressable(pluginId: string): boolean {
+  return pluginId !== '' && pluginId === pluginId.trim();
+}
+
+/** `work`'s answer, or `fallback` if it fails or takes longer than {@link TAG_GROUP_WAIT_MS}: one slow plugin must not hold up the rest. */
+function within<T>(work: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => (timer = setTimeout(() => resolve(fallback), TAG_GROUP_WAIT_MS)));
+  return Promise.race([work.catch(() => fallback), late]).finally(() => clearTimeout(timer));
 }
 
 interface TreeNode {
@@ -520,6 +774,7 @@ function rowsFrom(results: (Record<string, unknown[]> & { num_rows?: number }) |
     return Array.isArray(arr) && arr[i] !== undefined ? (arr[i] as T) : fallback;
   };
   const withTags = Array.isArray(results['tags']);
+  const withInstrument = Array.isArray(results['is_instrument_preset']);
   const rows: PresetRow[] = [];
   for (let i = 0; i < n; i++) {
     const row: PresetRow = {
@@ -532,6 +787,7 @@ function rowsFrom(results: (Record<string, unknown[]> & { num_rows?: number }) |
       path: col('path', i, ''),
     };
     if (withTags) row.tags = col<string[]>('tags', i, []);
+    if (withInstrument) row.isInstrumentPreset = Boolean(col('is_instrument_preset', i, false));
     rows.push(row);
   }
   return rows;

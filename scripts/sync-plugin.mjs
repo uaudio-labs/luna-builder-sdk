@@ -88,7 +88,7 @@ export const BUILDS = [
 ];
 
 /** Consumer docs only. `api/` is generated and large. */
-export const DOCS = ['QUICKSTART.md', 'FILES.md', 'CLIPS.md', 'MANIFEST.md', 'PROTOCOL.md', 'EVIDENCE.md', 'RECIPES.md', 'tree/luna-3.0.0.15776.json'];
+export const DOCS = ['QUICKSTART.md', 'FILES.md', 'FILES-GUIDE.md', 'CLIPS.md', 'MANIFEST.md', 'PROTOCOL.md', 'EVIDENCE.md', 'RECIPES.md', 'tree/luna-3.0.0.15776.json'];
 
 /** The typed `Luna` global (`@uaudio/luna-builder-sdk/global`), hand-written in `types/`. */
 export const GLOBAL_DTS = { from: 'types/global.d.ts', to: 'sdk/global.d.ts' };

@@ -1,0 +1,223 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA track presets</title>
+<!--
+  New Track From Preset, the way LUNA's own browser offers it: pick a category (they are preset
+  tags), tags from the tag groups (a tab per group, with the selected tags above the tabs:
+  click one there to remove it), and type to filter by name. With All or Instrument the list
+  also holds every installed instrument plugin's presets, so a track can be made straight from
+  a synth patch (fact 132).
+
+  Click a preset to make a track from it. The page then switches to replacing presets on that
+  track, like the track header's PRESETS > Assign: each click applies another preset to it, in
+  its own undo step, until Done (or Esc) goes back to making new tracks.
+
+  An instrument preset is listed with its plugin's name, which the SDK reads from the preset
+  folder that holds it (`row.pluginName`).
+
+  `luna.presets.trackSelection()` does the list; `session.newTrackFromPreset(row)` makes the
+  track; `track.loadPreset(row)` replaces its preset, and `track.presetUid` marks the current
+  one.
+
+  `npx ua-builder serve` serves the package over HTTP, or open it from file:// in a real
+  browser.
+-->
+<script src="../dist/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #17171a; color: #e8e8ec; font: 13px/1.35 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #2a2a30; flex-wrap: wrap; }
+  header .title { font-weight: 600; }
+  button, input { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #3a3a42; background: #26262c; color: inherit; }
+  button { cursor: pointer; }
+  #status { margin-left: auto; opacity: .6; }
+  #status.error { color: #ff8080; opacity: 1; }
+  #mode { display: flex; gap: 10px; align-items: center; padding: 8px 14px; background: #1f2a1f; border-bottom: 1px solid #2f4a2f; }
+  #mode[hidden] { display: none; }
+  #mode .what { flex: 1; }
+  main { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+  #search { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .label { opacity: .55; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; min-width: 110px; }
+  .chip { padding: 3px 10px; border-radius: 12px; font-size: 12px; }
+  .chip[aria-pressed="true"] { background: #2d5a8a; border-color: #5a9ae0; }
+  /* Tags: the selected ones (click to remove), then a tab per tag group and that group's tags. */
+  #chosen .chip::after { content: ' ×'; }
+  #chosen .none { opacity: .45; }
+  #clear { margin-left: auto; font-size: 12px; padding: 3px 10px; }
+  #tabs { display: flex; gap: 2px; border-bottom: 1px solid #3a3a42; }
+  #tabs button { border-radius: 6px 6px 0 0; border-bottom: none; background: transparent; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
+  #tabs button[aria-selected="true"] { background: #26262c; opacity: 1; }
+  #tabs .n { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #2d5a8a; font-size: 10px; }
+  #groupTags { padding: 4px 0; }
+  #list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+  .preset { text-align: left; display: flex; flex-direction: column; gap: 2px; }
+  .preset .kind { font-size: 11px; opacity: .55; }
+  .preset[data-instrument="true"] .kind { color: #c9b26a; opacity: .9; }
+  .preset[data-current="true"] { background: #2f4a2f; border-color: #7c7; }
+  #count { opacity: .55; }
+</style>
+<header>
+  <span class="title">LUNA track presets</span>
+  <span id="status">connecting…</span>
+</header>
+<div id="mode" hidden>
+  <span class="what"></span>
+  <button id="done">Done</button>
+</div>
+<main>
+  <input id="search" type="search" placeholder="Search track presets and instrument presets…" autocomplete="off">
+  <div class="row" id="categories"><span class="label">Category</span></div>
+  <div id="tagArea">
+    <div class="row" id="chosen"></div>
+    <div id="tabs" role="tablist" aria-label="Tag groups"></div>
+    <div class="row" id="groupTags" role="tabpanel"></div>
+  </div>
+  <div id="count"></div>
+  <div id="list"></div>
+</main>
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
+  const searchEl = document.getElementById('search');
+  const categoriesEl = document.getElementById('categories');
+  const tagAreaEl = document.getElementById('tagArea');
+  const chosenEl = document.getElementById('chosen');
+  const tabsEl = document.getElementById('tabs');
+  const groupTagsEl = document.getElementById('groupTags');
+  const countEl = document.getElementById('count');
+  const listEl = document.getElementById('list');
+  const modeEl = document.getElementById('mode');
+
+  let luna;
+  try { luna = await Luna.connect(); } catch (e) { say(e.message, true); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  luna.status.onChange(() => {
+    const connected = luna.status.value === 'connected';
+    say(connected ? '' : 'disconnected from LUNA', !connected);
+  });
+
+  await luna.sessions.ready();
+  const sel = luna.presets.trackSelection();
+  await sel.ready();
+  for (const prop of [sel.presets, sel.groups, sel.tags, sel.category, sel.error]) prop.onChange(render);
+
+  // The track being replaced on, or undefined while clicks make new tracks.
+  let target, targetOffs = [], busy = false;
+
+  function replaceOn(track) {
+    for (const off of targetOffs) off();
+    target = track;
+    targetOffs = track ? [track.presetUid.onChange(render), track.name.onChange(render)] : [];
+    render();
+  }
+
+  async function pick(row) {
+    if (busy) return;
+    busy = true;
+    try {
+      if (target) {
+        await target.loadPreset(row);
+      } else {
+        const session = luna.sessions.current();
+        if (!session) { say('no session open in LUNA', true); return; }
+        await session.ready();
+        const [track] = await session.newTrackFromPreset(row);
+        // A master bus preset loads onto the master bus and makes no track.
+        if (track) replaceOn(track);
+      }
+      say('');
+    } catch (e) {
+      say(e.message, true);
+    } finally {
+      busy = false;
+    }
+  }
+
+  searchEl.oninput = () => { void sel.search.set(searchEl.value); };
+  document.getElementById('done').onclick = () => replaceOn(undefined);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && target) replaceOn(undefined); });
+
+  function render() {
+    renderMode();
+    renderCategories();
+    renderGroups();
+    const rows = sel.presets.items;
+    countEl.textContent = `${rows.length} preset${rows.length === 1 ? '' : 's'}`;
+    if (sel.error.value) say(sel.error.value.message, true);
+    listEl.replaceChildren(...rows.map((row) => {
+      const b = document.createElement('button');
+      b.className = 'preset';
+      b.dataset.uid = row.uid;
+      b.dataset.instrument = String(row.isInstrumentPreset === true);
+      b.dataset.current = String(target?.presetUid.value === row.uid);
+      b.innerHTML = '<span class="name"></span><span class="kind"></span>';
+      b.querySelector('.name').textContent = row.name + (row.factory ? '' : ' (user)');
+      // An instrument preset says whose it is: the plugin the SDK found for it, when one was.
+      b.querySelector('.kind').textContent = row.isInstrumentPreset ? `Instrument preset${row.pluginName ? ` · ${row.pluginName}` : ''}` : 'Track preset';
+      b.title = target ? `Replace ${target.name.value}'s preset with ${row.name}` : `New track from ${row.name}`;
+      b.onclick = () => { void pick(row); };
+      return b;
+    }));
+  }
+
+  function renderMode() {
+    modeEl.hidden = !target;
+    if (target) modeEl.querySelector('.what').textContent = `Replacing the preset on ${target.name.value ?? 'the new track'}: click a preset to apply it.`;
+  }
+
+  function renderCategories() {
+    const label = categoriesEl.firstElementChild;
+    const current = sel.category.value ?? null;
+    categoriesEl.replaceChildren(label, ...[null, ...Luna.TRACK_PRESET_CATEGORIES].map((category) => {
+      const chip = Object.assign(document.createElement('button'), { className: 'chip', textContent: category ?? 'All' });
+      chip.dataset.category = category ?? 'All';
+      chip.setAttribute('aria-pressed', String(current === category));
+      chip.onclick = () => { void sel.category.set(category); };
+      return chip;
+    }));
+  }
+
+  // The tag group whose tags show, by name.
+  let openGroup;
+
+  // Selected tags first (click one to remove it), then a tab per tag group with a count of its
+  // selected tags, and the open group's tags.
+  function renderGroups() {
+    const groups = sel.groups.value ?? [];
+    const selected = sel.tags.value ?? [];
+    tagAreaEl.hidden = groups.length === 0;
+    if (!groups.some((g) => g.name === openGroup)) openGroup = groups[0]?.name;
+    const chip = (tag) => {
+      const b = Object.assign(document.createElement('button'), { className: 'chip', textContent: tag });
+      b.setAttribute('aria-pressed', String(selected.includes(tag)));
+      b.onclick = () => { void sel.toggleTag(tag); };
+      return b;
+    };
+
+    const label = Object.assign(document.createElement('span'), { className: 'label', textContent: 'Tags' });
+    if (selected.length) {
+      const clear = Object.assign(document.createElement('button'), { id: 'clear', textContent: 'Clear' });
+      clear.onclick = () => { void sel.tags.set([]); };
+      chosenEl.replaceChildren(label, ...selected.map(chip), clear);
+    } else {
+      chosenEl.replaceChildren(label, Object.assign(document.createElement('span'), { className: 'none', textContent: 'none selected' }));
+    }
+
+    tabsEl.replaceChildren(...groups.map((group) => {
+      const tab = Object.assign(document.createElement('button'), { textContent: group.name });
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(group.name === openGroup));
+      const count = group.tags.filter((t) => selected.includes(t)).length;
+      if (count) tab.append(Object.assign(document.createElement('span'), { className: 'n', textContent: String(count) }));
+      tab.onclick = () => { openGroup = group.name; renderGroups(); };
+      return tab;
+    }));
+
+    groupTagsEl.replaceChildren(...(groups.find((g) => g.name === openGroup)?.tags ?? []).map(chip));
+  }
+
+  render();
+})();
+</script>

@@ -54,7 +54,6 @@
 | [Playlist](classes/Playlist.md) | - |
 | [Plugin](classes/Plugin.md) | - |
 | [Plugins](classes/Plugins.md) | An observable ordered collection with id lookup. |
-| [PreferenceContext](classes/PreferenceContext.md) | `/sessions/<uid>/preferences/<context>`: one context's preferences. Get one with `session.preferences.context(name)`. |
 | [Preferences](classes/Preferences.md) | `/preferences`: engine preferences as writable properties by name. |
 | [Presets](classes/Presets.md) | - |
 | [PresetSelection](classes/PresetSelection.md) | Created by [Presets.selection](classes/Presets.md#selection). |
@@ -67,14 +66,16 @@
 | [SendMidi](classes/SendMidi.md) | - |
 | [Session](classes/Session.md) | - |
 | [SessionPackage](classes/SessionPackage.md) | One session package as a live node. |
-| [SessionPreferences](classes/SessionPreferences.md) | `/sessions/<uid>/preferences`: every Add On's session preferences, by context. |
 | [Sessions](classes/Sessions.md) | - |
+| [SessionStorage](classes/SessionStorage.md) | `/sessions/<uid>/storage`: every Add On's session storage, by context. |
 | [Shortcuts](classes/Shortcuts.md) | The standard shortcuts as an object: which command a key means, and running it. Most Add Ons only need [bindShortcuts](functions/bindShortcuts.md); use this directly to route keys from a listener the page already has, or to run a command from a menu. |
+| [StorageContext](classes/StorageContext.md) | `/sessions/<uid>/storage/<context>`: one context's records. Get one with `session.storage.context(name)`. |
 | [Store](classes/Store.md) | - |
 | [TempoEvent](classes/TempoEvent.md) | - |
 | [Timeline](classes/Timeline.md) | Pure tick arithmetic over the current tempo map and time signatures. Every method reads the maps as they are now; [onChange](classes/Timeline.md#onchange) says when an answer may have moved. |
 | [TimeSignature](classes/TimeSignature.md) | - |
 | [Track](classes/Track.md) | - |
+| [TrackPresetSelection](classes/TrackPresetSelection.md) | Created by [Presets.trackSelection](classes/Presets.md#trackselection). |
 | [Transport](classes/Transport.md) | - |
 | [Unsupported](classes/Unsupported.md) | The feature is not available on this engine (for example a headless engine has no `/gui`). |
 | [Waveforms](classes/Waveforms.md) | A bounded cache of overview pages, keyed by source, analysis and page index. A short page (the end of the analysis, or growth in progress) is never cached, so a recording still being written is re-read until it settles. |
@@ -127,6 +128,7 @@
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
 | [NewBusOptions](interfaces/NewBusOptions.md) | - |
 | [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute (session ticks), as LUNA's verb takes them, unlike the clip-relative ticks of the [Note](interfaces/Note.md)s it returns. There is no channel: LUNA's `create_note` writes every note on channel 0 (fact 111). For another channel, add the notes to a clip with [Clip.addNotes](classes/Clip.md#addnotes), which takes one. |
+| [NewTrackFromPresetOptions](interfaces/NewTrackFromPresetOptions.md) | - |
 | [NewTrackOptions](interfaces/NewTrackOptions.md) | - |
 | [Note](interfaces/Note.md) | A note-on row paired with the note-off that ends it. |
 | [OutputAssignment](interfaces/OutputAssignment.md) | One row of an output's `assignments` property, as LUNA publishes it. |
@@ -138,8 +140,10 @@
 | [PathDrop](interfaces/PathDrop.md) | Where a native drag is, in page pixels, and the absolute paths it carries. |
 | [PathDropHandlers](interfaces/PathDropHandlers.md) | - |
 | [PluginManifest](interfaces/PluginManifest.md) | - |
+| [PluginQueryOptions](interfaces/PluginQueryOptions.md) | - |
+| [PluginRow](interfaces/PluginRow.md) | One plugin [Plugins.query](classes/Plugins.md#query) returned. |
+| [PluginWindow](interfaces/PluginWindow.md) | One plugin editor window open in LUNA, from [Gui.pluginWindows](classes/Gui.md#pluginwindows). |
 | [Port](interfaces/Port.md) | A connection to one engine. |
-| [PreferenceEditOptions](interfaces/PreferenceEditOptions.md) | Options for an edit of a session preference. |
 | [PresetQueryOptions](interfaces/PresetQueryOptions.md) | - |
 | [PresetRecommendation](interfaces/PresetRecommendation.md) | One preset UA Assistant recommends for a search, best first (fact 121). |
 | [PresetRow](interfaces/PresetRow.md) | - |
@@ -159,8 +163,10 @@
 | [ShortcutsBinding](interfaces/ShortcutsBinding.md) | The listeners [bindShortcuts](functions/bindShortcuts.md) installed. |
 | [ShortcutsOptions](interfaces/ShortcutsOptions.md) | - |
 | [SocketLike](interfaces/SocketLike.md) | The subset of the WebSocket API this port uses; lets tests inject a fake. |
+| [StorageEditOptions](interfaces/StorageEditOptions.md) | Options for an edit of session storage. |
 | [SubscribeOptions](interfaces/SubscribeOptions.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [TraceWaveformOptions](interfaces/TraceWaveformOptions.md) | - |
+| [TrackPresetSelectionOptions](interfaces/TrackPresetSelectionOptions.md) | - |
 | [TransactionOptions](interfaces/TransactionOptions.md) | - |
 | [TransportLocation](interfaces/TransportLocation.md) | The `location` property of a session. |
 | [UploadOptions](interfaces/UploadOptions.md) | - |
@@ -178,6 +184,7 @@
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AddOnInstalledFrom](type-aliases/AddOnInstalledFrom.md) | Where an installed Add On lives: see [AddOn.installedFrom](classes/AddOn.md#installedfrom). |
 | [AddOnTarget](type-aliases/AddOnTarget.md) | - |
 | [AutomationMode](type-aliases/AutomationMode.md) | - |
 | [AutomationModeName](type-aliases/AutomationModeName.md) | - |
@@ -215,6 +222,7 @@
 | [SourceLookup](type-aliases/SourceLookup.md) | Anything that can resolve a source uid: `session.sources`, or a plain array. |
 | [StatusListener](type-aliases/StatusListener.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [StemFormat](type-aliases/StemFormat.md) | - |
+| [TrackPresetCategory](type-aliases/TrackPresetCategory.md) | - |
 | [TrackType](type-aliases/TrackType.md) | - |
 | [TransactionMode](type-aliases/TransactionMode.md) | Which kind of [Session.transaction](classes/Session.md#transaction) is open: `'batch'` holds every command for one undo step and holds pushes until the commit; `'continuous'` keeps only the last command. |
 | [Unsubscribe](type-aliases/Unsubscribe.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
@@ -246,6 +254,7 @@
 | [SIXTEENTH\_NOTE](variables/SIXTEENTH_NOTE.md) | - |
 | [TICKS\_PER\_BEAT](variables/TICKS_PER_BEAT.md) | - |
 | [TICKS\_PER\_DISPLAY\_TICK](variables/TICKS_PER_DISPLAY_TICK.md) | - |
+| [TRACK\_PRESET\_CATEGORIES](variables/TRACK_PRESET_CATEGORIES.md) | The categories LUNA's track preset browser offers. They are ordinary preset tags, which LUNA writes when a track preset is saved (fact 132). No category means all of them. |
 | [VERSION](variables/VERSION.md) | SDK version, compiled in from package.json: major.minor.patch in source, and with the Bamboo build number as a fourth part in a shipped SDK, e.g. 0.1.0.1234 (0 for a local build). |
 | [WAVEFORM\_PAGE](variables/WAVEFORM_PAGE.md) | Pairs per cached page; four pages cover a minute of fine pairs. |
 | [WHOLE\_NOTE](variables/WHOLE_NOTE.md) | - |

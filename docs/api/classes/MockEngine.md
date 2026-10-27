@@ -22,15 +22,22 @@ new MockEngine(options): MockEngine;
 
 | Property | Modifier | Type | Default value | Description |
 | ------ | ------ | ------ | ------ | ------ |
+| <a id="addoninstalls"></a> `addOnInstalls` | `public` | ( \| \{ `id`: `string`; \} \| \{ `url`: `string`; \})[] | `[]` | Every install `/gui/install_add_on` started, in order: `{ id }` with the package id, or `{ url }` with what LUNA fetches: a repo's URL (`https://github.com/<owner>/<repo>`), or a Drive file's direct download (`https://drive.usercontent.google.com/download?id=<id>&export=download&confirm=t`), or an iCloud Drive share as `https://www.icloud.com/iclouddrive/<id>`, which LUNA resolves, or a Dropbox file's download (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=1`). |
+| <a id="addonuninstalls"></a> `addOnUninstalls` | `public` | `string`[] | `[]` | Every Add On id (lowercase) `/gui/uninstall_add_on` asked the user about, in order, whatever the answer. |
+| <a id="builtinaddons"></a> `builtInAddOns` | `public` | `string`[] | `[]` | Add On ids (lowercase) under `/gui/add_ons` that are built into LUNA, which `/gui/uninstall_add_on` refuses. |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
 | <a id="grantedfolders"></a> `grantedFolders` | `public` | `string`[] | `[]` | The folders `/gui/list_files` may read, it and every folder inside them (fact 106). LUNA grants a folder the user picks in `show_folder_dialog` (the mock does too, for each of `nextDialogFiles`) or drops on an Add On; set this, or call [grantFolder](#grantfolder), to model a drop or a grant saved from an earlier run. Anything else is `uasrv.not_permitted`. The mock does not model links or LUNA's cap on how many folders it keeps. **Example** `engine.folders['/Samples'] = ['kick.wav']; engine.grantFolder('/Samples');` |
-| <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio or video file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
+| <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [marketplace](#marketplace) that were imported from a link, which `/gui/remove_imported_add_on` removes (from here and from `marketplace`); any other package is the marketplace's own and is refused. |
+| <a id="installingpackages"></a> `installingPackages` | `public` | `string`[] | `[]` | Package ids `/gui/install_add_on` treats as already installing. |
+| <a id="marketplace"></a> `marketplace` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The marketplace `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
+| <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio, video or MIDI file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
 | <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
 | <a id="midisent"></a> `midiSent` | `readonly` | [`MockMidiSent`](../interfaces/MockMidiSent.md)[] | `[]` | Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. |
 | <a id="nextdialogfiles"></a> `nextDialogFiles` | `public` | `string`[] | `[]` | What the next mock file dialog "selects"; empty means the user cancelled. |
 | <a id="requests"></a> `requests` | `readonly` | `object`[] | `[]` | Every request any port made, oldest first. Useful for asserting what a model did. |
 | <a id="touches"></a> `touches` | `readonly` | `string`[] | `[]` | `set_touch` calls, as `<control path>:on|off`, oldest first. |
 | <a id="transactions"></a> `transactions` | `readonly` | `string`[] | `[]` | Transaction commands seen: `begin`, `commit`, `abort`. |
+| <a id="uninstallanswer"></a> `uninstallAnswer` | `public` | `"remove"` \| `"cancel"` | `'remove'` | How the user answers LUNA's prompt for `/gui/uninstall_add_on`: `'remove'` (the default) takes the Add On out of `/gui/add_ons`, `'cancel'` leaves it. |
 
 ## Methods
 
@@ -276,15 +283,19 @@ Register a session package in the workspace.
 addPlugin(pluginId, options): void;
 ```
 
-Add a plugin to the catalog.
+Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
+when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `pluginId` | `string` |
-| `options` | \{ `categories?`: `string`[]; `manufacturer?`: `string`; `name?`: `string`; \} |
+| `options` | \{ `categories?`: `string`[]; `effectType?`: `string`; `favorite?`: `boolean`; `formats?`: \[`string`, `string`\][]; `manufacturer?`: `string`; `name?`: `string`; \} |
 | `options.categories?` | `string`[] |
+| `options.effectType?` | `string` |
+| `options.favorite?` | `boolean` |
+| `options.formats?` | \[`string`, `string`\][] |
 | `options.manufacturer?` | `string` |
 | `options.name?` | `string` |
 
@@ -423,8 +434,6 @@ addTrack(
    options): void;
 ```
 
-Add a track with the standard control layout and one playlist.
-
 #### Parameters
 
 | Parameter | Type |
@@ -439,6 +448,62 @@ Add a track with the standard control layout and one playlist.
 #### Returns
 
 `void`
+
+***
+
+### addTrackPreset()
+
+```ts
+addTrackPreset(name, options): string;
+```
+
+Add a track preset to the library (fact 132). Like LUNA when it saves one, it is tagged
+with its category (`Audio`, `Instrument`, `Bus`, or `Multi-Track` for more than one
+track) besides any `tags`. `new_track` with it makes one track of `trackType` named after
+it, or, with `trackNames`, a track per name, named as the preset saved them. Returns its uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `name` | `string` |
+| `options` | \{ `factory?`: `boolean`; `favorite?`: `boolean`; `tags?`: `string`[]; `trackNames?`: `string`[]; `trackType?`: `"instrument"` \| `"audio"` \| `"bus"`; `uid?`: `string`; \} |
+| `options.factory?` | `boolean` |
+| `options.favorite?` | `boolean` |
+| `options.tags?` | `string`[] |
+| `options.trackNames?` | `string`[] |
+| `options.trackType?` | `"instrument"` \| `"audio"` \| `"bus"` |
+| `options.uid?` | `string` |
+
+#### Returns
+
+`string`
+
+***
+
+### addTrackPresetTagGroup()
+
+```ts
+addTrackPresetTagGroup(
+   name, 
+   tags, 
+   options): string;
+```
+
+Add a group of track preset tags, as [addPresetTagGroup](#addpresettaggroup) does for a plugin.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `name` | `string` |
+| `tags` | `string`[] |
+| `options` | \{ `category?`: `string`; \} |
+| `options.category?` | `string` |
+
+#### Returns
+
+`string`
 
 ***
 
@@ -629,6 +694,28 @@ True when `uid` is a mock MIDI device's output port uid.
 
 ***
 
+### loadTrackPreset()
+
+```ts
+loadTrackPreset(data): null;
+```
+
+`post /presets/devices/track/load` (fact 132): a track preset or an instrument plugin's
+preset onto a track. The track records the preset and takes its name unless its
+`name_modified` is true; a name set through `set` does not make it so.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `data` | `unknown` |
+
+#### Returns
+
+`null`
+
+***
+
 ### locationAt()
 
 ```ts
@@ -748,6 +835,58 @@ Names of a node's properties.
 #### Returns
 
 `string`[]
+
+***
+
+### queryPlugins()
+
+```ts
+queryPlugins(data): object;
+```
+
+`/plugins/query` (fact 127), with LUNA's slot rules. Categories pass through untranslated.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `data` | `unknown` |
+
+#### Returns
+
+`object`
+
+| Name | Type |
+| ------ | ------ |
+| `plugins` | `Record`\<`string`, `unknown`\>[] |
+
+***
+
+### queryPresets()
+
+```ts
+queryPresets(data): object;
+```
+
+`/presets/query` (facts 98, 120, 132). A plugin's presets, or a device type's; with
+`device_type_id: "track"` and `include_instrument_presets`, also every installed instrument
+plugin's presets, with `Instrument` dropped from the tags they must match and added to the
+tags they report, and an `is_instrument_preset` column.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `data` | `unknown` |
+
+#### Returns
+
+`object`
+
+| Name | Type |
+| ------ | ------ |
+| `folders` | `unknown`[] |
+| `results` | `Record`\<`string`, `unknown`\> |
 
 ***
 

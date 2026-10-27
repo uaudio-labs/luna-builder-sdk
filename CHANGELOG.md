@@ -4,10 +4,99 @@ Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carri
 
 ## Unreleased
 
+Changed (breaking)
+- Session preferences are now **session storage**, to keep them apart from LUNA's own
+  preferences (`luna.preferences`) and to say what they hold: an Add On's data, not only its
+  settings. The three levels are now context, record and field (fact 129):
+
+  | Before (0.2.x) | Now |
+  |---|---|
+  | `session.preferences` (`Luna.SessionPreferences`) | `session.storage` (`Luna.SessionStorage`) |
+  | `session.preferences.context(name)` (`Luna.PreferenceContext`) | `session.storage.context(name)` (`Luna.StorageContext`) |
+  | `context.preferences` (names of its preferences) | `context.records` |
+  | `add(preference, property, value?, options?)` | `add(record, field, value?, options?)` |
+  | `set(preference, property, value, options?)` | `set(record, field, value, options?)` |
+  | `remove(preference, property?, options?)` | `remove(record, field?, options?)` |
+  | `value(preference, property)`, `clear(options?)` | unchanged |
+  | `Luna.PreferenceEditOptions` | `Luna.StorageEditOptions` |
+  | `/sessions/<uid>/preferences/<context>/<preference>/<property>` | `/sessions/<uid>/storage/<context>/<record>/<field>` |
+  | `add_preference`, `set_preference`, `remove_preference` with `{ context, preference, property }` | `add_field`, `set_field`, `remove_field` with `{ context, record, field }` |
+
+  The methods take the same arguments in the same order, so moving an Add On is a rename:
+  `session.preferences` becomes `session.storage`, and `.preferences` on a context becomes
+  `.records`. Code that posts the commands with `luna.raw` also renames the path, the
+  commands and the `preference` and `property` arguments.
+
+  **Data is kept.** LUNA renames what a session already stored the first time it opens the
+  session, so an Add On finds its data under the same context, record and field names, and
+  undoable edits made before still undo.
+
+  **LUNA versions.** This SDK needs a LUNA with session storage. A LUNA built with session
+  preferences, or an older one, has no `storage` node: `load()` still resolves and finds
+  nothing (fact 10), and `add` rejects with `uasrv.invalid_object` (fact 11). An Add On that
+  must also run there catches that rejection and falls back, for example to `localStorage`.
+
+Fixed
+- A session storage `set` (in 0.2.x, a session preferences `set`) whose value has a key set to
+  `undefined`, such as `{ cursor: undefined }`, waited 4 s and then rejected with `no_effect`,
+  although LUNA had stored it. LUNA keeps values as JSON, which drops such keys, so the SDK
+  waited for a value LUNA could never show. It now compares with the value as JSON and resolves
+  at once. An Add On that saves in a queue, one write after another, was held up 4 s per such
+  write, and lost what was still queued when the session closed. `Luna.MockEngine` now keeps
+  storage values as JSON too, as LUNA does (fact 129).
+
+Changed
+- `luna.gui.serveMediaFile(addOnId, path)` serves MIDI files too: `.mid` and `.midi` that
+  start with a Standard MIDI File header (`MThd`), on a LUNA built with it. Read the bytes with
+  `XMLHttpRequest` and parse them; a media element does not play MIDI (fact 114).
+
+Added
+- Track presets, as LUNA's New Track From Preset browser offers them (fact 132).
+  `luna.presets.trackSelection({ category })` is a live selection over track presets by
+  category (`Luna.TRACK_PRESET_CATEGORIES`: Audio, Instrument, Bus, Multi-Track, or `null` for
+  all), tags and search text; with all or Instrument it also lists installed instrument
+  plugins' presets, marked `isInstrumentPreset` and named with their plugin (`pluginId`,
+  `pluginName`), so a track can be made from a synth patch.
+  `session.newTrackFromPreset(row)` makes the track (or tracks) in one undo step and resolves
+  to them; `track.loadPreset(row)` replaces a track's preset, as the track header's PRESETS >
+  Assign does; `track.presetUid` and `track.presetName` say which preset it has.
+  `luna.presets.query` takes `includeInstrumentPresets`, and `luna.presets.trackTagGroups()`
+  gives the tag groups. `examples/track-presets.html` is the whole flow.
+- `luna.gui.installAddOn({ id })` or `({ url })` installs Add Ons as LUNA's Settings > Add Ons
+  > MARKETPLACE does: by marketplace package or Add On id, from the latest release of a
+  public GitHub repo, which LUNA lists in its marketplace and installs, or from a Google
+  Drive, iCloud Drive or Dropbox share link to a `.lunaaddon` shared with anyone who has the
+  link. A link that installs is saved, and LUNA's marketplace lists it from then on.
+  `luna.gui.removeImportedAddOn(id)` forgets one. LUNA asks the user to
+  confirm; the call resolves as LUNA starts, so watch `luna.gui.addOns` for the result. Needs
+  a LUNA with its Add On marketplace; another rejects with `Luna.Unsupported` (fact 128).
+  `Luna.MockEngine` models it: `marketplace`, `installingPackages`, `importedPackages`,
+  `addOnInstalls`.
+- `luna.gui.uninstallAddOn(id)` asks the user to remove an installed Add On. LUNA shows its
+  own prompt, so a page cannot remove one silently; on approval LUNA closes the Add On,
+  deletes its folder (with any Add On installed in the same folder) and rescans. A
+  `ua-builder install` symlink loses only the link, never the project. Add Ons built into
+  LUNA are refused. Resolves as the prompt opens, so watch `luna.gui.addOns` for the result.
+  An older LUNA rejects with `Luna.Unsupported` (fact 130). `Luna.MockEngine` models it:
+  `builtInAddOns`, `uninstallAnswer`, `addOnUninstalls`.
+- `addOn.version` (the manifest's) and `addOn.installedFrom` (`'folder'`, `'link'` or
+  `'built_in'`) on `luna.gui.addOns`, so a page can offer an update when a newer release is out
+  and offer Remove only where `uninstallAddOn` allows it. `version` follows a replace.
+  `undefined` on an older LUNA (fact 131).
+- `luna.plugins.query()` asks LUNA for installed plugins by search text, categories and
+  favorites, and with `insertType` (and a channel) only those that slot takes.
+  `effect.validPlugins()` does that for one slot: what LUNA's plugins browser offers there, an
+  instrument slot listing instruments, an effect slot effects that run in the channel's
+  format. LUNA decides; the SDK filters nothing. Needs a LUNA with `/plugins/query`; an older
+  one rejects with `Luna.Unsupported` (fact 127).
+- `examples/inserts.html` picks plugins that way: a target slot (the next empty one, a given
+  effect slot, or the instrument slot), search text, a category and Favorites, and the list is
+  what LUNA offers that slot on that channel. On an older LUNA it falls back to the catalog.
+
 Documentation
-- Session preferences: a context is any name without `/`, not only the Add On's id. The docs
+- Session storage: a context is any name without `/`, not only the Add On's id. The docs
   now show an Add On using one context per kind of data (`com.example.seq.tracks`), a
-  preference per item and a property per field, instead of one record in one value (fact 110).
+  record per item and a field per part, instead of one record in one value (fact 129).
 
 ## 0.2.1
 
@@ -28,6 +117,15 @@ Added
   `luna.gui.addOns` items (`''` when the manifest has none). `ua-builder new --description "Text"`
   writes it; without the flag it is left out. In the `add_ons` shape a top-level `description`
   is the default for every entry without its own, as `manufacturer` is.
+- Plugin editor windows (fact 126): `effect.openEditor()` and `effect.closeEditor()` open and
+  close the plugin's window in LUNA, as clicking it in LUNA's mixer does, and resolve once
+  LUNA shows the change; `effect.editorOpen` follows the window, whoever opens or closes it.
+  Without an `Effect`: `luna.gui.showPlugin(channelUid, slot)`, `luna.gui.hidePlugin(...)` and
+  `luna.gui.pluginWindows`. `session.ready()` now also follows `/gui/plugin_windows`. Needs
+  a LUNA that has them; an older one rejects with `Luna.Unsupported`, and `editorOpen` stays
+  `undefined` there.
+  `examples/inserts.html` shows it: click a plugin's name to show or hide its window, and the
+  name stays lit while the window is open.
 
 ## 0.2.0
 

@@ -1,14 +1,14 @@
-# Class: PreferenceContext
+# Class: StorageContext
 
-`/sessions/<uid>/preferences/<context>`: one context's preferences. Get one with
-`session.preferences.context(name)`.
+`/sessions/<uid>/storage/<context>`: one context's records. Get one with
+`session.storage.context(name)`.
 
 ## Example
 
 ```ts
-const prefs = session.preferences.context('com.example.my-add-on');
-await prefs.load();
-prefs.preferences.value; // ['layout']
+const store = session.storage.context('com.example.my-add-on');
+await store.load();
+store.records.value; // ['layout']
 ```
 
 ## Extends
@@ -21,7 +21,7 @@ prefs.preferences.value; // ['layout']
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
-| <a id="preferences"></a> `preferences` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`[]\> | Names of this context's preferences. | - |
+| <a id="records"></a> `records` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`[]\> | Names of this context's records. | - |
 
 ## Accessors
 
@@ -86,23 +86,23 @@ The context's reverse-DNS name.
 
 ```ts
 add(
-   preference, 
-   property, 
+   record, 
+   field, 
    value, 
 options): Promise<void>;
 ```
 
-Add a property with an initial value (default `null`) and resolve once it is visible.
-A property that already exists keeps its value.
+Add a field with an initial value (default `null`) and resolve once it is visible.
+A field that already exists keeps its value.
 
 #### Parameters
 
 | Parameter | Type | Default value |
 | ------ | ------ | ------ |
-| `preference` | `string` | `undefined` |
-| `property` | `string` | `undefined` |
+| `record` | `string` | `undefined` |
+| `field` | `string` | `undefined` |
 | `value` | `unknown` | `null` |
-| `options` | [`PreferenceEditOptions`](../interfaces/PreferenceEditOptions.md) | `{}` |
+| `options` | [`StorageEditOptions`](../interfaces/StorageEditOptions.md) | `{}` |
 
 #### Returns
 
@@ -111,7 +111,7 @@ A property that already exists keeps its value.
 #### Example
 
 ```ts
-await prefs.add('layout', 'timeline', { height: 200 });
+await store.add('layout', 'timeline', { height: 200 });
 ```
 
 ***
@@ -122,13 +122,13 @@ await prefs.add('layout', 'timeline', { height: 200 });
 clear(options): Promise<void>;
 ```
 
-Remove every preference in this context.
+Remove every record in this context.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `options` | [`PreferenceEditOptions`](../interfaces/PreferenceEditOptions.md) |
+| `options` | [`StorageEditOptions`](../interfaces/StorageEditOptions.md) |
 
 #### Returns
 
@@ -137,7 +137,7 @@ Remove every preference in this context.
 #### Example
 
 ```ts
-await prefs.clear();
+await store.clear();
 ```
 
 ***
@@ -179,7 +179,7 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 load(): Promise<void>;
 ```
 
-Fetch this context's preferences and their values. Call once before reading
+Fetch this context's records and their values. Call once before reading
 [value](#value); pushes keep them current while the session is watched.
 
 #### Returns
@@ -189,7 +189,7 @@ Fetch this context's preferences and their values. Call once before reading
 #### Example
 
 ```ts
-await prefs.load();
+await store.load();
 ```
 
 #### Overrides
@@ -294,20 +294,20 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ```ts
 remove(
-   preference, 
-   property?, 
+   record, 
+   field?, 
 options?): Promise<void>;
 ```
 
-Remove one property, or a whole preference when `property` is left out.
+Remove one field, or a whole record when `field` is left out.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `preference` | `string` |
-| `property?` | `string` |
-| `options?` | [`PreferenceEditOptions`](../interfaces/PreferenceEditOptions.md) |
+| `record` | `string` |
+| `field?` | `string` |
+| `options?` | [`StorageEditOptions`](../interfaces/StorageEditOptions.md) |
 
 #### Returns
 
@@ -316,8 +316,8 @@ Remove one property, or a whole preference when `property` is left out.
 #### Example
 
 ```ts
-await prefs.remove('layout', 'timeline');
-await prefs.remove('layout');
+await store.remove('layout', 'timeline');
+await store.remove('layout');
 ```
 
 ***
@@ -326,23 +326,23 @@ await prefs.remove('layout');
 
 ```ts
 set(
-   preference, 
-   property, 
+   record, 
+   field, 
    value, 
 options): Promise<void>;
 ```
 
-Set an existing property and resolve once the new value is visible. Rejects with
-`uasrv.invalid_property` if the property was never added.
+Set an existing field and resolve once the new value is visible. Rejects with
+`uasrv.invalid_property` if the field was never added.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `preference` | `string` |
-| `property` | `string` |
+| `record` | `string` |
+| `field` | `string` |
 | `value` | `unknown` |
-| `options` | [`PreferenceEditOptions`](../interfaces/PreferenceEditOptions.md) |
+| `options` | [`StorageEditOptions`](../interfaces/StorageEditOptions.md) |
 
 #### Returns
 
@@ -351,7 +351,7 @@ Set an existing property and resolve once the new value is visible. Rejects with
 #### Example
 
 ```ts
-await prefs.set('layout', 'timeline', { height: 320 }, { undoable: true });
+await store.set('layout', 'timeline', { height: 320 }, { undoable: true });
 ```
 
 ***
@@ -359,11 +359,11 @@ await prefs.set('layout', 'timeline', { height: 320 }, { undoable: true });
 ### value()
 
 ```ts
-value<T>(preference, property): WritableProp<T>;
+value<T>(record, field): WritableProp<T>;
 ```
 
-The value of one property as a live prop, `undefined` while it does not exist.
-`set` on it is a non-undoable write of an existing property.
+The value of one field as a live prop, `undefined` while it does not exist.
+`set` on it is a non-undoable write of an existing field.
 
 #### Type Parameters
 
@@ -375,8 +375,8 @@ The value of one property as a live prop, `undefined` while it does not exist.
 
 | Parameter | Type |
 | ------ | ------ |
-| `preference` | `string` |
-| `property` | `string` |
+| `record` | `string` |
+| `field` | `string` |
 
 #### Returns
 
@@ -385,7 +385,7 @@ The value of one property as a live prop, `undefined` while it does not exist.
 #### Example
 
 ```ts
-const timeline = prefs.value<{ height: number }>('layout', 'timeline');
+const timeline = store.value<{ height: number }>('layout', 'timeline');
 timeline.onChange(() => console.log(timeline.value?.height));
 await timeline.set({ height: 240 });
 ```

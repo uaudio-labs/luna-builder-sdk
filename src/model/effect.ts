@@ -16,13 +16,16 @@
  * slot.pluginName.value;                          // '1176 ...'
  * await slot.setIn(false);                        // bypass
  * slot.controls.items.map((c) => c.name.value);   // plugin parameters
+ * await slot.openEditor();                        // the plugin's window in LUNA
  */
 import type { Client } from '../client/client';
 import { derived, type Prop } from '../store/prop';
 import { RequestTimeout, UAError } from '../wire/errors';
+import { settle } from './settle';
 import type { Control } from './control';
 import { Controls } from './controls';
 import { Node } from './node';
+import type { PluginQueryOptions, PluginRow } from './plugins';
 
 export type InsertSlot = 'console' | 'reserved_0' | `effect_${number}` | `record_fx_${number}` | 'sidechain_filter' | string;
 
@@ -59,6 +62,12 @@ export class Effect extends Node {
   /** True once a plugin is loaded in this slot without an error. */
   readonly loaded: Prop<boolean>;
   /**
+   * True while LUNA has this plugin's editor window open, whoever opened it (fact 126).
+   * `undefined` until known and on a LUNA that does not report editor windows. Follows LUNA
+   * after `session.ready()`.
+   */
+  readonly editorOpen: Prop<boolean | undefined>;
+  /**
    * Every child of the slot's `controls` folder, including parameters a cleared plugin left
    * behind (fact 86). Prefer {@link params}.
    */
@@ -91,6 +100,7 @@ export class Effect extends Node {
     this.controls = new Controls(client, `${path}/controls`);
     this.instanceId = this.prop<number | null>('external_sdk_instance_id');
     this.loaded = derived([this.pluginId, this.instanceId, this.pluginError], () => !this.isEmpty && this.instanceId.value !== null && this.instanceId.value !== undefined && !this.pluginError.value);
+    this.editorOpen = derived([client.gui.pluginWindows], () => client.gui.isPluginOpen(this.channelUid, this.id, this.sessionUid));
     const bypassValue = derived([this.bypassControl], () => {
       const name = this.bypassControl.value;
       return name ? this.controls.get(name).value.value : undefined;
@@ -164,6 +174,21 @@ export class Effect extends Node {
     return reply;
   }
 
+  /**
+   * The installed plugins LUNA would put in this slot, sorted by name: what LUNA's plugins
+   * browser offers here (fact 127). An instrument slot lists instruments, an effect slot
+   * effects that run in this channel's format. Narrow with search text, categories and
+   * favorites. A LUNA without the query rejects with `Luna.Unsupported`.
+   *
+   * @example
+   * const choices = await slot.validPlugins({ search: 'comp', categories: ['Compressors & Limiters'] });
+   * await slot.setPlugin(choices[0].pluginId);
+   */
+  validPlugins(options: Omit<PluginQueryOptions, 'insertType' | 'sessionUid' | 'channelUid'> = {}): Promise<PluginRow[]> {
+    this.assertLive();
+    return this.client.plugins.query({ ...options, insertType: this.id, sessionUid: this.sessionUid, channelUid: this.channelUid });
+  }
+
   /** Remove the plugin from this slot. */
   clear(): Promise<unknown> {
     return this.wire.post(`/sessions/${this.sessionUid}/set_inserts`, { session_uid: this.sessionUid, channel_uid: this.channelUid, inserts: [{ insert_type: this.id, plugin_id: '' }] });
@@ -209,6 +234,48 @@ export class Effect extends Node {
       channel_uid: this.channelUid,
       inserts: [this.id],
       value: on,
+    });
+  }
+
+  /**
+   * Open this plugin's editor window in LUNA, as clicking it in LUNA's mixer does, or bring
+   * it to the front. Resolves once {@link editorOpen} shows it; LUNA's reply alone proves
+   * nothing, as an empty slot or a plugin LUNA will not show opens nothing (fact 126). That
+   * rejects with code `no_effect`; an empty slot rejects at once with `empty_slot`. Pass
+   * `wait: false` to resolve on the reply alone. Needs `/gui`: a headless engine or an older
+   * LUNA rejects with `Luna.Unsupported`.
+   *
+   * @example
+   * nameLabel.onclick = () => slot.openEditor();
+   * slot.editorOpen.onChange(() => nameLabel.classList.toggle('open', slot.editorOpen.value === true));
+   */
+  async openEditor(options: { wait?: boolean; timeoutMs?: number } = {}): Promise<void> {
+    if (this.isEmpty) throw new UAError('empty_slot', `openEditor: ${this.id} has no plugin`, { path: this.path });
+    await this.client.gui.showPlugin(this.channelUid, this.id, { sessionUid: this.sessionUid });
+    if (options.wait !== false) await this.settleEditor(true, 'openEditor', options.timeoutMs);
+  }
+
+  /**
+   * Close this plugin's editor window in LUNA, if it is open. Resolves once
+   * {@link editorOpen} is false; see {@link openEditor}.
+   *
+   * @example
+   * if (slot.editorOpen.value) await slot.closeEditor();
+   */
+  async closeEditor(options: { wait?: boolean; timeoutMs?: number } = {}): Promise<void> {
+    await this.client.gui.hidePlugin(this.channelUid, this.id, { sessionUid: this.sessionUid });
+    if (options.wait !== false) await this.settleEditor(false, 'closeEditor', options.timeoutMs);
+  }
+
+  private async settleEditor(open: boolean, what: string, timeoutMs?: number): Promise<void> {
+    await this.client.gui.watchPluginWindows();
+    // Nothing to wait on where LUNA does not report editor windows.
+    if (this.editorOpen.value === undefined) return;
+    await settle(() => this.editorOpen.value === open, what, {
+      path: this.path,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      disposed: () => this.disposed,
+      refresh: () => this.client.store.load('/gui/plugin_windows'),
     });
   }
 

@@ -24,11 +24,11 @@
 | <a id="name"></a> `name` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="playlists"></a> `playlists` | `readonly` | [`Collection`](Collection.md)\<[`Playlist`](Playlist.md)\> | All playlists (take lanes) in the session; each names its track. | - |
-| <a id="preferences"></a> `preferences` | `readonly` | [`SessionPreferences`](SessionPreferences.md) | Settings Add Ons keep with this session, by reverse-DNS context (fact 110). | - |
 | <a id="readonly"></a> `readOnly` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="sessionpackagepath"></a> `sessionPackagePath` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="sessionpackageuid"></a> `sessionPackageUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="solomode"></a> `soloMode` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="storage"></a> `storage` | `readonly` | [`SessionStorage`](SessionStorage.md) | Data Add Ons keep with this session, by reverse-DNS context (fact 129). | - |
 | <a id="tempoestablished"></a> `tempoEstablished` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="tracks"></a> `tracks` | `readonly` | [`Collection`](Collection.md)\<[`Track`](Track.md)\> | - | - |
 | <a id="transport"></a> `transport` | `readonly` | [`Transport`](Transport.md) | - | - |
@@ -446,8 +446,8 @@ its notes with [Playlist.createNotes](Playlist.md#createnotes), which makes the 
 
 | Parameter | Type |
 | ------ | ------ |
-| `options` | \{ `clipType?`: `"audio"` \| `"video"` \| `"midi"`; `name?`: `string`; `playlistUid?`: `string`; `sourceStartNs?`: `number`; `sourceStopNs?`: `number`; `sourceUid`: `string`; `startTick`: `number`; `stopTick`: `number`; `trackUid?`: `string`; \} |
-| `options.clipType?` | `"audio"` \| `"video"` \| `"midi"` |
+| `options` | \{ `clipType?`: `"midi"` \| `"audio"` \| `"video"`; `name?`: `string`; `playlistUid?`: `string`; `sourceStartNs?`: `number`; `sourceStopNs?`: `number`; `sourceUid`: `string`; `startTick`: `number`; `stopTick`: `number`; `trackUid?`: `string`; \} |
+| `options.clipType?` | `"midi"` \| `"audio"` \| `"video"` |
 | `options.name?` | `string` |
 | `options.playlistUid?` | `string` |
 | `options.sourceStartNs?` | `number` |
@@ -582,6 +582,47 @@ Create a track. Resolves to the engine reply.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### newTrackFromPreset()
+
+```ts
+newTrackFromPreset(preset, options): Promise<Track[]>;
+```
+
+Make a track from a preset in one undo step (fact 132), as LUNA's New Track From Preset
+does, and resolve to the new tracks once they are listed in [tracks](#tracks) with their
+properties loaded. The preset is a row from [Presets.trackSelection](Presets.md#trackselection) or
+`luna.presets.query({ deviceTypeId: 'track', includeInstrumentPresets: true })`:
+
+- a track preset makes its tracks with its plugins and settings: one named `name`, or
+  for a multi-track preset several, keeping the names saved in it; a master bus preset
+  loads onto the master bus and makes none, so `[]`;
+- an instrument plugin's preset makes a stereo instrument track with the plugin on it,
+  on that preset; an effect plugin's preset an audio track with the plugin.
+
+LUNA selects the new tracks. Rejects with `device.database_error` for an unknown preset.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `preset` | `Pick`\<[`PresetRow`](../interfaces/PresetRow.md), `"uid"` \| `"name"`\> |
+| `options` | [`NewTrackFromPresetOptions`](../interfaces/NewTrackFromPresetOptions.md) |
+
+#### Returns
+
+`Promise`\<[`Track`](Track.md)[]\>
+
+#### Example
+
+```ts
+const sel = luna.presets.trackSelection({ category: 'Instrument' });
+await sel.ready();
+const [track] = await session.newTrackFromPreset(sel.presets.items[0]);
+track.name.value; // the preset's name
+```
 
 ***
 

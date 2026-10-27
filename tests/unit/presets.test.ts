@@ -202,3 +202,132 @@ describe('Luna.Effect.loadPreset', () => {
     await expect(track.effects.byId('effect_3')!.loadPreset('p_lion')).rejects.toMatchObject({ code: 'unavailable' });
   });
 });
+
+const SYNTH = 'uaudio_moog_minimoog';
+
+/** Track presets of every category, and an installed instrument with tagged presets (fact 132). */
+async function withTrackPresets() {
+  const engine = new Luna.MockEngine();
+  engine.addSession('abc', { tracks: ['Guitar'], name: 'Demo' });
+  engine.addPlugin(SYNTH, { name: 'Minimoog', effectType: 'instrument' });
+  engine.addPlugin(AMP, { name: 'Paradise' });
+  engine.addPresetTagGroup(SYNTH, 'TYPE', ['Bass', 'Lead']);
+  engine.addPreset(SYNTH, 'Fat Bass', { uid: 'p_fat_bass', factory: true, tags: ['Bass'] });
+  engine.addPreset(SYNTH, 'Screaming Lead', { uid: 'p_lead', tags: ['Lead'] });
+  engine.addPreset(AMP, 'Warm Jazz', { uid: 'p_warm_jazz', tags: ['Clean'] });
+  engine.addTrackPresetTagGroup('TYPE', ['Bass', 'Vocal', 'Instrument']);
+  engine.addTrackPresetTagGroup('GENRE', ['Rock']);
+  engine.addTrackPreset('Bass Rig', { uid: 'tp_bass', trackType: 'instrument', tags: ['Bass'] });
+  engine.addTrackPreset('Lead Vocal', { uid: 'tp_vocal', trackType: 'audio', tags: ['Vocal', 'Rock'] });
+  engine.addTrackPreset('Reverb Bus', { uid: 'tp_bus', trackType: 'bus' });
+  engine.addTrackPreset('Drum Kit', { uid: 'tp_drums', trackType: 'audio', trackNames: ['Kick', 'Snare', 'OHs'], tags: ['Rock'] });
+  await engine.settled();
+  const luna = await Luna.connect({ port_: engine.port() });
+  const session = await luna.session();
+  return { engine, luna, session };
+}
+
+describe('Luna track presets (fact 132)', () => {
+  it('lists track presets, with instrument plugin presets merged in and marked on request', async () => {
+    const { engine, luna } = await withTrackPresets();
+    expect(names(await luna.presets.query({ deviceTypeId: 'track' }))).toEqual(['Bass Rig', 'Lead Vocal', 'Reverb Bus', 'Drum Kit']);
+    const all = await luna.presets.query({ deviceTypeId: 'track', includeInstrumentPresets: true, withTags: true });
+    expect(all.map((r) => [r.name, r.isInstrumentPreset])).toEqual([
+      ['Bass Rig', false],
+      ['Lead Vocal', false],
+      ['Reverb Bus', false],
+      ['Drum Kit', false],
+      ['Fat Bass', true],
+      ['Screaming Lead', true],
+    ]);
+    expect(all.find((r) => r.name === 'Fat Bass')?.tags).toEqual(['Bass', 'Instrument']);
+    // Each instrument preset names its plugin, by the factory or user folder that holds it.
+    expect(all.filter((r) => r.isInstrumentPreset).map((r) => [r.name, r.pluginId, r.pluginName])).toEqual([
+      ['Fat Bass', SYNTH, 'Minimoog'],
+      ['Screaming Lead', SYNTH, 'Minimoog'],
+    ]);
+    expect(all.find((r) => r.name === 'Bass Rig')).not.toHaveProperty('pluginId');
+    expect(engine.requests.find((r) => r.path === '/presets/query' && (r.data as { include_instrument_presets?: boolean }).include_instrument_presets)).toMatchObject({ data: { device_type_id: 'track', include_instrument_presets: true } });
+    // Instrument matches instrument track presets and every instrument preset; other tags apply to both.
+    expect(names(await luna.presets.query({ deviceTypeId: 'track', includeInstrumentPresets: true, tags: ['Instrument'] }))).toEqual(['Bass Rig', 'Fat Bass', 'Screaming Lead']);
+    expect(names(await luna.presets.query({ deviceTypeId: 'track', includeInstrumentPresets: true, tags: ['Instrument', 'Bass'] }))).toEqual(['Bass Rig', 'Fat Bass']);
+  });
+
+  it('merges the track and instrument tag groups by name, without the category tags', async () => {
+    const { luna } = await withTrackPresets();
+    const groups = await luna.presets.trackTagGroups();
+    expect(groups.map((g) => [g.name, g.tags])).toEqual([
+      ['TYPE', ['Bass', 'Vocal', 'Lead']],
+      ['GENRE', ['Rock']],
+    ]);
+    expect(Luna.TRACK_PRESET_CATEGORIES).toEqual(['Audio', 'Instrument', 'Bus', 'Multi-Track']);
+  });
+
+  it('trackSelection follows category, tags and search, with instrument presets only for All and Instrument', async () => {
+    const { luna } = await withTrackPresets();
+    const sel = luna.presets.trackSelection({ queryDelayMs: 0 });
+    await sel.ready();
+    expect(sel.presets.items).toHaveLength(6);
+    expect(sel.groups.value?.map((g) => g.name)).toEqual(['TYPE', 'GENRE']);
+    await sel.category.set('Instrument');
+    await sel.settled();
+    expect(names(sel.presets.items)).toEqual(['Bass Rig', 'Fat Bass', 'Screaming Lead']);
+    await sel.toggleTag('Bass');
+    await sel.settled();
+    expect(names(sel.presets.items)).toEqual(['Bass Rig', 'Fat Bass']);
+    await sel.search.set('fat');
+    await sel.settled();
+    expect(names(sel.presets.items)).toEqual(['Fat Bass']);
+    await sel.clear();
+    await sel.category.set('Audio');
+    await sel.settled();
+    expect(sel.includesInstrumentPresets).toBe(false);
+    expect(names(sel.presets.items)).toEqual(['Lead Vocal']);
+    sel.dispose();
+  });
+
+  it('newTrackFromPreset makes an instrument track on an instrument preset, and resolves to it', async () => {
+    const { engine, session } = await withTrackPresets();
+    const [track, ...rest] = await session.newTrackFromPreset({ uid: 'p_fat_bass', name: 'Fat Bass' });
+    expect(rest).toEqual([]);
+    expect(track?.name.value).toBe('Fat Bass');
+    expect(track?.trackType.value).toBe('instrument');
+    expect(track?.presetUid.value).toBe('p_fat_bass');
+    expect(engine.value(`${track!.path}/effects/instrument`, 'plugin_id')).toBe(SYNTH);
+    expect(engine.value(`${track!.path}/effects/instrument`, 'preset_uid')).toBe('p_fat_bass');
+    expect(engine.requests.find((r) => r.path === '/sessions/abc/new_track')).toMatchObject({ data: { uid: 'abc', name: 'Fat Bass', preset_uid: 'p_fat_bass', count: 1, make_name_unique: true } });
+  });
+
+  it('newTrackFromPreset resolves to every track a multi-track preset makes, named as it saved them', async () => {
+    const { session } = await withTrackPresets();
+    const tracks = await session.newTrackFromPreset({ uid: 'tp_drums', name: 'Drum Kit' });
+    expect(tracks.map((t) => [t.name.value, t.presetName.value])).toEqual([
+      ['Kick', 'Drum Kit'],
+      ['Snare', 'Drum Kit'],
+      ['OHs', 'Drum Kit'],
+    ]);
+    await expect(session.newTrackFromPreset({ uid: 'nope', name: 'x' })).rejects.toMatchObject({ code: 'device.database_error' });
+  });
+
+  it('loadPreset replaces the preset on a track, and its name unless renamed in LUNA', async () => {
+    const { engine, session } = await withTrackPresets();
+    const [track] = await session.newTrackFromPreset({ uid: 'tp_bass', name: 'Bass Rig' });
+    await track!.loadPreset({ uid: 'p_lead' });
+    await engine.settled();
+    await expect.poll(() => track!.presetUid.value).toBe('p_lead');
+    expect(track!.name.value).toBe('Screaming Lead');
+    expect(engine.requests.find((r) => r.path === '/presets/devices/track/load')).toMatchObject({ data: { session_uid: 'abc', uid: track!.id, preset_uid: 'p_lead' } });
+    // A name set through the API is replaced; one renamed in LUNA (name_modified) is kept.
+    await track!.name.set('My Bass');
+    await track!.loadPreset('p_fat_bass');
+    await expect.poll(() => track!.name.value).toBe('Fat Bass');
+    engine.setValue(track!.path, 'name', 'My Bass');
+    engine.setValue(track!.path, 'name_modified', true);
+    await track!.loadPreset('p_lead');
+    await expect.poll(() => track!.presetName.value).toBe('Screaming Lead');
+    expect(track!.name.value).toBe('My Bass');
+    // An instrument preset needs an instrument track.
+    const guitar = session.tracks.byId('Guitar')!;
+    await expect(guitar.loadPreset('p_fat_bass')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+  });
+});

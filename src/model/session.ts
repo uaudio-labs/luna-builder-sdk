@@ -20,12 +20,13 @@ import { Bus } from './bus';
 import { Collection } from './collection';
 import { Context } from './context';
 import { Markers } from './markers';
-import { SessionPreferences } from './preferences';
+import { SessionStorage } from './storage';
 import { Musical } from './musical';
 import { Node } from './node';
 import { requireFadeShape, type Clip } from './clip';
 import type { FadeShape } from './compiled-clip';
 import { Playlist } from './playlist';
+import type { PresetRow } from './presets';
 import { requireTick, settle } from './settle';
 import { Render } from './system';
 import { Track, type TrackType } from './track';
@@ -111,6 +112,19 @@ export interface NewTrackOptions {
   folderUid?: string;
 }
 
+export interface NewTrackFromPresetOptions {
+  /** The new track's name. Default: the preset's name. A multi-track preset's tracks keep their own. */
+  name?: string;
+  /** Number the name when a track or bus already has it, as LUNA's browser does. Default true. */
+  makeNameUnique?: boolean;
+  /** Place the new tracks before this track. Default: after the last one. */
+  beforeUid?: string;
+  /** Place the new tracks in this folder track. */
+  folderUid?: string;
+  /** The stem format of the audio track an effect plugin's preset makes. Default mono. */
+  stemFormat?: 'mono' | 'stereo' | string;
+}
+
 export interface NewBusOptions {
   /** Default `'Bus'`. */
   name?: string;
@@ -157,8 +171,8 @@ export class Session extends Node {
   /** Tempo map, time and key signatures, and tick/bar/seconds conversion. */
   readonly musical: Musical;
   readonly markers: Markers;
-  /** Settings Add Ons keep with this session, by reverse-DNS context (fact 110). */
-  readonly preferences: SessionPreferences;
+  /** Data Add Ons keep with this session, by reverse-DNS context (fact 129). */
+  readonly storage: SessionStorage;
   /** Edit contexts (`main`, `editor`, `alt_<n>`). */
   readonly contexts: Collection<Context>;
   /** The `main` edit context: selection, zoom and the context edit commands. */
@@ -204,7 +218,7 @@ export class Session extends Node {
     this.playlists = new Collection<Playlist>(client, `${this.path}/playlists`, (p) => new Playlist(client, p, uid, () => this.transactionMode), { levels: 2, commands: false, flatvalue: true });
     this.musical = new Musical(client, this.path, uid, (name, fn) => this.transaction(name, fn));
     this.markers = new Markers(client, this.path, uid, () => this.musical.timeline);
-    this.preferences = new SessionPreferences(client, this.path);
+    this.storage = new SessionStorage(client, this.path);
     this.contexts = new Collection<Context>(client, `${this.path}/contexts`, (p) => new Context(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.context = new Context(client, `${this.path}/contexts/main`, uid);
     const focusedId = derived([this.context.lastSelectedTrack, this.context.selectionTracks, this.tracks], () => this.focusedTrackId(), { distinct: true });
@@ -232,7 +246,8 @@ export class Session extends Node {
     if (!this.readyPromise) {
       const watch = this.client.store.watch(this.path, { recursive: true, load: { flatvalue: true, commands: false } });
       this.watchRelease = watch.release;
-      this.readyPromise = watch.ready.then(() => Promise.all([this.tracks.load(), this.buses.load(), this.playlists.load(), this.musical.ready(), this.markers.load(), this.contexts.load()])).then(() => undefined);
+      // Open plugin editors live in /gui, outside the session subtree (effect.editorOpen, fact 126).
+      this.readyPromise = watch.ready.then(() => Promise.all([this.tracks.load(), this.buses.load(), this.playlists.load(), this.musical.ready(), this.markers.load(), this.contexts.load(), this.client.gui.watchPluginWindows()])).then(() => undefined);
     }
     return this.readyPromise;
   }
@@ -314,6 +329,46 @@ export class Session extends Node {
     // fetches them, and until then name, busType and stemFormat read undefined.
     await this.buses.membersReady();
     return this.buses.byId(uid)!;
+  }
+
+  /**
+   * Make a track from a preset in one undo step (fact 132), as LUNA's New Track From Preset
+   * does, and resolve to the new tracks once they are listed in {@link tracks} with their
+   * properties loaded. The preset is a row from {@link Presets.trackSelection} or
+   * `luna.presets.query({ deviceTypeId: 'track', includeInstrumentPresets: true })`:
+   *
+   * - a track preset makes its tracks with its plugins and settings: one named `name`, or
+   *   for a multi-track preset several, keeping the names saved in it; a master bus preset
+   *   loads onto the master bus and makes none, so `[]`;
+   * - an instrument plugin's preset makes a stereo instrument track with the plugin on it,
+   *   on that preset; an effect plugin's preset an audio track with the plugin.
+   *
+   * LUNA selects the new tracks. Rejects with `device.database_error` for an unknown preset.
+   *
+   * @example
+   * const sel = luna.presets.trackSelection({ category: 'Instrument' });
+   * await sel.ready();
+   * const [track] = await session.newTrackFromPreset(sel.presets.items[0]);
+   * track.name.value; // the preset's name
+   */
+  async newTrackFromPreset(preset: Pick<PresetRow, 'uid' | 'name'>, options: NewTrackFromPresetOptions = {}): Promise<Track[]> {
+    const payload: Record<string, unknown> = { uid: this.uid, name: options.name ?? preset.name, preset_uid: preset.uid, count: 1, make_name_unique: options.makeNameUnique ?? true };
+    if (options.beforeUid !== undefined) payload['before_uid'] = options.beforeUid;
+    if (options.folderUid !== undefined) payload['folder_uid'] = options.folderUid;
+    if (options.stemFormat !== undefined) payload['stem_format'] = options.stemFormat;
+    // One track answers `{ uid }`, several an array of them, none (a master bus preset) nothing.
+    const reply = (await this.post('new_track', payload)) as { uid?: unknown } | { uid?: unknown }[] | null;
+    const uids = (Array.isArray(reply) ? reply : reply ? [reply] : []).map((r) => r?.uid).filter((u): u is string => typeof u === 'string' && u !== '');
+    if (uids.length === 0) return [];
+    await settle(() => uids.every((uid) => this.tracks.byId(uid) !== undefined || this.buses.byId(uid) !== undefined), 'new tracks', {
+      path: `${this.path}/tracks`,
+      refresh: () => Promise.all([this.tracks.reload(), this.buses.reload()]).then(() => undefined),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+    // Listed is not loaded: wait for the new members' properties and their change notices.
+    await this.tracks.membersReady();
+    await this.client.settled();
+    return uids.map((uid) => this.tracks.byId(uid)).filter((t): t is Track => t !== undefined);
   }
 
   undo(count = 1): Promise<unknown> {
@@ -856,7 +911,7 @@ export class Session extends Node {
     this.playlists.dispose();
     this.musical.dispose();
     this.markers.dispose();
-    this.preferences.dispose();
+    this.storage.dispose();
     this.contexts.dispose();
     this.sourcesCollection?.dispose();
     this.sourcesRelease?.();

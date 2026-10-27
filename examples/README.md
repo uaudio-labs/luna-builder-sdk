@@ -13,8 +13,9 @@ from `../dist/luna.global.js`, so run `npm run build` in the builder folder firs
 | `editor.html` | Every clip, marker and note edit the SDK offers, one undo entry each, with LUNA's own selection read back after every action to prove it was put back. |
 | `addon/` | The smallest useful Add On: one file, one button on the master bus mute, and the whole connection lifecycle. The copy-out starting point. |
 | `mixer.html` | A strip per channel: fader, pan, mute, solo, meter with held peak and clip. A drag is one undo entry. `?all=1` includes the system tracks. |
-| `inserts.html` | Insert slots, the plugin catalog, parameters with the plugin's own readouts, IN/OUT and remove. |
+| `inserts.html` | Insert slots, the plugin catalog, parameters with the plugin's own readouts, IN/OUT and remove. Click a plugin's name to show or hide its editor window in LUNA; the name stays lit while the window is open. |
 | `presets.html` | Preset selection for a plugin on any insert: type to filter presets by name, pick tags from the plugin's tag groups (any or all), and see UA Assistant's recommendations for the same text, kept within the selected tags. Click to load a preset onto the slot. Built on `luna.presets.selection()`. |
+| `track-presets.html` | New Track From Preset: pick a category, tags and search over track presets and installed instrument plugins' presets, click one to make a track from it, then keep clicking to replace the preset on that track until Done. Built on `luna.presets.trackSelection()`, `session.newTrackFromPreset()` and `track.loadPreset()`. |
 | `ruler.html` | Live bar\|beat ruler over the tempo map with tempo, signature and key rows, clickable markers, and LUNA's own playhead annotation beside the SDK's. |
 | `sends.html` | Every send and cue output: level, pan, mute, pre-fader, enable, meter, destination, and a picker that reroutes it (assign appends, so it uses `retarget`). |
 | `automation.html` | The first track's volume lane drawn live: insert a ramp, move, revalue and delete breakpoints, and drive the track's automation mode. |

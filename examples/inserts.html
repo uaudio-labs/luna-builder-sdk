@@ -2,8 +2,16 @@
 <meta charset="utf-8">
 <title>LUNA inserts</title>
 <!--
-  Pick a channel, see its insert slots, add a plugin from the catalog, drive its parameters
-  with sliders that show the plugin's own display strings, take it IN/OUT, remove it.
+  Pick a channel, see its insert slots, add a plugin, drive its parameters with sliders that
+  show the plugin's own display strings, take it IN/OUT, remove it. Click a plugin's name to
+  open its editor window in LUNA, as LUNA's mixer does; click again to close it. The name is lit
+  while the editor is open, whoever opened it (fact 126).
+
+  The plugin list is LUNA's answer for the chosen slot, not the whole catalog: an effect slot
+  offers effects that run in the channel's format (mono or stereo), an instrument slot
+  instruments, as LUNA's own plugins browser does. Search text, a category and Favorites narrow
+  it, and LUNA applies those too (`slot.validPlugins()`, fact 127). A LUNA too old to answer
+  falls back to the catalog, unfiltered by slot.
 
   Bypass is not the slot's `enabled` property — writes to that are ignored. IN/OUT goes
   through `slot.setIn()`, which drives the plugin control named by `bypass_control` with
@@ -27,21 +35,34 @@
   .slot.empty { opacity: .55; }
   .slot .idx { opacity: .5; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding-top: 4px; }
   .slot .name { font-weight: 600; margin-bottom: 6px; }
+  .slot button.name { display: block; padding: 2px 8px; margin-left: -8px; }
+  .slot button.name.open { background: #1f4f7a; border-color: #4a9ee0; }
   .slot .err { color: #ff8080; }
   .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px; }
   .param label { display: flex; justify-content: space-between; font-size: 12px; opacity: .8; }
   .param .display { font-variant-numeric: tabular-nums; opacity: 1; }
   .param input[type=range] { width: 100%; }
   .actions { display: flex; gap: 6px; }
+  .picker { display: flex; gap: 8px; align-items: center; padding: 8px 14px; border-bottom: 1px solid #2a2a30; flex-wrap: wrap; }
+  .picker input[type=search] { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid #3a3a42; background: #26262c; color: inherit; width: 160px; }
+  .picker #plugin { min-width: 260px; }
+  .picker .count { opacity: .6; }
   button[data-on="true"] { background: #8a7a1f; border-color: #dc3; }
 </style>
 <header>
   <span class="title">LUNA inserts</span>
   <select id="channel"></select>
-  <select id="plugin"></select>
-  <button id="add">Add</button>
   <span id="status">connecting…</span>
 </header>
+<div class="picker">
+  <select id="target" title="The slot to load into"></select>
+  <input id="search" type="search" placeholder="Search plugins" autocomplete="off">
+  <select id="category" title="Category"></select>
+  <label><input id="favorites" type="checkbox"> Favorites</label>
+  <select id="plugin"></select>
+  <button id="add">Add</button>
+  <span class="count" id="count"></span>
+</div>
 <div id="slots"></div>
 <script>
 (async () => {
@@ -49,6 +70,11 @@
   const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
   const channelSel = document.getElementById('channel');
   const pluginSel = document.getElementById('plugin');
+  const targetSel = document.getElementById('target');
+  const searchEl = document.getElementById('search');
+  const categorySel = document.getElementById('category');
+  const favoritesEl = document.getElementById('favorites');
+  const countEl = document.getElementById('count');
   const slotsEl = document.getElementById('slots');
 
   let luna;
@@ -59,19 +85,101 @@
     say(connected ? '' : 'disconnected from LUNA', !connected);
   });
 
-  // Catalog: installed and licensed, by name. `authorized: null` means the engine has not
-  // said, which is not the same as refused, so only an explicit false is excluded.
+  // The catalog names a loaded slot's plugin (fact 86), and is the fallback list for a LUNA
+  // without /plugins/query.
   await luna.plugins.load();
-  const plugins = luna.plugins.items
-    .filter((p) => p.installed.value !== false && p.authorized.value !== false)
-    .sort((a, b) => (a.name.value ?? '').localeCompare(b.name.value ?? ''));
-  pluginSel.replaceChildren(...plugins.map((p) => Object.assign(document.createElement('option'), {
-    value: p.id,
-    textContent: `${p.name.value ?? p.id}  (${p.categories.join(', ') || 'uncategorised'})`,
-  })));
 
   const kindOf = (ch) => (ch instanceof Luna.Bus ? (ch.isMaster ? 'master' : ch.busType.value ?? 'bus') : ch.trackType.value ?? 'audio');
   const slotIndex = (slot) => Number(slot.id.replace(/^\D+/, '')) || 0;
+
+  const option = (value, textContent) => Object.assign(document.createElement('option'), { value, textContent });
+  const NEXT_EMPTY = '';
+
+  // The slots a plugin can be chosen for: the effect slots, and the instrument slot on a
+  // channel that has one. "Next empty slot" loads into the first empty effect slot.
+  const targetSlots = (ch) => [...ch.effectSlots, ...ch.effects.items.filter((s) => s.id === 'instrument')];
+  function targetSlot() {
+    if (!channel) return undefined;
+    if (targetSel.value === NEXT_EMPTY) return channel.effectSlots.find((s) => s.isEmpty) ?? channel.effectSlots[0];
+    return channel.effects.byId(targetSel.value);
+  }
+  function renderTargets() {
+    const keep = targetSel.value;
+    const label = (s) => {
+      const what = s.isEmpty ? 'empty' : luna.plugins.byId(s.pluginId.value ?? '')?.name.value ?? s.pluginId.value;
+      return s.id === 'instrument' ? `Instrument (${what})` : `Slot ${slotIndex(s) + 1} (${what})`;
+    };
+    targetSel.replaceChildren(option(NEXT_EMPTY, 'Next empty slot'), ...targetSlots(channel).map((s) => option(s.id, label(s))));
+    targetSel.value = [...targetSel.options].some((o) => o.value === keep) ? keep : NEXT_EMPTY;
+  }
+
+  // What LUNA offers the target slot, narrowed by the search, category and Favorites. Every
+  // change asks again; an answer that arrives after a newer question is dropped.
+  let asked = 0;
+  let categoriesFor = '';
+  async function refreshPlugins() {
+    const slot = targetSlot();
+    const seq = ++asked;
+    if (!slot) { pluginSel.replaceChildren(); countEl.textContent = ''; return; }
+    const filters = {
+      search: searchEl.value.trim() || undefined,
+      categories: categorySel.value ? [categorySel.value] : undefined,
+      favoritesOnly: favoritesEl.checked || undefined,
+    };
+    try {
+      // The category list is everything this slot can take, so ask once per slot and channel.
+      const key = `${channel.id}/${slot.id}`;
+      if (categoriesFor !== key) {
+        const all = await slot.validPlugins();
+        if (seq !== asked) return;
+        renderCategories([...new Set(all.flatMap((p) => p.categories))]);
+        categoriesFor = key;
+        filters.categories = categorySel.value ? [categorySel.value] : undefined;
+      }
+      const rows = await slot.validPlugins(filters);
+      if (seq !== asked) return;
+      renderPlugins(rows);
+    } catch (e) {
+      if (!(e instanceof Luna.Unsupported)) { say(e.message, true); return; }
+      if (seq !== asked) return;
+      say('this LUNA cannot say which plugins fit a slot; listing the whole catalog');
+      renderCategories(luna.plugins.categories);
+      renderPlugins(catalogRows(filters));
+    }
+  }
+
+  function renderCategories(categories) {
+    const keep = categorySel.value;
+    categorySel.replaceChildren(option('', 'All categories'), ...[...categories].sort().map((c) => option(c, c)));
+    categorySel.value = categories.includes(keep) ? keep : '';
+  }
+
+  function renderPlugins(rows) {
+    const keep = pluginSel.value;
+    pluginSel.replaceChildren(...rows.map((p) => option(p.pluginId, `${p.favorite ? '★ ' : ''}${p.name}${p.manufacturer ? ` (${p.manufacturer})` : ''}`)));
+    if (rows.some((p) => p.pluginId === keep)) pluginSel.value = keep;
+    countEl.textContent = rows.length === 1 ? '1 plugin' : `${rows.length} plugins`;
+    document.getElementById('add').disabled = rows.length === 0;
+  }
+
+  // Fallback for an older LUNA: the catalog, installed and not refused a licence
+  // (`authorized: null` means not said), filtered here by the same three inputs.
+  function catalogRows({ search, categories, favoritesOnly }) {
+    const q = (search ?? '').toLowerCase();
+    return luna.plugins.items
+      .filter((p) => p.installed.value !== false && p.authorized.value !== false)
+      .filter((p) => !favoritesOnly || p.favorite.value === true)
+      .filter((p) => !categories || p.categories.some((c) => categories.includes(c)))
+      .filter((p) => !q || `${p.name.value ?? ''} ${p.manufacturer ?? ''}`.toLowerCase().includes(q))
+      .map((p) => ({ pluginId: p.id, name: p.name.value ?? p.id, manufacturer: p.manufacturer ?? '', categories: p.categories, favorite: p.favorite.value === true }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  let searchTimer;
+  searchEl.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { void refreshPlugins(); }, 150); };
+  categorySel.onchange = () => { void refreshPlugins(); };
+  favoritesEl.onchange = () => { void refreshPlugins(); };
+  targetSel.onchange = () => { void refreshPlugins(); };
 
   let session, channel, offs = [], rowOffs = [];
   async function build() {
@@ -102,18 +210,38 @@
       for (const off of rowOffs) off();
       rowOffs = [];
       slotsEl.replaceChildren(...ch.effectSlots.map(slotRow));
+      renderTargets();
     };
-    for (const slot of ch.effectSlots) {
+    for (const slot of targetSlots(ch)) {
       offs.push(slot.pluginId.onChange(render), slot.pluginError.onChange(render));
     }
     render();
+    // A new channel can have another format, so another list (and maybe an instrument slot).
+    targetSel.value = NEXT_EMPTY;
+    categoriesFor = '';
+    await refreshPlugins();
   }
 
   function slotRow(slot) {
     const el = document.createElement('div');
     el.className = 'slot' + (slot.isEmpty ? ' empty' : '');
     el.innerHTML = `<div class="idx">slot ${slotIndex(slot) + 1}</div><div><div class="name"></div><div class="params"></div></div><div class="actions"></div>`;
-    const name = el.querySelector('.name');
+    let name = el.querySelector('.name');
+    if (!slot.isEmpty) {
+      // The name opens and closes the plugin's editor window in LUNA. openEditor() resolves
+      // once LUNA shows the window; editorOpen follows it, including a window the user opened
+      // or closed in LUNA, and is undefined on a LUNA that does not report editors (fact 126).
+      const button = Object.assign(document.createElement('button'), { className: 'name', title: 'Show or hide the plugin window' });
+      name.replaceWith(button);
+      name = button;
+      const renderOpen = () => {
+        button.classList.toggle('open', slot.editorOpen.value === true);
+        button.setAttribute('aria-pressed', String(slot.editorOpen.value === true));
+      };
+      renderOpen();
+      rowOffs.push(slot.editorOpen.onChange(renderOpen));
+      button.onclick = () => (slot.editorOpen.value ? slot.closeEditor() : slot.openEditor()).catch((e) => say(e.message, true));
+    }
     // The slot's plugin_name can stay null for a loaded plugin; the catalog has the name (fact 86).
     const catalogName = slot.pluginId.value ? luna.plugins.byId(slot.pluginId.value)?.name.value : undefined;
     name.textContent = slot.isEmpty ? 'empty' : catalogName ?? slot.pluginName.value ?? slot.pluginId.value ?? 'loading…';
@@ -132,14 +260,27 @@
       remove.onclick = () => slot.clear().catch((e) => say(e.message, true));
       actions.append(inOut, remove);
     }
+    // A plugin's parameters are the slot's own controls, and they arrive after its plugin_id:
+    // a new plugin's controls are pushed once it has loaded, and a removed one's are marked
+    // `initialized: null` after the slot empties (fact 86). So the list redraws on its own,
+    // whenever a control comes or goes or its `initialized` changes, and an empty slot shows
+    // none of the ghosts.
     const params = el.querySelector('.params');
-    // A plugin's parameters are the slot's own controls.
-    for (const p of slot.params) params.append(paramRow(p)); // live parameters only, not a cleared plugin's ghosts (fact 86)
+    let paramOffs = [], gone = false;
+    const renderParams = () => {
+      for (const off of paramOffs) off();
+      if (gone) return; // the row was replaced before the controls finished loading
+      paramOffs = [slot.controls.onChange(renderParams), ...slot.controls.items.map((c) => c.initialized.onChange(renderParams))];
+      params.replaceChildren(...(slot.isEmpty ? [] : slot.params).map((p) => paramRow(p, paramOffs)));
+    };
+    renderParams();
+    if (!slot.isEmpty) slot.controls.load().then(renderParams, () => {});
+    rowOffs.push(() => { gone = true; for (const off of paramOffs) off(); paramOffs = []; });
     return el;
   }
 
   // A slider per parameter: drives normalized 0..1; the label shows the plugin's own string.
-  function paramRow(p) {
+  function paramRow(p, offs) {
     const el = document.createElement('div');
     el.className = 'param';
     el.innerHTML = `<label><span></span><span class="display"></span></label><input type="range" min="0" max="1000" step="1">`;
@@ -152,17 +293,21 @@
     // slider follows the plugin except mid-drag; double-click resets to the plugin's default.
     const binding = Luna.bindRange(slider, p, { onError: (e) => say(e.message, true) });
     renderDisplay();
-    rowOffs.push(p.display.onChange(renderDisplay), () => binding.dispose());
+    offs.push(p.display.onChange(renderDisplay), () => binding.dispose());
     return el;
   }
 
   document.getElementById('add').onclick = async () => {
-    if (!channel) return;
+    if (!channel || !pluginSel.value) return;
     try {
-      // insert() resolves once the plugin has loaded, and rejects with the slot's
-      // plugin_error (for example mixer.missing_plug-in) when it cannot (fact 86).
-      const slot = await channel.insert(pluginSel.value);
-      if (!slot) { say('every insert slot is full', true); return; }
+      // insert() and setPlugin() resolve once the plugin has loaded, and reject with the
+      // slot's plugin_error (for example mixer.missing_plug-in) when it cannot (fact 86).
+      if (targetSel.value === NEXT_EMPTY) {
+        const slot = await channel.insert(pluginSel.value);
+        if (!slot) { say('every insert slot is full', true); return; }
+      } else {
+        await channel.effects.byId(targetSel.value)?.setPlugin(pluginSel.value); // replaces what is there
+      }
       say('');
     } catch (e) { say(e.message, true); }
   };

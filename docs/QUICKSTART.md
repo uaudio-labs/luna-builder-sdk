@@ -239,6 +239,7 @@ await luna.sessions.open(recent[0].uid);
 const paths = (await luna.gui.available()) ? await luna.gui.chooseFiles() : []; // paths, not Files
 await luna.gui.setPage('mixer'); await luna.gui.openUrl(url); await luna.gui.revealPath(path);
 const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
+await luna.gui.installAddOn({ url: 'https://github.com/<owner>/<repo>' }); // LUNA asks the user; watch luna.gui.addOns
 ```
 
 `/gui` is absent on a headless engine. Getting a user's file in: [FILES.md](FILES.md).

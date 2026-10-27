@@ -157,7 +157,7 @@ const luna = await Luna.connect({ port_: engine.port() });
 src/          the SDK source; everything public is exported from src/luna.ts as Luna.<Name>
 cli/          ua-builder new/serve/install/pack/doctor, built to dist/cli.js
 tests/        vitest: unit (Luna.MockEngine), live (a running LUNA)
-docs/         QUICKSTART.md, FILES.md, CLIPS.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
+docs/         QUICKSTART.md, FILES.md, FILES-GUIDE.md, CLIPS.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
 skills/       create-add-on, add-feature, test-add-on, debug-connection, verify-add-on, edit-clips
 templates/    add-on-basic scaffold
 examples/     addon (master mute), mixer, inserts, ruler, sends, tracks (raw wire), plus

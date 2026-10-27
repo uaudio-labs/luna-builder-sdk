@@ -381,38 +381,16 @@ export class MockEngine {
         },
       },
     });
-    this.addNode('/plugins', { properties: { type: 'folder' }, commands: { rescan: () => null } });
+    // `query` applies LUNA's slot rules (fact 127): the slot's effect type, and on a channel
+    // its format for effect, record FX and instrument slots.
+    this.addNode('/plugins', { properties: { type: 'folder' }, commands: { rescan: () => null, query: (data, engine) => engine.queryPlugins(data) } });
     // The preset library: rows seeded with `addPreset`, queried columnar like the workspace
     // (fact 98). `favorite` and `factory` are 0/1 integers on the wire, as LUNA sends them.
     // Search and tags combine; several tags match all of them unless `union` (fact 120).
     this.addNode('/presets', {
       properties: { type: 'folder' },
       commands: {
-        query: (data, engine) => {
-          const body = (data ?? {}) as { plugin_id?: string; device_type_id?: string; search?: string; favorite?: boolean; limit?: number; tag?: string | string[]; union?: boolean; tags?: boolean };
-          if (!body.plugin_id && !body.device_type_id) throw new UAError('uasrv.invalid_type', 'query: plugin_id or device_type_id required', { cmd: 'post', path: '/presets/query' });
-          const root = `/presets/plugins/${body.plugin_id ?? ''}/presets`;
-          let rows = engine.children(root).map((uid) => ({
-            uid,
-            name: String(engine.value(`${root}/${uid}`, 'preset_name') ?? uid),
-            version: Number(engine.value(`${root}/${uid}`, 'version') ?? 1),
-            favorite: engine.value(`${root}/${uid}`, 'favorite') ? 1 : 0,
-            factory: engine.value(`${root}/${uid}`, 'factory') ? 1 : 0,
-            path: String(engine.value(`${root}/${uid}`, 'path') ?? ''),
-            tags: engine.presetTags(body.plugin_id ?? '', uid),
-          }));
-          const wanted = (Array.isArray(body.tag) ? body.tag : body.tag !== undefined ? [body.tag] : []).filter((t) => t !== '');
-          // A single string tag is always matched alone; `union` applies to a list only.
-          const any = Array.isArray(body.tag) && body.union === true;
-          if (wanted.length > 0) rows = rows.filter((r) => (any ? wanted.some((t) => r.tags.includes(t)) : wanted.every((t) => r.tags.includes(t))));
-          if (body.search) rows = rows.filter((r) => r.name.toLowerCase().includes(body.search!.toLowerCase()));
-          if (body.favorite) rows = rows.filter((r) => r.favorite === 1);
-          if (body.limit !== undefined && body.limit > 0) rows = rows.slice(0, body.limit);
-          const results: Record<string, unknown> = { num_rows: rows.length };
-          for (const k of ['uid', 'name', 'version', 'favorite', 'factory', 'path'] as const) results[k] = rows.map((r) => r[k]);
-          if (body.tags) results['tags'] = rows.map((r) => r.tags);
-          return { results, folders: [] };
-        },
+        query: (data, engine) => engine.queryPresets(data),
         // Fact 121: deviced forwards to UA Assistant's hybrid search; with the assistant not
         // connected it answers `ua.unknown`, and the assistant refuses empty text.
         preset_recommendations: (data, engine) => {
@@ -424,6 +402,11 @@ export class MockEngine {
         },
       },
     });
+    // Track presets: `/presets/devices/track`, seeded with `addTrackPreset`. `load` applies one
+    // (or an instrument plugin's preset) to a track (fact 132).
+    this.addNode('/presets/devices/track', { properties: { device_type_id: 'track' }, commands: { load: (data, engine) => engine.loadTrackPreset(data) } });
+    this.addNode('/presets/devices/track/presets', { properties: { type: 'presets' } });
+    this.addNode('/presets/devices/track/categories', { properties: { type: 'categories' } });
     // UA Assistant's connection to LUNA; `setAssistantEnabled` drives it (fact 121).
     this.addNode('/assistant', { properties: { enabled: false }, readOnly: ['enabled'] });
     this.addNode('/drivers', { properties: { connected: [{ id: 'mock', name: 'Mock Device', type: 'built_in', num_inputs: 2, num_outputs: 2 }], unsupported: [], sample_rates: [44100, 48000] } });
@@ -490,6 +473,67 @@ export class MockEngine {
         show_feedback: () => null,
         show_session_in_finder: () => null,
         show_add_on: () => null,
+        // Fact 128: install_add_on's checks and codes as LUNA's. It records the request
+        // instead of downloading and installing anything.
+        install_add_on: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `install_add_on: ${why}`, { cmd: 'post', path: '/gui/install_add_on' });
+          const body = typeof data === 'object' && data !== null ? (data as { id?: unknown; url?: unknown }) : {};
+          const hasId = typeof body.id === 'string';
+          const hasUrl = typeof body.url === 'string';
+          if (hasId === hasUrl) throw hasId ? fail('uasrv.invalid_value', 'give id or url, not both') : fail('uasrv.missing_field', 'id or url is required');
+          if (hasUrl) {
+            const target = githubRepoUrl(body.url as string) ?? driveDownloadUrl(body.url as string) ?? iCloudShareUrl(body.url as string) ?? dropboxDownloadUrl(body.url as string);
+            if (!target) throw fail('uasrv.invalid_value', 'url is not a GitHub repo, or a Google Drive, iCloud Drive or Dropbox share');
+            engine.addOnInstalls.push({ url: target });
+            return null;
+          }
+          const id = (body.id as string).toLowerCase();
+          const pkg = engine.marketplace[id] !== undefined ? id : Object.keys(engine.marketplace).find((p) => engine.marketplace[p]?.includes(id));
+          if (pkg === undefined) throw fail('uasrv.invalid_value', `no marketplace package or Add On ${id}`);
+          if (engine.installingPackages.includes(pkg)) throw fail('uasrv.too_many_requests', `${pkg} is already installing`);
+          engine.addOnInstalls.push({ id: pkg });
+          return null;
+        },
+        // Fact 128: remove_imported_add_on's checks and codes as LUNA's.
+        remove_imported_add_on: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `remove_imported_add_on: ${why}`, { cmd: 'post', path: '/gui/remove_imported_add_on' });
+          const body = typeof data === 'object' && data !== null ? (data as { id?: unknown }) : {};
+          if (typeof body.id !== 'string') throw fail('uasrv.missing_field', 'id is required');
+          const id = body.id.toLowerCase();
+          const pkg = engine.marketplace[id] !== undefined ? id : Object.keys(engine.marketplace).find((p) => engine.marketplace[p]?.includes(id));
+          if (pkg === undefined) throw fail('uasrv.invalid_value', `no marketplace package or Add On ${id}`);
+          if (!engine.importedPackages.includes(pkg)) throw fail('uasrv.not_permitted', `${pkg} is the marketplace's own`);
+          engine.importedPackages = engine.importedPackages.filter((p) => p !== pkg);
+          delete engine.marketplace[pkg];
+          return null;
+        },
+        // Fact 130: uninstall_add_on's checks and codes as LUNA's. LUNA's prompt is answered
+        // with uninstallAnswer; on 'remove' the Add On leaves /gui/add_ons.
+        uninstall_add_on: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `uninstall_add_on: ${why}`, { cmd: 'post', path: '/gui/uninstall_add_on' });
+          const body = typeof data === 'object' && data !== null ? (data as { id?: unknown }) : {};
+          if (typeof body.id !== 'string') throw fail('uasrv.missing_field', 'id is required');
+          const id = body.id.toLowerCase();
+          if (!engine.has(`/gui/add_ons/${id}`)) throw fail('uasrv.invalid_value', `no Add On ${id}`);
+          if (engine.builtInAddOns.includes(id)) throw fail('uasrv.not_permitted', `${id} is built into LUNA`);
+          engine.addOnUninstalls.push(id);
+          if (engine.uninstallAnswer === 'remove') engine.removeNode(`/gui/add_ons/${id}`);
+          return null;
+        },
+        // Fact 126: what LUNA's show_plugin / hide_plugin check and do. LUNA opens a window
+        // only for a slot with a plugin, and lists it in /gui/plugin_windows by uid.
+        show_plugin: (data, engine) => {
+          const { slot, key } = engine.pluginWindowTarget(data, 'show_plugin');
+          const open = engine.pluginWindowsOpen();
+          if (engine.value(slot, 'plugin_id') && !open.some((w) => sameWindow(w, key))) engine.setValue('/gui/plugin_windows', 'open', [...open, key]);
+          return null;
+        },
+        hide_plugin: (data, engine) => {
+          const { key } = engine.pluginWindowTarget(data, 'hide_plugin');
+          const open = engine.pluginWindowsOpen();
+          if (open.some((w) => sameWindow(w, key))) engine.setValue('/gui/plugin_windows', 'open', open.filter((w) => !sameWindow(w, key)));
+          return null;
+        },
         execute: () => null,
         add_task: () => null,
         update_task: () => null,
@@ -552,7 +596,7 @@ export class MockEngine {
           if (!/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
           const file = engine.mediaFiles[path];
           if (file === undefined) throw fail('uasrv.filesystem_error', 'no file at path');
-          if (file === null) throw fail('uasrv.invalid_value', 'not an audio or video file');
+          if (file === null) throw fail('uasrv.invalid_value', 'not an audio, video or MIDI file');
           const id = body.add_on_id.toLowerCase();
           if (!engine.has(`/gui/add_ons/${id}`)) throw fail('uasrv.not_installed', `no Add On ${id}`);
           const target = file === true ? path : file;
@@ -573,17 +617,38 @@ export class MockEngine {
     });
     this.addNode('/gui/windows/main', { properties: { page: 'timeline' } });
     this.addNode('/gui/transport', { properties: { arm_mode: false } });
-    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, manufacturer: 'Example Co', description: 'A demo Add On.' } });
+    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, manufacturer: 'Example Co', description: 'A demo Add On.', version: '1.0.0', installed_from: 'folder' } });
     this.addNode('/gui/file_chooser');
+    this.addNode('/gui/plugin_windows', { properties: { open: [] }, readOnly: ['open'] });
     if (options.gui === false) this.removeNode('/gui');
+  }
+
+  /** @internal The windows listed in `/gui/plugin_windows`. */
+  pluginWindowsOpen(): PluginWindowKey[] {
+    const open = this.value('/gui/plugin_windows', 'open');
+    return Array.isArray(open) ? (open as PluginWindowKey[]) : [];
+  }
+
+  /** @internal Validate a show_plugin / hide_plugin payload as LUNA does (fact 126). */
+  pluginWindowTarget(data: unknown, command: string): { slot: string; key: PluginWindowKey } {
+    const fail = (code: string, why: string) => new UAError(code, `${command}: ${why}`, { cmd: 'post', path: `/gui/${command}` });
+    const body = typeof data === 'object' && data !== null ? (data as { session_uid?: unknown; channel_uid?: unknown; insert_type?: unknown }) : {};
+    if (typeof body.channel_uid !== 'string') throw fail('uasrv.missing_field', 'channel_uid is required');
+    if (typeof body.insert_type !== 'string') throw fail('uasrv.missing_field', 'insert_type is required');
+    if (!/^(effect_\d+|record_fx_\d+|midi_\d+|console|tape|bus_input|instrument|sidechain_filter)$/.test(body.insert_type)) throw fail('uasrv.invalid_value', `unknown insert_type ${body.insert_type}`);
+    const sessionUid = typeof body.session_uid === 'string' ? body.session_uid : this.children('/sessions')[0];
+    if (sessionUid === undefined || !this.has(`/sessions/${sessionUid}`)) throw fail('uasrv.invalid_value', 'no such open session');
+    const base = `/sessions/${sessionUid}`;
+    const channel = this.has(`${base}/tracks/${body.channel_uid}`) ? `${base}/tracks/${body.channel_uid}` : `${base}/buses/${body.channel_uid}`;
+    return { slot: `${channel}/effects/${body.insert_type}`, key: { session_uid: sessionUid, channel_uid: body.channel_uid, insert_type: body.insert_type } };
   }
 
   /** What the next mock file dialog "selects"; empty means the user cancelled. */
   nextDialogFiles: string[] = [];
 
   /**
-   * The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio or video
-   * file it serves, `null` for one it refuses (not media, or media in name only), or the
+   * The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio, video or
+   * MIDI file it serves, `null` for one it refuses (not media, or media in name only), or the
    * path a link leads to, which is served under that path. A path not listed is missing.
    *
    * @example
@@ -595,6 +660,44 @@ export class MockEngine {
 
   /** Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. */
   mediaServed: { addOnId: string; path: string }[] = [];
+
+  /**
+   * The marketplace `/gui/install_add_on` installs from: each package id to the ids of the
+   * Add Ons in it, all lowercase.
+   *
+   * @example
+   * engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
+   */
+  marketplace: Record<string, string[]> = {};
+
+  /** Package ids `/gui/install_add_on` treats as already installing. */
+  installingPackages: string[] = [];
+
+  /**
+   * Package ids in {@link marketplace} that were imported from a link, which
+   * `/gui/remove_imported_add_on` removes (from here and from `marketplace`); any other
+   * package is the marketplace's own and is refused.
+   */
+  importedPackages: string[] = [];
+
+  /**
+   * Every install `/gui/install_add_on` started, in order: `{ id }` with the package id, or
+   * `{ url }` with what LUNA fetches: a repo's URL (`https://github.com/<owner>/<repo>`), or
+   * a Drive file's direct download
+   * (`https://drive.usercontent.google.com/download?id=<id>&export=download&confirm=t`), or
+   * an iCloud Drive share as `https://www.icloud.com/iclouddrive/<id>`, which LUNA resolves,
+   * or a Dropbox file's download (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=1`).
+   */
+  addOnInstalls: ({ id: string } | { url: string })[] = [];
+
+  /** Add On ids (lowercase) under `/gui/add_ons` that are built into LUNA, which `/gui/uninstall_add_on` refuses. */
+  builtInAddOns: string[] = [];
+
+  /** How the user answers LUNA's prompt for `/gui/uninstall_add_on`: `'remove'` (the default) takes the Add On out of `/gui/add_ons`, `'cancel'` leaves it. */
+  uninstallAnswer: 'remove' | 'cancel' = 'remove';
+
+  /** Every Add On id (lowercase) `/gui/uninstall_add_on` asked the user about, in order, whatever the answer. */
+  addOnUninstalls: string[] = [];
 
   /**
    * The disk `/gui/list_files` reads: each folder's absolute path to the names inside it,
@@ -689,8 +792,14 @@ export class MockEngine {
     return undefined;
   }
 
-  /** Add a plugin to the catalog. */
-  addPlugin(pluginId: string, options: { name?: string; manufacturer?: string; categories?: string[] } = {}): void {
+  /**
+   * Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
+   * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
+   */
+  addPlugin(pluginId: string, options: { name?: string; manufacturer?: string; categories?: string[]; effectType?: string; formats?: [string, string][]; favorite?: boolean } = {}): void {
+    const manifest: Record<string, unknown> = { manufacturer: options.manufacturer ?? 'Mock', name: options.name ?? pluginId, plugin_id: pluginId, categories: options.categories ?? [], short_names: [] };
+    if (options.effectType !== undefined) manifest['effect_type'] = options.effectType;
+    if (options.formats !== undefined) manifest['supported_stream_formats'] = { primary: options.formats };
     this.addNode(`/plugins/${pluginId}`, {
       properties: {
         plugin_id: pluginId,
@@ -698,12 +807,69 @@ export class MockEngine {
         version: '1.0.0',
         description: '',
         installed: true,
-        favorite: false,
+        favorite: options.favorite ?? false,
         authorized: null,
         default_preset_uid: null,
-        manifest: { manufacturer: options.manufacturer ?? 'Mock', name: options.name ?? pluginId, plugin_id: pluginId, categories: options.categories ?? [], short_names: [] },
+        manifest,
       },
     });
+  }
+
+  /** `/plugins/query` (fact 127), with LUNA's slot rules. Categories pass through untranslated. */
+  queryPlugins(data: unknown): { plugins: Record<string, unknown>[] } {
+    const body = (data ?? {}) as { search?: string; categories?: string[]; favorite?: boolean; insert_type?: string; session_uid?: string; channel_uid?: string; limit?: number };
+    const fail = (msg: string, code = 'uasrv.invalid_value') => new UAError(code, `query: ${msg}`, { cmd: 'post', path: '/plugins/query' });
+    const visible = ['effect', 'instrument', 'midi', 'unison'];
+    let slotType: string | undefined;
+    let checksFormat = false;
+    if (body.insert_type !== undefined) {
+      const slot = body.insert_type;
+      if (/^(effect|record_fx)_\d+$/.test(slot)) [slotType, checksFormat] = ['effect', true];
+      else if (/^midi_\d+$/.test(slot)) slotType = 'midi';
+      else if (slot === 'instrument') [slotType, checksFormat] = ['instrument', true];
+      else if (slot === 'tape') slotType = 'tape';
+      else if (slot === 'bus_input') slotType = 'console';
+      else if (slot === 'console') slotType = 'console_ext';
+      else if (slot === 'sidechain_filter') slotType = '';
+      else if (['reserved_0', 'bus_compressor', 'ara_editor_renderer'].includes(slot)) slotType = 'none';
+      else throw fail(`unknown insert_type ${slot}`);
+    }
+    let channelFormat: string | undefined;
+    if (body.channel_uid !== undefined) {
+      const base = `/sessions/${body.session_uid ?? ''}`;
+      if (!body.session_uid || !this.has(base)) throw fail('unknown session', 'error_code.session_missing');
+      const channel = [`${base}/tracks/${body.channel_uid}`, `${base}/buses/${body.channel_uid}`].find((p) => this.has(p));
+      if (!channel) throw fail('unknown channel');
+      channelFormat = String(this.value(channel, 'stem_format') ?? '');
+    }
+    const search = (body.search ?? '').toLowerCase();
+    const rows = this.children('/plugins')
+      .map((id) => {
+        const path = `/plugins/${id}`;
+        const manifest = (this.value(path, 'manifest') ?? {}) as { manufacturer?: string; categories?: string[]; effect_type?: string; supported_stream_formats?: { primary?: [string, string][] } };
+        return {
+          plugin_id: id,
+          name: String(this.value(path, 'name') ?? ''),
+          manufacturer: manifest.manufacturer ?? '',
+          categories: manifest.categories ?? [],
+          favorite: this.value(path, 'favorite') === true,
+          installed: this.value(path, 'installed') !== false,
+          effectTypes: (manifest.effect_type || 'effect').split(','),
+          formats: manifest.supported_stream_formats?.primary,
+        };
+      })
+      .filter((p) => p.installed && p.name !== '')
+      .filter((p) => !body.favorite || p.favorite)
+      .filter((p) => !search || p.name.toLowerCase().includes(search) || p.manufacturer.toLowerCase().includes(search))
+      .filter((p) => !body.categories?.length || p.categories.some((c) => body.categories!.includes(c)))
+      .filter((p) => {
+        if (slotType === 'none') return false;
+        if (checksFormat && channelFormat && p.formats && !p.formats.some(([i, o]) => (i === channelFormat || i === 'any') && (o === channelFormat || o === 'any'))) return false;
+        return slotType ? p.effectTypes.includes(slotType) : p.effectTypes.some((t) => visible.includes(t));
+      })
+      .sort((a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0));
+    const limited = body.limit && body.limit > 0 ? rows.slice(0, body.limit) : rows;
+    return { plugins: limited.map(({ plugin_id, name, manufacturer, categories, favorite }) => ({ plugin_id, name, manufacturer, categories, favorite })) };
   }
 
   /**
@@ -714,8 +880,10 @@ export class MockEngine {
     this.ensurePresetPlugin(pluginId);
     const root = `/presets/plugins/${pluginId}/presets`;
     const uid = options.uid ?? `preset_${this.children(root).length + 1}_${pluginId}`;
+    // `path` is the folder holding the preset: the plugin's factory or user root (fact 132).
+    const folder = this.value(`/presets/plugins/${pluginId}`, options.factory ? 'factory_root' : 'user_root');
     this.addNode(`${root}/${uid}`, {
-      properties: { uid, preset_name: name, version: options.version ?? 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: '' },
+      properties: { uid, preset_name: name, version: options.version ?? 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: folder },
     });
     this.addNode(`${root}/${uid}/tags`, { properties: { type: 'tags' } });
     for (const tag of options.tags ?? []) {
@@ -726,13 +894,148 @@ export class MockEngine {
   }
 
   /**
+   * `/presets/query` (facts 98, 120, 132). A plugin's presets, or a device type's; with
+   * `device_type_id: "track"` and `include_instrument_presets`, also every installed instrument
+   * plugin's presets, with `Instrument` dropped from the tags they must match and added to the
+   * tags they report, and an `is_instrument_preset` column.
+   */
+  queryPresets(data: unknown): { results: Record<string, unknown>; folders: unknown[] } {
+    const body = (data ?? {}) as { plugin_id?: string; device_type_id?: string; search?: string; favorite?: boolean; limit?: number; tag?: string | string[]; union?: boolean; tags?: boolean; include_instrument_presets?: boolean };
+    if (!body.plugin_id && !body.device_type_id) throw new UAError('uasrv.invalid_type', 'query: plugin_id or device_type_id required', { cmd: 'post', path: '/presets/query' });
+    const wanted = (Array.isArray(body.tag) ? body.tag : body.tag !== undefined ? [body.tag] : []).filter((t) => t !== '');
+    // A single string tag is always matched alone; `union` applies to a list only.
+    const any = Array.isArray(body.tag) && body.union === true;
+    const search = (body.search ?? '').toLowerCase();
+    const list = (root: string, tagsOf: (uid: string) => string[], tags: string[]) =>
+      this.children(root)
+        .map((uid) => ({
+          uid,
+          name: String(this.value(`${root}/${uid}`, 'preset_name') ?? uid),
+          version: Number(this.value(`${root}/${uid}`, 'version') ?? 1),
+          favorite: this.value(`${root}/${uid}`, 'favorite') ? 1 : 0,
+          factory: this.value(`${root}/${uid}`, 'factory') ? 1 : 0,
+          path: String(this.value(`${root}/${uid}`, 'path') ?? ''),
+          tags: tagsOf(uid),
+          instrument: false,
+        }))
+        .filter((r) => tags.length === 0 || (any ? tags.some((t) => r.tags.includes(t)) : tags.every((t) => r.tags.includes(t))))
+        .filter((r) => !search || r.name.toLowerCase().includes(search))
+        .filter((r) => !body.favorite || r.favorite === 1);
+    const limit = <T>(rows: T[]) => (body.limit !== undefined && body.limit > 0 ? rows.slice(0, body.limit) : rows);
+    let rows = body.plugin_id
+      ? limit(list(`/presets/plugins/${body.plugin_id}/presets`, (uid) => this.presetTags(body.plugin_id!, uid), wanted))
+      : limit(list(`/presets/devices/${body.device_type_id}/presets`, (uid) => this.presetTagsAt(`/presets/devices/${body.device_type_id}/presets/${uid}/tags`), wanted));
+    const merge = !body.plugin_id && body.device_type_id === 'track' && body.include_instrument_presets === true;
+    if (merge) {
+      const pluginTags = wanted.filter((t) => t !== 'Instrument');
+      for (const pluginId of this.instrumentPluginIds()) {
+        const found = limit(list(`/presets/plugins/${pluginId}/presets`, (uid) => this.presetTags(pluginId, uid), pluginTags));
+        rows = rows.concat(found.map((r) => ({ ...r, instrument: true, tags: r.tags.includes('Instrument') ? r.tags : [...r.tags, 'Instrument'] })));
+      }
+    }
+    const results: Record<string, unknown> = { num_rows: rows.length };
+    for (const k of ['uid', 'name', 'version', 'favorite', 'factory', 'path'] as const) results[k] = rows.map((r) => r[k]);
+    if (body.tags) results['tags'] = rows.map((r) => r.tags);
+    if (merge) results['is_instrument_preset'] = rows.map((r) => r.instrument);
+    return { results, folders: [] };
+  }
+
+  /** @internal Installed plugins whose manifest makes them instruments. */
+  instrumentPluginIds(): string[] {
+    return this.children('/plugins').filter((id) => {
+      const manifest = (this.value(`/plugins/${id}`, 'manifest') ?? {}) as { effect_type?: string };
+      return this.value(`/plugins/${id}`, 'installed') !== false && (manifest.effect_type ?? '').split(',').includes('instrument');
+    });
+  }
+
+  /**
+   * Add a track preset to the library (fact 132). Like LUNA when it saves one, it is tagged
+   * with its category (`Audio`, `Instrument`, `Bus`, or `Multi-Track` for more than one
+   * track) besides any `tags`. `new_track` with it makes one track of `trackType` named after
+   * it, or, with `trackNames`, a track per name, named as the preset saved them. Returns its uid.
+   */
+  addTrackPreset(name: string, options: { uid?: string; trackType?: 'audio' | 'instrument' | 'bus'; trackNames?: string[]; factory?: boolean; favorite?: boolean; tags?: string[] } = {}): string {
+    const root = '/presets/devices/track/presets';
+    const uid = options.uid ?? `track_preset_${this.children(root).length + 1}`;
+    const trackType = options.trackType ?? 'audio';
+    const count = options.trackNames?.length ?? 1;
+    this.addNode(`${root}/${uid}`, {
+      properties: { uid, preset_name: name, version: 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: '', track_type: trackType, track_names: options.trackNames ?? null },
+    });
+    this.addNode(`${root}/${uid}/tags`, { properties: { type: 'tags' } });
+    const category = count > 1 ? 'Multi-Track' : { audio: 'Audio', instrument: 'Instrument', bus: 'Bus' }[trackType];
+    for (const tag of [category, ...(options.tags ?? [])]) {
+      const rowid = this.nextRow();
+      this.addNode(`${root}/${uid}/tags/${rowid}`, { properties: { type: 'tag', rowid, tag } });
+    }
+    return uid;
+  }
+
+  /** Add a group of track preset tags, as {@link addPresetTagGroup} does for a plugin. */
+  addTrackPresetTagGroup(name: string, tags: string[], options: { category?: string } = {}): string {
+    return this.addTagGroupAt('/presets/devices/track/categories', name, tags, options);
+  }
+
+  /** @internal The preset `uid` names: a track preset, or a plugin preset with its plugin. */
+  findPreset(uid: string): { kind: 'track'; path: string } | { kind: 'plugin'; path: string; pluginId: string } | undefined {
+    const track = `/presets/devices/track/presets/${uid}`;
+    if (this.has(track)) return { kind: 'track', path: track };
+    for (const pluginId of this.children('/presets/plugins')) {
+      const path = `/presets/plugins/${pluginId}/presets/${uid}`;
+      if (this.has(path)) return { kind: 'plugin', path, pluginId };
+    }
+    return undefined;
+  }
+
+  /** @internal Put a plugin on a track's instrument slot (or first effect slot), on a preset. */
+  putPluginPreset(track: string, pluginId: string, presetPath: string): void {
+    const instrument = this.instrumentPluginIds().includes(pluginId);
+    const slot = `${track}/effects/${instrument ? 'instrument' : 'effect_0'}`;
+    if (!this.has(slot)) {
+      this.addNode(slot, { properties: { uid: `${track}_instrument`, insert_type: 'instrument', plugin_id: null, plugin_name: null, external_sdk_instance_id: null, enabled: true, plugin_power: true, preset_name: null, preset_uid: null, preset_uid_dirty: false }, readOnly: ['uid', 'insert_type', 'plugin_id', 'plugin_name'] });
+      this.addNode(`${slot}/controls`);
+    }
+    this.setValue(slot, 'plugin_id', pluginId);
+    this.setValue(slot, 'plugin_name', this.value(`/plugins/${pluginId}`, 'name') ?? pluginId);
+    this.setValue(slot, 'preset_uid', this.value(presetPath, 'uid'));
+    this.setValue(slot, 'preset_name', this.value(presetPath, 'preset_name'));
+    this.setValue(slot, 'preset_uid_dirty', false);
+  }
+
+  /**
+   * `post /presets/devices/track/load` (fact 132): a track preset or an instrument plugin's
+   * preset onto a track. The track records the preset and takes its name unless its
+   * `name_modified` is true; a name set through `set` does not make it so.
+   */
+  loadTrackPreset(data: unknown): null {
+    const body = (data ?? {}) as { session_uid?: string; uid?: string; preset_uid?: string };
+    const where = { cmd: 'post', path: '/presets/devices/track/load' };
+    const track = `/sessions/${body.session_uid ?? ''}/tracks/${body.uid ?? ''}`;
+    if (!body.session_uid || !body.preset_uid) throw new UAError('uasrv.invalid_property', 'load: session_uid and preset_uid required', where);
+    const preset = this.findPreset(body.preset_uid);
+    if (!preset || !this.has(track)) throw new UAError('device.database_error', 'load: no such track or preset', where);
+    if (preset.kind === 'plugin') {
+      if (this.instrumentPluginIds().includes(preset.pluginId) && this.value(track, 'track_type') !== 'instrument') throw new UAError('uasrv.invalid_value', 'load: an instrument preset needs an instrument track', where);
+      this.putPluginPreset(track, preset.pluginId, preset.path);
+    }
+    const name = this.value(preset.path, 'preset_name');
+    this.setValue(track, 'preset_uid', body.preset_uid);
+    this.setValue(track, 'preset_name', name);
+    if (this.value(track, 'name_modified') !== true) this.setValue(track, 'name', name);
+    return null;
+  }
+
+  /**
    * Add a group of preset tags for a plugin, as LUNA keeps them: a sub-category named `name`
    * under the category `category` (default `Default`) holding the tags (fact 120). Returns
    * the sub-category uid.
    */
   addPresetTagGroup(pluginId: string, name: string, tags: string[], options: { category?: string } = {}): string {
     this.ensurePresetPlugin(pluginId);
-    const categories = `/presets/plugins/${pluginId}/categories`;
+    return this.addTagGroupAt(`/presets/plugins/${pluginId}/categories`, name, tags, options);
+  }
+
+  private addTagGroupAt(categories: string, name: string, tags: string[], options: { category?: string }): string {
     const categoryName = options.category ?? 'Default';
     let categoryUid = this.children(categories).find((c) => this.value(`${categories}/${c}`, 'name') === categoryName);
     if (!categoryUid) {
@@ -766,7 +1069,11 @@ export class MockEngine {
 
   /** @internal */
   presetTags(pluginId: string, uid: string): string[] {
-    const folder = `/presets/plugins/${pluginId}/presets/${uid}/tags`;
+    return this.presetTagsAt(`/presets/plugins/${pluginId}/presets/${uid}/tags`);
+  }
+
+  /** @internal */
+  presetTagsAt(folder: string): string[] {
     return this.children(folder).map((t) => String(this.value(`${folder}/${t}`, 'tag') ?? '')).filter((t) => t !== '');
   }
 
@@ -796,7 +1103,7 @@ export class MockEngine {
     const path = `/presets/plugins/${pluginId}`;
     if (this.has(path)) return;
     this.addNode(path, {
-      properties: { plugin_id: pluginId },
+      properties: { plugin_id: pluginId, factory_root: `/Mock/factory_presets/${pluginId}`, user_root: `/Mock/Presets/Plug-Ins/${pluginId}` },
       commands: {
         load: (data, engine) => {
           const body = (data ?? {}) as { session_uid?: string; uid?: string; preset_uid?: string };
@@ -1473,7 +1780,10 @@ export class MockEngine {
     const pkg = options.packageUid ?? `pkg_${uid}`;
     const sessionCommands: Record<string, CommandHandler> = {
       new_track: (data, engine) => {
-        const body = (data ?? {}) as { name?: string; track_type?: string; stem_format?: string };
+        const body = (data ?? {}) as { name?: string; track_type?: string; stem_format?: string; preset_uid?: string };
+        // `preset_uid` makes the preset's tracks; an instrument plugin's preset a stereo
+        // instrument track with the plugin on it (fact 132).
+        if (body.preset_uid !== undefined) return engine.newTrackFromPreset(uid, body.preset_uid, body.name, body.stem_format);
         // `track_type: "bus"` makes an aux bus, ordered after everything (fact 83).
         if (body.track_type === 'bus') {
           const id = `bus${engine.children(`${base}/buses`).length + 1}`;
@@ -2023,7 +2333,7 @@ export class MockEngine {
     this.addNode(`${base}/key_signatures`);
     this.addNode(`${base}/markers`);
     this.addNode(`${base}/chords`);
-    this.addNode(`${base}/preferences`, { commands: preferenceCommands(`${base}/preferences`) });
+    this.addNode(`${base}/storage`, { commands: storageCommands(`${base}/storage`) });
     this.addPackage(pkg, { name: options.name ?? uid, lastOpened: Date.now() });
     // LUNA gives every session four cue buses before anything else (fact 83).
     for (let i = 0; i < 4; i++) this.addBus(uid, `cue${i + 1}_${uid}`, { name: `CUE ${i + 1}`, busType: `cue_${i}`, stemFormat: 'stereo' });
@@ -2034,6 +2344,35 @@ export class MockEngine {
   }
 
   /** Add a track with the standard control layout and one playlist. */
+  /** @internal `new_track` with `preset_uid` (fact 132). */
+  newTrackFromPreset(sessionUid: string, presetUid: string, name: string | undefined, stemFormat: string | undefined): { uid: string } | { uid: string }[] {
+    const base = `/sessions/${sessionUid}`;
+    const preset = this.findPreset(presetUid);
+    if (!preset) throw new UAError('device.database_error', 'new_track: no such preset', { cmd: 'post', path: `${base}/new_track` });
+    const presetName = String(this.value(preset.path, 'preset_name') ?? '');
+    const made: string[] = [];
+    const make = (trackName: string, trackType: string, format: string) => {
+      const id = `t${this.children(`${base}/tracks`).length + 1}`;
+      this.addTrack(sessionUid, id, { name: trackName, trackType, stemFormat: format });
+      this.setValue(`${base}/tracks/${id}`, 'preset_uid', presetUid);
+      this.setValue(`${base}/tracks/${id}`, 'preset_name', presetName);
+      made.push(id);
+      return `${base}/tracks/${id}`;
+    };
+    if (preset.kind === 'plugin') {
+      const instrument = this.instrumentPluginIds().includes(preset.pluginId);
+      const track = make(name ?? presetName, instrument ? 'instrument' : 'audio', instrument ? 'stereo' : (stemFormat ?? 'mono'));
+      this.putPluginPreset(track, preset.pluginId, preset.path);
+    } else {
+      // One track takes the requested name; a multi-track preset's keep the names it saved.
+      const saved = (this.value(preset.path, 'track_names') as string[] | null) ?? [];
+      const trackType = String(this.value(preset.path, 'track_type') ?? 'audio');
+      const names = saved.length > 1 ? saved : [name ?? presetName];
+      for (const trackName of names) make(trackName, trackType, trackType === 'instrument' ? 'stereo' : 'mono');
+    }
+    return made.length === 1 ? { uid: made[0]! } : made.map((uid) => ({ uid }));
+  }
+
   addTrack(sessionUid: string, id: string, options: { name?: string; trackType?: string; stemFormat?: string } = {}): void {
     const base = `/sessions/${sessionUid}`;
     const order = this.children(`${base}/tracks`).length;
@@ -2062,6 +2401,8 @@ export class MockEngine {
         playlist_uid: playlist,
         has_preamp: false,
         record_mute: false,
+        preset_uid: null,
+        preset_name: null,
       },
       options.stemFormat === 'stereo',
     );
@@ -2841,6 +3182,82 @@ export class MockPort implements Port {
  * The host of an Add On's `ua-content://` URL, as LUNA builds it (fact 114): the lowercase
  * id with `_` doubled and any other byte a host cannot carry written `_` plus two hex digits.
  */
+/**
+ * The repo a pasted URL names, as LUNA's `Rack_AddOnMarketplace::RepoURLFromString()` reads
+ * it: `https://github.com/<owner>/<repo>`, or `undefined` when it is not a GitHub repo.
+ */
+function githubRepoUrl(input: string): string | undefined {
+  const url = input.trim().replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  if (!/^github\.com\//i.test(url)) return undefined;
+  const [owner = '', rawName = ''] = (url.slice(11).split(/[?#]/)[0] ?? '').split('/');
+  const name = rawName.replace(/\.git$/i, '');
+  const ok = (part: string) => /^[A-Za-z0-9._-]+$/.test(part) && !/^\.+$/.test(part);
+  return ok(owner) && ok(name) ? `https://github.com/${owner}/${name}` : undefined;
+}
+
+/**
+ * The direct download of the Google Drive file a share link names, as LUNA's
+ * `Rack_AddOnMarketplace::DriveDownloadURLFromString()` builds it, or `undefined`.
+ */
+function driveDownloadUrl(input: string): string | undefined {
+  const url = input.trim().replace(/^https?:\/\//i, '');
+  const slash = url.indexOf('/');
+  if (slash < 0) return undefined;
+  const host = url.slice(0, slash).toLowerCase();
+  if (!['drive.google.com', 'docs.google.com', 'drive.usercontent.google.com'].includes(host)) return undefined;
+  const rest = url.slice(slash + 1).split('#')[0] ?? '';
+  const [path = '', query = ''] = rest.split('?');
+  const param = (name: string) => {
+    const hit = query.split('&').find((p) => p.split('=')[0] === name);
+    return hit === undefined ? '' : decodeURIComponent(hit.slice(name.length + 1));
+  };
+  const file = /^(?:u\/[^/]+\/)?file\/d\/([^/]*)/.exec(path);
+  const id = file ? (file[1] ?? '') : ['open', 'uc', 'download'].includes(path) ? param('id') : '';
+  const key = param('resourcekey');
+  const ok = (part: string) => /^[A-Za-z0-9_-]*$/.test(part);
+  if (!id || !ok(id) || !ok(key)) return undefined;
+  return `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t${key ? `&resourcekey=${key}` : ''}`;
+}
+
+/**
+ * An iCloud Drive share link as `https://www.icloud.com/iclouddrive/<id>`, its short GUID
+ * read as LUNA's `Rack_AddOnMarketplace::ICloudShortGUIDFromString()` reads it, or `undefined`.
+ */
+function iCloudShareUrl(input: string): string | undefined {
+  const url = input.trim().replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  if (!/^icloud\.com\/iclouddrive\//i.test(url)) return undefined;
+  const guid = url.slice(23).split(/[#?/]/)[0] ?? '';
+  return /^[A-Za-z0-9_-]+$/.test(guid) ? `https://www.icloud.com/iclouddrive/${guid}` : undefined;
+}
+
+/**
+ * The `dl=1` download of the Dropbox file a share link names, as LUNA's
+ * `Rack_AddOnMarketplace::DropboxDownloadURLFromString()` builds it, or `undefined`.
+ */
+function dropboxDownloadUrl(input: string): string | undefined {
+  const url = input.trim().replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  if (!/^dropbox\.com\//i.test(url)) return undefined;
+  const rest = url.slice(12).split('#')[0] ?? '';
+  const [path = '', query = ''] = rest.split('?');
+  const parts = path.split('/').filter(Boolean);
+  const current = parts.length === 4 && parts[0] === 'scl' && parts[1] === 'fi';
+  const older = parts.length === 3 && parts[0] === 's';
+  if (!current && !older) return undefined;
+  const id = parts[parts.length - 2] ?? '';
+  const name = parts[parts.length - 1] ?? '';
+  const hit = query.split('&').find((p) => p.split('=')[0] === 'rlkey');
+  const key = hit === undefined ? '' : decodeURIComponent(hit.slice(6));
+  const idOk = (part: string) => /^[A-Za-z0-9_-]*$/.test(part);
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(name);
+  } catch {
+    return undefined;
+  }
+  if (!id || !idOk(id) || !/^[A-Za-z0-9._%~+()!-]+$/.test(name) || /[/\\]/.test(decoded) || !idOk(key) || (current && !key)) return undefined;
+  return `https://www.dropbox.com/${parts.join('/')}?${key ? `rlkey=${key}&` : ''}dl=1`;
+}
+
 function localContentHost(id: string): string {
   let host = '';
   for (const byte of new TextEncoder().encode(id)) {
@@ -2948,62 +3365,74 @@ function naturalCompare(a: string, b: string): number {
 }
 
 /**
- * `/sessions/<uid>/preferences` commands (fact 110). Names must be non-empty and free of
- * `/`; a preference with no properties left, and a context with no preferences left, go
- * away. `undoable` is accepted and ignored: the mock keeps no undo history.
+ * `/sessions/<uid>/storage` commands (fact 129). Names must be non-empty and free of `/`; a
+ * record with no fields left, and a context with no records left, go away. Values are kept as
+ * LUNA keeps them, as JSON, so a key whose value is `undefined` is gone. `undoable` is
+ * accepted and ignored: the mock keeps no undo history.
  */
-function preferenceCommands(root: string): Record<string, CommandHandler> {
+function storageCommands(root: string): Record<string, CommandHandler> {
   const validName = (v: unknown): v is string => typeof v === 'string' && v !== '' && !v.includes('/');
-  type Body = { context?: unknown; preference?: unknown; property?: unknown; value?: unknown };
+  const asJson = (v: unknown): unknown => (v === undefined ? null : JSON.parse(JSON.stringify(v)));
+  type Body = { context?: unknown; record?: unknown; field?: unknown; value?: unknown };
   const target = (body: Body, verb: string) => {
-    if (body.context === undefined || body.preference === undefined || body.property === undefined) {
+    if (body.context === undefined || body.record === undefined || body.field === undefined) {
       throw new UAError('uasrv.missing_field', `${verb}: uasrv.missing_field`, { cmd: 'post', path: `${root}/${verb}` });
     }
-    if (!validName(body.context) || !validName(body.preference) || !validName(body.property)) {
+    if (!validName(body.context) || !validName(body.record) || !validName(body.field)) {
       throw new UAError('uasrv.invalid_value', `${verb}: uasrv.invalid_value`, { cmd: 'post', path: `${root}/${verb}` });
     }
-    return { node: `${root}/${body.context}/${body.preference}`, property: body.property };
+    return { node: `${root}/${body.context}/${body.record}`, field: body.field };
   };
   const prune = (engine: MockEngine, context: string) => {
-    for (const pref of engine.children(`${root}/${context}`)) {
-      const path = `${root}/${context}/${pref}`;
+    for (const record of engine.children(`${root}/${context}`)) {
+      const path = `${root}/${context}/${record}`;
       if (engine.propertyNames(path).length === 0) engine.removeNode(path);
     }
     if (engine.children(`${root}/${context}`).length === 0) engine.removeNode(`${root}/${context}`);
   };
   return {
-    add_preference: (data, engine) => {
+    add_field: (data, engine) => {
       const body = (data ?? {}) as Body;
-      const { node, property } = target(body, 'add_preference');
-      if (engine.has(node) && engine.propertyNames(node).includes(property)) return null;
-      if (!engine.has(node)) engine.addNode(node, { properties: { [property]: body.value ?? null } });
-      else engine.setValue(node, property, body.value ?? null);
+      const { node, field } = target(body, 'add_field');
+      if (engine.has(node) && engine.propertyNames(node).includes(field)) return null;
+      if (!engine.has(node)) engine.addNode(node, { properties: { [field]: asJson(body.value) } });
+      else engine.setValue(node, field, asJson(body.value));
       return null;
     },
-    set_preference: (data, engine) => {
+    set_field: (data, engine) => {
       const body = (data ?? {}) as Body;
-      if (body.value === undefined) throw new UAError('uasrv.missing_field', 'set_preference: uasrv.missing_field', { cmd: 'post', path: `${root}/set_preference` });
-      const { node, property } = target(body, 'set_preference');
-      if (!engine.has(node) || !engine.propertyNames(node).includes(property)) {
-        throw new UAError('uasrv.invalid_property', 'set_preference: uasrv.invalid_property', { cmd: 'post', path: `${root}/set_preference` });
+      if (body.value === undefined) throw new UAError('uasrv.missing_field', 'set_field: uasrv.missing_field', { cmd: 'post', path: `${root}/set_field` });
+      const { node, field } = target(body, 'set_field');
+      if (!engine.has(node) || !engine.propertyNames(node).includes(field)) {
+        throw new UAError('uasrv.invalid_property', 'set_field: uasrv.invalid_property', { cmd: 'post', path: `${root}/set_field` });
       }
-      engine.setValue(node, property, body.value);
+      engine.setValue(node, field, asJson(body.value));
       return null;
     },
-    remove_preference: (data, engine) => {
+    remove_field: (data, engine) => {
       const body = (data ?? {}) as Body;
-      const path = `${root}/remove_preference`;
-      if (body.context === undefined) throw new UAError('uasrv.missing_field', 'remove_preference: uasrv.missing_field', { cmd: 'post', path });
-      const pref = body.preference ?? '';
-      const prop = body.property ?? '';
-      if (!validName(body.context) || (pref === '' && prop !== '')) throw new UAError('uasrv.invalid_value', 'remove_preference: uasrv.invalid_value', { cmd: 'post', path });
+      const path = `${root}/remove_field`;
+      if (body.context === undefined) throw new UAError('uasrv.missing_field', 'remove_field: uasrv.missing_field', { cmd: 'post', path });
+      const record = body.record ?? '';
+      const field = body.field ?? '';
+      if (!validName(body.context) || (record === '' && field !== '')) throw new UAError('uasrv.invalid_value', 'remove_field: uasrv.invalid_value', { cmd: 'post', path });
       const contextPath = `${root}/${body.context}`;
       if (!engine.has(contextPath)) return null;
-      if (pref === '') engine.removeNode(contextPath);
-      else if (prop === '') engine.removeNode(`${contextPath}/${String(pref)}`);
-      else engine.deleteValue(`${contextPath}/${String(pref)}`, String(prop));
+      if (record === '') engine.removeNode(contextPath);
+      else if (field === '') engine.removeNode(`${contextPath}/${String(record)}`);
+      else engine.deleteValue(`${contextPath}/${String(record)}`, String(field));
       prune(engine, body.context);
       return null;
     },
   };
+}
+
+interface PluginWindowKey {
+  session_uid: string;
+  channel_uid: string;
+  insert_type: string;
+}
+
+function sameWindow(a: PluginWindowKey, b: PluginWindowKey): boolean {
+  return a.session_uid === b.session_uid && a.channel_uid === b.channel_uid && a.insert_type === b.insert_type;
 }

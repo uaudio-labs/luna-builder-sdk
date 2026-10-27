@@ -1,13 +1,13 @@
-# Class: SessionPreferences
+# Class: SessionStorage
 
-`/sessions/<uid>/preferences`: every Add On's session preferences, by context.
+`/sessions/<uid>/storage`: every Add On's session storage, by context.
 
 ## Example
 
 ```ts
-await session.preferences.load();
-session.preferences.contexts.value; // ['com.example.my-add-on']
-const prefs = session.preferences.context('com.example.my-add-on');
+await session.storage.load();
+session.storage.contexts.value; // ['com.example.my-add-on']
+const store = session.storage.context('com.example.my-add-on');
 ```
 
 ## Extends
@@ -19,7 +19,7 @@ const prefs = session.preferences.context('com.example.my-add-on');
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
-| <a id="contexts"></a> `contexts` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`[]\> | Names of the contexts that hold at least one property. | - |
+| <a id="contexts"></a> `contexts` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`[]\> | Names of the contexts that hold at least one field. | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 
 ## Accessors
@@ -99,16 +99,16 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 ### context()
 
 ```ts
-context(name): PreferenceContext;
+context(name): StorageContext;
 ```
 
-One context's preferences. It need not exist yet: the first [PreferenceContext.add](PreferenceContext.md#add)
+One context's records. It need not exist yet: the first [StorageContext.add](StorageContext.md#add)
 creates it.
 
 `name` is any non-empty name without `/`, not only your Add On's id. Give each kind of data
-its own context, your id plus a suffix, then use a preference per item and a property per
-field, rather than one record in one value: each `set` replaces a value whole, and only
-whole values can be undoable or not.
+its own context, your id plus a suffix, then use a record per item and a field per part,
+rather than one record in one value: each `set` replaces a value whole, and only whole
+values can be undoable or not.
 
 #### Parameters
 
@@ -118,13 +118,13 @@ whole values can be undoable or not.
 
 #### Returns
 
-[`PreferenceContext`](PreferenceContext.md)
+[`StorageContext`](StorageContext.md)
 
 #### Example
 
 ```ts
-const prefs = session.preferences.context('com.example.my-add-on');
-const tracks = session.preferences.context('com.example.my-add-on.tracks');
+const store = session.storage.context('com.example.my-add-on');
+const tracks = session.storage.context('com.example.my-add-on.tracks');
 await tracks.add(track.id, 'channel', 0);
 ```
 
@@ -145,7 +145,7 @@ Fetch the context names.
 #### Example
 
 ```ts
-await session.preferences.load();
+await session.storage.load();
 ```
 
 #### Overrides

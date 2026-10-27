@@ -1,8 +1,10 @@
 # Getting a user's file into an Add On
 
+New to this? Start with [FILES-GUIDE.md](FILES-GUIDE.md), a walkthrough with recipes; this page is the reference.
+
 There are two routes, and an Add On picks one per feature. **Do not mix them**: a path from
 LUNA's dialog cannot be read by the page, and a `File` cannot be handed to LUNA by path. The
-one bridge is for audio and video: `luna.gui.serveMediaFile()` turns a path into a URL the
+one bridge is for audio, video and MIDI: `luna.gui.serveMediaFile()` turns a path into a URL the
 page can play and fetch (see "Playing a file you know by path").
 
 | | **File route** (default) | **Path route** (LUNA optimization) |
@@ -114,19 +116,19 @@ if (Luna.canDropPaths()) {
 
 A page cannot load a path, but LUNA can serve an audio or video file to your Add On's page
 and hand back a URL for it (fact 114) that `<video>`, `<audio>` and XMLHttpRequest load. That lets an Add On remember a file by path, for
-example a video kept in `session.preferences`, and load it again when the session reopens,
+example a video kept in `session.storage`, and load it again when the session reopens,
 with no `File` and no dialog.
 
 ```js
 const ADD_ON_ID = 'com.example.my-add-on';   // your manifest's id
-const prefs = session.preferences.context(ADD_ON_ID);
-await prefs.load();
-await prefs.add('video', 'path', null);
+const store = session.storage.context(ADD_ON_ID);
+await store.load();
+await store.add('video', 'path', null);
 
 async function show(path) {
   try {
     video.src = await luna.gui.serveMediaFile(ADD_ON_ID, path);
-    await prefs.set('video', 'path', path);
+    await store.set('video', 'path', path);
   } catch (e) {
     // uasrv.filesystem_error: the file is gone or moved (a session from another computer).
     // uasrv.invalid_value: not an audio or video file.
@@ -161,8 +163,9 @@ const bytes = await readBytes(video.src);
 ```
 
 - Only real media is served: LUNA follows links and checks the file they lead to, which needs
-  an audio or video extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`, `aiff`,
-  `mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`) and that format's signature in its first bytes.
+  an audio, video or MIDI extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`, `aiff`,
+  `mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`, `mid`, `midi`) and that format's signature in
+  its first bytes (`MThd` for a Standard MIDI File).
 - The file is served to the Add On you name, and only to its pages. Ask again after every
   reload: LUNA forgets the files it served when it quits, so keep the path, not the URL.
 - On macOS the URL is `ua-content://` and answers byte ranges, so a long video seeks without

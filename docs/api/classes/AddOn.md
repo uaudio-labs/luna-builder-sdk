@@ -13,11 +13,13 @@
 | <a id="description"></a> `description` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The manifest's `description`, an array of strings already concatenated, or `''` when it has none. | - |
 | <a id="floating"></a> `floating` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. | - |
 | <a id="icon"></a> `icon` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | Absolute file path of the icon, or `''`. | - |
+| <a id="installedfrom"></a> `installedFrom` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`AddOnInstalledFrom`](../type-aliases/AddOnInstalledFrom.md)\> | Where it is installed (fact 131): `'folder'`, a folder in LUNA's Add Ons folder (from a `.lunaaddon`, the marketplace, or copied there); `'link'`, a symlink there, as `ua-builder install` makes on macOS; `'built_in'`, bundled with LUNA. [Gui.uninstallAddOn](Gui.md#uninstalladdon) removes `'folder'` and `'link'` ones (a link loses only the link) and refuses `'built_in'`. `undefined` on a LUNA older than the property. **Example** `const removable = addOn.installedFrom.value === 'folder' || addOn.installedFrom.value === 'link';` | - |
 | <a id="manufacturer"></a> `manufacturer` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The manifest's `manufacturer`, or `''` when it has none. | - |
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The manifest's `name`: its menu item and panel header. | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="showwithsession"></a> `showWithSession` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `show_with_session`: `false` unless it says `true`. Meaningful for `'window'` only. | - |
 | <a id="target"></a> `target` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`AddOnTarget`](../type-aliases/AddOnTarget.md)\> | - | - |
+| <a id="version"></a> `version` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The manifest's `version`, or `''` when it has none. Follows a replace (fact 131). | - |
 
 ## Accessors
 

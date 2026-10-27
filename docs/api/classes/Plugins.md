@@ -199,6 +199,38 @@ Called when members are added or removed.
 
 ***
 
+### query()
+
+```ts
+query(options): Promise<PluginRow[]>;
+```
+
+Ask LUNA for the installed plugins matching a search, categories and favorites, sorted by
+name (fact 127). With `insertType`, only those LUNA's plugins browser offers for that slot:
+an instrument slot takes instruments, an effect slot effects, and with `channelUid` only
+plugins that run in the channel's format. LUNA applies the rules; the catalog need not be
+loaded. A LUNA without the query rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`PluginQueryOptions`](../interfaces/PluginQueryOptions.md) |
+
+#### Returns
+
+`Promise`\<[`PluginRow`](../interfaces/PluginRow.md)[]\>
+
+#### Example
+
+```ts
+const eqs = await luna.plugins.query({ categories: ['EQ'], search: 'pultec' });
+const instruments = await luna.plugins.query({ insertType: 'instrument' });
+await track.effects.byId('effect_0')!.setPlugin(eqs[0].pluginId);
+```
+
+***
+
 ### reload()
 
 ```ts

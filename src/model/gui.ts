@@ -13,15 +13,18 @@
  * const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
  * const [folder] = await luna.gui.chooseFolders();
  * if (folder) console.log(await luna.gui.listFiles(folder));
+ * await luna.gui.showPlugin(track.id, 'effect_0');
  */
 import type { Client } from '../client/client';
-import type { Prop, WritableProp } from '../store/prop';
+import { derived, type Prop, type WritableProp } from '../store/prop';
 import { RequestTimeout, UAError, Unsupported } from '../wire/errors';
 import { Collection } from './collection';
 import { Node } from './node';
 
 export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | string;
 export type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
+/** Where an installed Add On lives: see {@link AddOn.installedFrom}. */
+export type AddOnInstalledFrom = 'folder' | 'link' | 'built_in';
 
 export class AddOn extends Node {
   /** The manifest's `id`, in lowercase: LUNA compares ids without case. */
@@ -39,6 +42,19 @@ export class AddOn extends Node {
   readonly manufacturer: Prop<string>;
   /** The manifest's `description`, an array of strings already concatenated, or `''` when it has none. */
   readonly description: Prop<string>;
+  /** The manifest's `version`, or `''` when it has none. Follows a replace (fact 131). */
+  readonly version: Prop<string>;
+  /**
+   * Where it is installed (fact 131): `'folder'`, a folder in LUNA's Add Ons folder (from a
+   * `.lunaaddon`, the marketplace, or copied there); `'link'`, a symlink there, as
+   * `ua-builder install` makes on macOS; `'built_in'`, bundled with LUNA. {@link Gui.uninstallAddOn}
+   * removes `'folder'` and `'link'` ones (a link loses only the link) and refuses `'built_in'`.
+   * `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const removable = addOn.installedFrom.value === 'folder' || addOn.installedFrom.value === 'link';
+   */
+  readonly installedFrom: Prop<AddOnInstalledFrom>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -51,6 +67,8 @@ export class AddOn extends Node {
     this.showWithSession = this.prop<boolean>('show_with_session');
     this.manufacturer = this.prop<string>('manufacturer');
     this.description = this.prop<string>('description');
+    this.version = this.prop<string>('version');
+    this.installedFrom = this.prop<AddOnInstalledFrom>('installed_from');
   }
 
   /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
@@ -82,6 +100,15 @@ export interface FileEntry {
   isDirectory: boolean;
 }
 
+/** One plugin editor window open in LUNA, from {@link Gui.pluginWindows}. */
+export interface PluginWindow {
+  sessionUid: string;
+  /** The track or bus uid. */
+  channelUid: string;
+  /** The insert slot, for example `effect_0`. */
+  slot: string;
+}
+
 export interface ProgressTask {
   progress(percent: number): Promise<void>;
   done(): Promise<void>;
@@ -95,7 +122,15 @@ export class Gui extends Node {
   /** Record-arm mode of LUNA's transport bar. */
   readonly armMode: WritableProp<boolean>;
   readonly priorLaunchCount: Prop<number>;
+  /**
+   * The plugin editor windows open in LUNA, opened from the page or by the user (fact 126).
+   * `undefined` until known, and on a LUNA that does not publish them. Follows LUNA once
+   * {@link watchPluginWindows} has run, which `session.ready()` does. Read one slot's state
+   * from `effect.editorOpen`.
+   */
+  readonly pluginWindows: Prop<readonly PluginWindow[] | undefined>;
   private presence: Promise<boolean> | undefined;
+  private pluginWindowsWatch: Promise<void> | undefined;
 
   /** @internal */
   constructor(client: Client) {
@@ -111,6 +146,36 @@ export class Gui extends Node {
       set: (v) => client.store.set('/gui/transport', 'arm_mode', v),
     };
     this.priorLaunchCount = this.prop<number>('prior_launch_count');
+    const open = client.store.cell<{ session_uid?: string; channel_uid?: string; insert_type?: string }[]>('/gui/plugin_windows', 'open');
+    this.pluginWindows = derived([open], () => {
+      const list = open.value;
+      if (!Array.isArray(list)) return undefined;
+      return list.map((w) => ({ sessionUid: w.session_uid ?? '', channelUid: w.channel_uid ?? '', slot: w.insert_type ?? '' }));
+    });
+  }
+
+  /**
+   * Follow {@link pluginWindows} for the life of the connection. Idempotent; resolves once
+   * the first list is in, or at once on an engine without `/gui`. `session.ready()` calls it.
+   *
+   * @example
+   * await luna.gui.watchPluginWindows();
+   * luna.gui.pluginWindows.value; // [{ sessionUid, channelUid, slot: 'effect_0' }]
+   */
+  watchPluginWindows(): Promise<void> {
+    this.pluginWindowsWatch ??= this.available()
+      .then((has) => (has ? this.client.store.watch('/gui/plugin_windows').ready : undefined))
+      .catch(() => {
+      this.pluginWindowsWatch = undefined; // a dropped connection is not an answer
+    });
+    return this.pluginWindowsWatch;
+  }
+
+  /** True when LUNA has the editor of `slot` on `channelUid` open; `undefined` until known. */
+  isPluginOpen(channelUid: string, slot: string, sessionUid?: string): boolean | undefined {
+    const list = this.pluginWindows.value;
+    if (list === undefined) return undefined;
+    return list.some((w) => w.slot === slot && sameUid(w.channelUid, channelUid) && (sessionUid === undefined || sameUid(w.sessionUid, sessionUid)));
   }
 
   /**
@@ -174,6 +239,103 @@ export class Gui extends Node {
 
   showAddOn(id: string): Promise<unknown> {
     return this.post('show_add_on', { id });
+  }
+
+  /**
+   * Install Add Ons into LUNA, as Settings > Add Ons > MARKETPLACE does (fact 128). Give
+   * `{ id }`, a marketplace package id or the id of an Add On in one (its whole package
+   * installs), or `{ url }`: a public GitHub repo (`https://github.com/<owner>/<repo>`; the
+   * scheme, `www.`, `.git` and a path inside the repo are tolerated), whose latest release
+   * LUNA lists in the marketplace and installs every `.lunaaddon` of; or a Google Drive share
+   * link to a `.lunaaddon` (`https://drive.google.com/file/d/<id>/view?usp=sharing`), an
+   * iCloud Drive one (`https://www.icloud.com/iclouddrive/<id>#<name>`) or a Dropbox one
+   * (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=0`), which LUNA downloads
+   * and installs. The file has to be shared with anyone who has the link: LUNA does not
+   * sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
+   * replace what is installed, so the user always confirms. A url that installs and is not
+   * one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
+   * then on, to install again; {@link removeImportedAddOn} forgets it.
+   *
+   * Resolves as LUNA starts, not once installed: watch {@link addOns} for the result. A
+   * repo whose latest release has nothing LUNA can install, or a shared file that is not
+   * shared with anyone, a folder, or not an Add On, is only found out after this resolves, and LUNA tells the user. Rejects with a `Luna.Error` whose `code` is
+   * `uasrv.invalid_value` for an id no marketplace package has, a url that is not a GitHub
+   * repo or a Drive, iCloud Drive or Dropbox file link, or both given; `uasrv.missing_field` for neither; `uasrv.too_many_requests` while
+   * that package is already installing. A LUNA without the command (an older one, or one
+   * without its Add On marketplace) rejects with `Luna.Unsupported`.
+   *
+   * @example
+   * await luna.gui.installAddOn({ url: 'https://github.com/uaudio-labs/video-window' });
+   * await luna.gui.installAddOn({ url: 'https://drive.google.com/file/d/<id>/view?usp=sharing' });
+   * await luna.gui.installAddOn({ url: 'https://www.icloud.com/iclouddrive/<id>#my-add-on' });
+   * await luna.gui.installAddOn({ url: 'https://www.dropbox.com/scl/fi/<id>/my-add-on.lunaaddon?rlkey=<key>&dl=0' });
+   * await luna.gui.installAddOn({ id: 'uaudio-labs.midi-notation' });
+   */
+  async installAddOn(from: { id: string } | { url: string }): Promise<void> {
+    await this.post('install_add_on', from).catch(olderLuna('installAddOn', 'install_add_on'));
+  }
+
+  /**
+   * Forget a link {@link installAddOn} (or LUNA's IMPORT URL) saved, as Remove from
+   * Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
+   * `/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
+   * marketplace now and at the next launch; the installed Add On is not touched. Rejects with
+   * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
+   * has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
+   * `uasrv.missing_field` with no id. A LUNA without the command rejects with
+   * `Luna.Unsupported`.
+   *
+   * @example
+   * await luna.gui.removeImportedAddOn('com.uaudio.qwerty_midi');
+   */
+  async removeImportedAddOn(id: string): Promise<void> {
+    await this.post('remove_imported_add_on', { id }).catch(olderLuna('removeImportedAddOn', 'remove_imported_add_on'));
+  }
+
+  /**
+   * Ask the user to remove an installed Add On (fact 130). LUNA shows its own prompt ("Remove
+   * "Video Window"?"), so a page can never remove one silently. If the user agrees, LUNA closes
+   * the Add On wherever it shows, deletes its folder in the Add Ons folder (with every other
+   * Add On installed in that folder, which the prompt names) and rescans, so it leaves
+   * {@link addOns}. An Add On installed with `ua-builder install` on macOS is a symlink: LUNA
+   * removes only the link, never your project.
+   *
+   * Resolves as the prompt opens, not once removed: watch {@link addOns} for the result (it
+   * stays there if the user cancels). Rejects with a `Luna.Error` whose `code` is
+   * `uasrv.invalid_value` for an id not in {@link addOns}, `uasrv.not_permitted` for an Add On
+   * built into LUNA, `uasrv.too_many_requests` while LUNA is already asking, and
+   * `uasrv.missing_field` with no id. A LUNA without the command rejects with
+   * `Luna.Unsupported`.
+   *
+   * @example
+   * await luna.gui.uninstallAddOn('com.uaudio.video_window');
+   */
+  async uninstallAddOn(id: string): Promise<void> {
+    await this.post('uninstall_add_on', { id }).catch(olderLuna('uninstallAddOn', 'uninstall_add_on'));
+  }
+
+  /**
+   * Open the editor window of the plugin in `slot` on a track or bus, as clicking it in
+   * LUNA's mixer does (or bring it to the front). LUNA answers before the window opens, and
+   * an empty slot opens nothing: `effect.openEditor()` waits for the window and says so.
+   * `sessionUid` defaults to the session in LUNA's window. A LUNA without the command
+   * rejects with `Luna.Unsupported`.
+   *
+   * @example
+   * await luna.gui.showPlugin(track.id, 'effect_0');
+   */
+  showPlugin(channelUid: string, slot: string, options: { sessionUid?: string } = {}): Promise<unknown> {
+    return this.post('show_plugin', pluginPayload(channelUid, slot, options.sessionUid)).catch(olderLuna('showPlugin', 'show_plugin'));
+  }
+
+  /**
+   * Close the editor window of the plugin in `slot`, if it is open. See {@link showPlugin}.
+   *
+   * @example
+   * await luna.gui.hidePlugin(track.id, 'effect_0');
+   */
+  hidePlugin(channelUid: string, slot: string, options: { sessionUid?: string } = {}): Promise<unknown> {
+    return this.post('hide_plugin', pluginPayload(channelUid, slot, options.sessionUid)).catch(olderLuna('hidePlugin', 'hide_plugin'));
   }
 
   /** Run a LUNA rack command by id with extra fields as its data. Escape hatch. */
@@ -260,7 +422,7 @@ export class Gui extends Node {
   /**
    * The URL your Add On's page loads a local audio or video file from, given its absolute
    * `path` (from {@link chooseFiles}, `Luna.onPathDrop()`, or a path you saved, say in
-   * `session.preferences`). Set it as a `<video>` or `<audio>` `src`, or read the bytes with
+   * `session.storage`). Set it as a `<video>` or `<audio>` `src`, or read the bytes with
    * XMLHttpRequest (fact 114). This is how a page plays or reads a file it knows only by path.
    *
    * `addOnId` is your manifest's `id`: the file is served to that Add On's pages only. On
@@ -270,10 +432,11 @@ export class Gui extends Node {
    * after every reload: LUNA forgets the files it served when it quits.
    *
    * Only real media is served. LUNA follows links and checks the file they lead to: it needs
-   * an audio or video extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`, `aiff`,
-   * `mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`) and that format's signature in its first
-   * bytes. Rejects with a `Luna.Error` whose `code` is `uasrv.invalid_value` for a relative
-   * path, a folder, or a file that is not audio or video; `uasrv.filesystem_error` when
+   * an audio, video or MIDI extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`,
+   * `aiff`, `mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`, `mid`, `midi`) and that format's
+   * signature in its first bytes (`MThd` for a Standard MIDI File). Rejects with a
+   * `Luna.Error` whose `code` is `uasrv.invalid_value` for a relative path, a folder, or a
+   * file that is not audio, video or MIDI; `uasrv.filesystem_error` when
    * nothing is at `path` (a session opened on another computer, a file moved) or it cannot
    * be read; `uasrv.not_installed` when `addOnId` names no installed Add On with a local
    * page. A LUNA without the command rejects with `Luna.Unsupported`.
@@ -361,6 +524,17 @@ function olderLuna(method: string, command: string): (err: unknown) => never {
     }
     throw err;
   };
+}
+
+function pluginPayload(channelUid: string, slot: string, sessionUid: string | undefined): Record<string, unknown> {
+  const payload: Record<string, unknown> = { channel_uid: channelUid, insert_type: slot };
+  if (sessionUid !== undefined) payload['session_uid'] = sessionUid;
+  return payload;
+}
+
+/** LUNA writes uids without dashes in `/gui/plugin_windows`; compare them in one form. */
+function sameUid(a: string, b: string): boolean {
+  return a.replaceAll('-', '').toLowerCase() === b.replaceAll('-', '').toLowerCase();
 }
 
 function randomUid(): string {

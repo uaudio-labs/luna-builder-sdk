@@ -90,8 +90,8 @@ describe('Luna.Effect and Luna.Plugins', () => {
     engine.addPreset('com.uaudio.uadx.1176', 'Vocal Smash', { uid: 'p_smash', favorite: true });
     const rows = await luna.presets.query({ pluginId: 'com.uaudio.uadx.1176' });
     expect(rows).toEqual([
-      { uid: 'p_abi', name: 'All Buttons In', version: 1, favorite: false, factory: true, path: '' },
-      { uid: 'p_smash', name: 'Vocal Smash', version: 1, favorite: true, factory: false, path: '' },
+      { uid: 'p_abi', name: 'All Buttons In', version: 1, favorite: false, factory: true, path: '/Mock/factory_presets/com.uaudio.uadx.1176' },
+      { uid: 'p_smash', name: 'Vocal Smash', version: 1, favorite: true, factory: false, path: '/Mock/Presets/Plug-Ins/com.uaudio.uadx.1176' },
     ]);
     expect(await luna.presets.query({ pluginId: 'com.uaudio.uadx.1176', search: 'smash' })).toHaveLength(1);
     expect((await luna.presets.find('com.uaudio.uadx.1176', 'vocal smash'))?.uid).toBe('p_smash');
@@ -131,6 +131,42 @@ describe('Luna.Effect and Luna.Plugins', () => {
     const from = engine.requests.length;
     await input.normalized.set(0.25);
     expect(engine.requests.slice(from).map((r) => `${r.verb} ${r.path.slice(slot.path.length)}`)).toEqual(['post /controls/input/set_touch', 'set /controls/input/normalized_value', 'post /controls/input/set_touch']);
+  });
+
+  it('asks LUNA which plugins a slot takes, with search, categories and favorites (fact 127)', async () => {
+    const { engine, luna, session } = await connected();
+    engine.addPlugin('uaudio_shape', { name: 'Shape', manufacturer: 'Universal Audio', effectType: 'instrument' });
+    engine.addPlugin('uaudio_maximizer', { name: 'Precision Maximizer', manufacturer: 'Universal Audio', categories: ['Compressors & Limiters'], formats: [['stereo', 'stereo']], favorite: true });
+    engine.addPlugin('uaudio_expansion', { name: 'Shape Expansion', effectType: 'content_expansion' });
+    await engine.settled();
+
+    // No slot: what LUNA's browser lists with nothing focused, sorted by name.
+    const all = await luna.plugins.query();
+    expect(all.map((p) => p.pluginId)).toEqual(['com.appl.au.aufx_bpas', 'uaudio_maximizer', 'uaudio_shape', 'com.uaudio.uadx.1176']);
+    expect(all[1]).toEqual({ pluginId: 'uaudio_maximizer', name: 'Precision Maximizer', manufacturer: 'Universal Audio', categories: ['Compressors & Limiters'], favorite: true });
+
+    const vocal = session.tracks.byId('Vocal')!; // mono
+    await vocal.effects.load();
+    expect((await luna.plugins.query({ insertType: 'instrument' })).map((p) => p.pluginId)).toEqual(['uaudio_shape']);
+    expect(await luna.plugins.query({ insertType: 'reserved_0' })).toEqual([]);
+    const effects = await vocal.effects.byId('effect_0')!.validPlugins();
+    expect(effects.map((p) => p.pluginId)).toEqual(['com.appl.au.aufx_bpas', 'com.uaudio.uadx.1176']); // the stereo-only maximizer is left out
+    expect(engine.requests.at(-1)).toMatchObject({ path: '/plugins/query', data: { insert_type: 'effect_0', session_uid: 'abc', channel_uid: 'Vocal' } });
+
+    const stereo = await luna.plugins.query({ insertType: 'effect_0', sessionUid: 'abc', channelUid: 'master_abc' });
+    expect(stereo.map((p) => p.pluginId)).toContain('uaudio_maximizer');
+
+    expect((await luna.plugins.query({ search: 'universal' })).map((p) => p.pluginId)).toEqual(['uaudio_maximizer', 'uaudio_shape', 'com.uaudio.uadx.1176']);
+    expect((await luna.plugins.query({ categories: ['Equalization'] })).map((p) => p.pluginId)).toEqual(['com.appl.au.aufx_bpas']);
+    expect((await luna.plugins.query({ favoritesOnly: true })).map((p) => p.pluginId)).toEqual(['uaudio_maximizer']);
+    expect(engine.requests.at(-1)).toMatchObject({ data: { favorite: true } });
+    await expect(luna.plugins.query({ insertType: 'nonsense' })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+  });
+
+  it('reports a LUNA without /plugins/query as Luna.Unsupported', async () => {
+    const { engine, luna } = await connected();
+    engine.fail('/plugins/query', 'uasrv.invalid_object');
+    await expect(luna.plugins.query()).rejects.toBeInstanceOf(Luna.Unsupported);
   });
 });
 
@@ -480,6 +516,8 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.manufacturer.value).toBe('Example Co');
     expect(luna.gui.addOns.items[0]!.description.value).toBe('A demo Add On.');
+    expect(luna.gui.addOns.items[0]!.version.value).toBe('1.0.0');
+    expect(luna.gui.addOns.items[0]!.installedFrom.value).toBe('folder');
     expect(luna.gui.main.page.value).toBe('timeline');
     const w = luna.gui.main.watch(); // outside a session: subscribe explicitly to follow pushes
     await w.ready;
@@ -589,6 +627,99 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(engine.mediaServed).toEqual([]);
   });
 
+  it('installs Add Ons by marketplace id or GitHub repo URL (fact 128)', async () => {
+    const { engine, luna } = await connected();
+    engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
+    await luna.gui.installAddOn({ id: 'uaudio-labs.midi-notation' });
+    // An Add On's id installs its package, matched without case.
+    await luna.gui.installAddOn({ id: 'COM.UAUDIO.Score-View' });
+    await luna.gui.installAddOn({ url: 'github.com/uaudio-labs/Video-Window.git' });
+    await luna.gui.installAddOn({ url: 'https://www.github.com/uaudio-labs/video-window/releases/tag/0.1.1?x=1' });
+    // A Drive share link is downloaded from its direct link, keeping its resourcekey.
+    await luna.gui.installAddOn({ url: 'https://drive.google.com/file/d/1QFSOyxrPC6thx3kYgSggBTcyHJCjIaEu/view?usp=sharing' });
+    await luna.gui.installAddOn({ url: 'drive.google.com/open?id=1QFSOyxrPC6thx3kYgSggBTcyHJCjIaEu&resourcekey=0-abc' });
+    // An iCloud Drive share is named by its short GUID; the name after # is only a label.
+    await luna.gui.installAddOn({ url: 'https://www.icloud.com/iclouddrive/076FaevAR0a2KAthHx_Bfv4-A#qwerty-midi-keyboard' });
+    // A Dropbox link is downloaded with dl=1, keeping its rlkey and dropping the rest.
+    await luna.gui.installAddOn({ url: 'https://www.dropbox.com/scl/fi/5vs12quvmxdhdm65htp0q/qwerty-midi-keyboard.lunaaddon?rlkey=z045urvstr9rw6exdmduiq0g5&st=zbwjeard&dl=0' });
+    expect(engine.addOnInstalls).toEqual([
+      { id: 'uaudio-labs.midi-notation' },
+      { id: 'uaudio-labs.midi-notation' },
+      { url: 'https://github.com/uaudio-labs/Video-Window' },
+      { url: 'https://github.com/uaudio-labs/video-window' },
+      { url: 'https://drive.usercontent.google.com/download?id=1QFSOyxrPC6thx3kYgSggBTcyHJCjIaEu&export=download&confirm=t' },
+      { url: 'https://drive.usercontent.google.com/download?id=1QFSOyxrPC6thx3kYgSggBTcyHJCjIaEu&export=download&confirm=t&resourcekey=0-abc' },
+      { url: 'https://www.icloud.com/iclouddrive/076FaevAR0a2KAthHx_Bfv4-A' },
+      { url: 'https://www.dropbox.com/scl/fi/5vs12quvmxdhdm65htp0q/qwerty-midi-keyboard.lunaaddon?rlkey=z045urvstr9rw6exdmduiq0g5&dl=1' },
+    ]);
+  });
+
+  it('rejects installAddOn with the engine codes LUNA answers (fact 128)', async () => {
+    const { engine, luna } = await connected();
+    engine.marketplace['uaudio-labs.video-window'] = ['com.uaudio.video-window'];
+    engine.installingPackages = ['uaudio-labs.video-window'];
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.installAddOn({ id: 'com.uaudio.not-listed' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ id: 'com.uaudio.video-window' }))).toBe('uasrv.too_many_requests');
+    expect(await code(luna.gui.installAddOn({ url: 'https://example.com/uaudio-labs/video-window' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://github.com.evil.com/a/b' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://github.com/uaudio-labs' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://github.com/uaudio-labs/..' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://drive.google.com/drive/folders/1QFSOyxrPC6thx3kYgSggBTcyHJCjIaEu' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://drive.google.com.evil.com/file/d/abc/view' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://www.icloud.com/photos/076FaevAR0a2KAthHx_Bfv4-A' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://www.icloud.com/iclouddrive/#name' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://www.dropbox.com/scl/fo/5vs12quvmxdhdm65htp0q/h?rlkey=z045urvstr9rw6exdmduiq0g5' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://www.dropbox.com/scl/fi/5vs12quvmxdhdm65htp0q/a.lunaaddon?dl=0' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ url: 'https://www.dropbox.com/s/abc123/a%2F..%2Fb.lunaaddon' }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({ id: 'uaudio-labs.video-window', url: 'https://github.com/a/b' } as unknown as { id: string }))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.installAddOn({} as { id: string }))).toBe('uasrv.missing_field');
+    expect(engine.addOnInstalls).toEqual([]);
+  });
+
+  it('removes an imported Add On from the marketplace by package or Add On id (fact 128)', async () => {
+    const { engine, luna } = await connected();
+    engine.marketplace['uaudio-labs.video-window'] = ['com.uaudio.video-window'];
+    engine.marketplace['com.uaudio.qwerty_midi'] = ['com.uaudio.qwerty_midi'];
+    engine.marketplace['com.example.pair'] = ['com.example.pair', 'com.example.pair-viewer'];
+    engine.importedPackages = ['com.uaudio.qwerty_midi', 'com.example.pair'];
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.removeImportedAddOn('uaudio-labs.video-window'))).toBe('uasrv.not_permitted');
+    expect(await code(luna.gui.removeImportedAddOn('com.example.nothing'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.removeImportedAddOn(undefined as unknown as string))).toBe('uasrv.missing_field');
+    await luna.gui.removeImportedAddOn('COM.UAUDIO.QWERTY_MIDI');
+    await luna.gui.removeImportedAddOn('com.example.pair-viewer');
+    expect(engine.importedPackages).toEqual([]);
+    expect(Object.keys(engine.marketplace)).toEqual(['uaudio-labs.video-window']);
+    engine.fail('/gui/remove_imported_add_on', 'uasrv.invalid_object');
+    await expect(luna.gui.removeImportedAddOn('x')).rejects.toBeInstanceOf(Luna.Unsupported);
+  });
+
+  it('asks to uninstall an Add On by id, refusing one built into LUNA (fact 130)', async () => {
+    const { engine, luna } = await connected();
+    engine.addNode('/gui/add_ons/com.example.builtin', { properties: { id: 'com.example.builtin', name: 'Built In', target: 'app' } });
+    engine.builtInAddOns = ['com.example.builtin'];
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.uninstallAddOn('com.example.builtin'))).toBe('uasrv.not_permitted');
+    expect(await code(luna.gui.uninstallAddOn('com.example.nothing'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.uninstallAddOn(undefined as unknown as string))).toBe('uasrv.missing_field');
+    engine.uninstallAnswer = 'cancel';
+    await luna.gui.uninstallAddOn('com.example.demo');
+    expect(engine.has('/gui/add_ons/com.example.demo')).toBe(true);
+    engine.uninstallAnswer = 'remove';
+    await luna.gui.uninstallAddOn('COM.EXAMPLE.DEMO');
+    expect(engine.has('/gui/add_ons/com.example.demo')).toBe(false);
+    expect(engine.addOnUninstalls).toEqual(['com.example.demo', 'com.example.demo']);
+    engine.fail('/gui/uninstall_add_on', 'uasrv.invalid_object');
+    await expect(luna.gui.uninstallAddOn('x')).rejects.toBeInstanceOf(Luna.Unsupported);
+  });
+
+  it('reports a LUNA without install_add_on as Luna.Unsupported', async () => {
+    const { engine, luna } = await connected();
+    engine.fail('/gui/install_add_on', 'uasrv.invalid_object');
+    await expect(luna.gui.installAddOn({ url: 'https://github.com/a/b' })).rejects.toBeInstanceOf(Luna.Unsupported);
+  });
+
   it('reports a LUNA without serve_media_file as Luna.Unsupported', async () => {
     const { engine, luna } = await connected();
     engine.fail('/gui/serve_media_file', 'uasrv.invalid_object');
@@ -608,6 +739,77 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     const headless = new Luna.MockEngine({ gui: false });
     const bare = await Luna.connect({ port_: headless.port() });
     await expect(bare.gui.listFiles('/Samples')).rejects.toBeInstanceOf(Luna.Unsupported);
+    await bare.close();
+  });
+
+  it('opens and closes a plugin editor and follows editors opened in LUNA (fact 126)', async () => {
+    const { engine, luna, session } = await connected();
+    await session.ready();
+    const track = session.tracks.byId('Vocal')!;
+    const slot = (await track.insert('com.uaudio.uadx.1176'))!;
+    await engine.settled();
+    expect(slot.editorOpen.value).toBe(false);
+    expect(luna.gui.pluginWindows.value).toEqual([]);
+
+    await slot.openEditor();
+    expect(slot.editorOpen.value).toBe(true);
+    expect(engine.requests.find((r) => r.path === '/gui/show_plugin')?.data).toEqual({ session_uid: 'abc', channel_uid: 'Vocal', insert_type: 'effect_0' });
+    expect(luna.gui.pluginWindows.value).toEqual([{ sessionUid: 'abc', channelUid: 'Vocal', slot: 'effect_0' }]);
+    await slot.openEditor(); // already open: brought to front, still one window
+    expect(luna.gui.pluginWindows.value).toHaveLength(1);
+
+    await slot.closeEditor();
+    expect(slot.editorOpen.value).toBe(false);
+    expect(engine.requests.find((r) => r.path === '/gui/hide_plugin')?.data).toEqual({ session_uid: 'abc', channel_uid: 'Vocal', insert_type: 'effect_0' });
+
+    // The user opens it from LUNA's mixer: the page sees it without asking.
+    const seen: (boolean | undefined)[] = [];
+    slot.editorOpen.onChange(() => seen.push(slot.editorOpen.value));
+    engine.setValue('/gui/plugin_windows', 'open', [{ session_uid: 'abc', channel_uid: 'Vocal', insert_type: 'effect_0' }]);
+    await engine.settled();
+    await luna.settled();
+    expect(slot.editorOpen.value).toBe(true);
+    expect(seen).toEqual([true]);
+    expect(luna.gui.isPluginOpen('Vocal', 'effect_0')).toBe(true);
+    expect(luna.gui.isPluginOpen('Vocal', 'effect_1')).toBe(false);
+  });
+
+  it('rejects openEditor on an empty slot and when LUNA opens nothing (fact 126)', async () => {
+    const { engine, luna, session } = await connected();
+    await session.ready();
+    const track = session.tracks.byId('Vocal')!;
+    await track.effects.load();
+    const empty = track.effects.byId('effect_1')!;
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(empty.openEditor())).toBe('empty_slot');
+    expect(engine.requests.some((r) => r.path === '/gui/show_plugin')).toBe(false);
+
+    // LUNA answers show_plugin without opening anything; the page is told, not left waiting.
+    const slot = (await track.insert('com.uaudio.uadx.1176'))!;
+    engine.overrideCommand('/gui/show_plugin', () => null);
+    expect(await code(slot.openEditor({ timeoutMs: 200 }))).toBe('no_effect');
+    expect(await code(slot.openEditor({ wait: false }))).toBe('resolved');
+    expect(slot.editorOpen.value).toBe(false);
+  });
+
+  it('validates show_plugin as LUNA does and reports an older LUNA as Luna.Unsupported (fact 126)', async () => {
+    const { engine, luna } = await connected();
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.showPlugin('Vocal', 'clip_effect_0'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.hidePlugin('Vocal', 'nonsense'))).toBe('uasrv.invalid_value');
+    engine.fail('/gui/show_plugin', 'uasrv.invalid_object');
+    await expect(luna.gui.showPlugin('Vocal', 'effect_0')).rejects.toBeInstanceOf(Luna.Unsupported);
+
+    const headless = new Luna.MockEngine({ gui: false });
+    headless.addSession('abc', { tracks: ['Vocal'] });
+    await headless.settled();
+    const bare = await Luna.connect({ port_: headless.port() });
+    const session = await bare.session();
+    await session.ready();
+    await session.tracks.byId('Vocal')!.effects.load();
+    // No /gui: nothing to report, and nothing to open.
+    expect(session.tracks.byId('Vocal')!.effects.byId('effect_0')!.editorOpen.value).toBe(undefined);
+    await expect(bare.gui.hidePlugin('Vocal', 'effect_0')).rejects.toBeInstanceOf(Luna.Unsupported);
     await bare.close();
   });
 

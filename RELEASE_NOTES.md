@@ -3,6 +3,15 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## Unreleased
+
+- **Breaking:** `session.preferences` is now `session.storage`, with records and fields in
+  place of preferences and properties (`context.records`; `add`/`set`/`remove`/`value(record,
+  field, ...)`); rename your calls, needs a LUNA with session storage, and existing sessions
+  keep their data (see `CHANGELOG.md` for the full table and upgrade steps).
+- A session storage `set` of a value with `undefined` keys resolves at once instead of
+  waiting 4 s and rejecting with `no_effect`.
+
 ## 0.2.1 — 2026-10-22
 
 - `luna.gui.listFiles` now lists only folders the user picked with `chooseFolders()` or dropped

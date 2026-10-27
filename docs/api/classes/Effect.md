@@ -12,6 +12,7 @@
 | <a id="bypasscontrolactivelow"></a> `bypassControlActiveLow` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `null`\> | - | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="controls"></a> `controls` | `readonly` | [`Controls`](Controls.md) | Every child of the slot's `controls` folder, including parameters a cleared plugin left behind (fact 86). Prefer [params](#params). | - |
+| <a id="editoropen"></a> `editorOpen` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `undefined`\> | True while LUNA has this plugin's editor window open, whoever opened it (fact 126). `undefined` until known and on a LUNA that does not report editor windows. Follows LUNA after `session.ready()`. | - |
 | <a id="enabled"></a> `enabled` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | Reported by the engine; not the bypass state. See [in](#in). | - |
 | <a id="frozen"></a> `frozen` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="in"></a> `in` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `undefined`\> | IN (true) or bypassed (false); `undefined` until known or when the plugin has no bypass control. | - |
@@ -159,6 +160,35 @@ Remove the plugin from this slot.
 
 ***
 
+### closeEditor()
+
+```ts
+closeEditor(options): Promise<void>;
+```
+
+Close this plugin's editor window in LUNA, if it is open. Resolves once
+[editorOpen](#editoropen) is false; see [openEditor](#openeditor).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `timeoutMs?`: `number`; `wait?`: `boolean`; \} |
+| `options.timeoutMs?` | `number` |
+| `options.wait?` | `boolean` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+if (slot.editorOpen.value) await slot.closeEditor();
+```
+
+***
+
 ### command()
 
 ```ts
@@ -287,6 +317,40 @@ track.onDispose(() => row.remove());
 #### Inherited from
 
 [`Node`](Node.md).[`onDispose`](Node.md#ondispose)
+
+***
+
+### openEditor()
+
+```ts
+openEditor(options): Promise<void>;
+```
+
+Open this plugin's editor window in LUNA, as clicking it in LUNA's mixer does, or bring
+it to the front. Resolves once [editorOpen](#editoropen) shows it; LUNA's reply alone proves
+nothing, as an empty slot or a plugin LUNA will not show opens nothing (fact 126). That
+rejects with code `no_effect`; an empty slot rejects at once with `empty_slot`. Pass
+`wait: false` to resolve on the reply alone. Needs `/gui`: a headless engine or an older
+LUNA rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `timeoutMs?`: `number`; `wait?`: `boolean`; \} |
+| `options.timeoutMs?` | `number` |
+| `options.wait?` | `boolean` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+nameLabel.onclick = () => slot.openEditor();
+slot.editorOpen.onChange(() => nameLabel.classList.toggle('open', slot.editorOpen.value === true));
+```
 
 ***
 
@@ -424,6 +488,36 @@ await slot.setPlugin('com.uaudio.uadx.1176');
 slot.loaded.value; // true
 const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
 await slot.setPlugin('uaudio_qi', { presetName: preset?.name, presetUid: preset?.uid });
+```
+
+***
+
+### validPlugins()
+
+```ts
+validPlugins(options): Promise<PluginRow[]>;
+```
+
+The installed plugins LUNA would put in this slot, sorted by name: what LUNA's plugins
+browser offers here (fact 127). An instrument slot lists instruments, an effect slot
+effects that run in this channel's format. Narrow with search text, categories and
+favorites. A LUNA without the query rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | `Omit`\<[`PluginQueryOptions`](../interfaces/PluginQueryOptions.md), `"insertType"` \| `"sessionUid"` \| `"channelUid"`\> |
+
+#### Returns
+
+`Promise`\<[`PluginRow`](../interfaces/PluginRow.md)[]\>
+
+#### Example
+
+```ts
+const choices = await slot.validPlugins({ search: 'comp', categories: ['Compressors & Limiters'] });
+await slot.setPlugin(choices[0].pluginId);
 ```
 
 ***
