@@ -18,7 +18,7 @@ the engine does something the docs do not say. Use PROTOCOL only for the raw esc
 - [Files](FILES.md): getting a user's file into an Add On. File route (`<input type="file">`, HTML drop, `uploadFile`) vs path route (`chooseFiles`, `onPathDrop`, `importPath`); never mix them. `luna.gui.serveMediaFile(addOnId, path)` turns an audio or video path into a URL the page plays.
 - [Clips](CLIPS.md): drawing and editing clips, waveforms, MIDI notes, fades and crossfades as LUNA does. Read it before any timeline or clip-editing code: compiled clips (not raw clips), per-piece renderings, moving and crossfading overlapping clips, selection, an interactive editor, testing.
 - [Recipes](RECIPES.md): thirteen Add Ons to ask an agent for, and the SDK each one leans on.
-- [Manifest](MANIFEST.md): `manifest.json` fields (`target`, `floating`, `show_with_session`, ...), Add Ons folder, how LUNA loads a page, secrets (`luna.secrets`).
+- [Manifest](MANIFEST.md): `manifest.json` fields (`target`, `floating`, `show_with_session`, `fixed_size`, `run_hidden`, ...), Add Ons folder, how LUNA loads a page, secrets (`luna.secrets`).
 - [Protocol](PROTOCOL.md): verbs, paths, correlation, pushes, error codes, where things live.
 - [Evidence](EVIDENCE.md): numbered measured facts about engine behaviour; cite as "fact N".
 - [Tree snapshot](tree/luna-3.0.0.15776.json): the shape of the nodes the SDK builds on, for one LUNA build. `ua-builder tree <path>` prints any node's shape; `ua-builder tree --out file.json` snapshots the running build.

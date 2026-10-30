@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { addOnsFolder, bundlePath, ensureExecutable, sdkVersion, type Args } from './util';
+import { addOnsFolder, bundlePath, canWriteFolder, ensureExecutable, isAddOnsFolderReady, sdkVersion, type Args } from './util';
 
 function probe(port: number, host = '127.0.0.1', timeoutMs = 800): Promise<boolean> {
   return new Promise((resolve) => {
@@ -54,14 +54,25 @@ export async function doctor(_args: Args): Promise<number> {
   rows.push(['LUNA engine :4718', luna ? 'listening' : 'not listening (is LUNA running?)']);
   try {
     const folder = addOnsFolder();
+    const setup = process.platform === 'win32'
+      ? ' `ua-builder install` or LUNA sets it up for every user, asking once for administrator approval'
+      : ' `ua-builder install` sets it up for every user, asking once for an administrator password';
+    const canSetUp = (process.platform === 'darwin' || process.platform === 'win32') && !process.env['UA_ADDONS_FOLDER'];
+    // A Windows folder made here would be this user's alone (see isAddOnsFolderReady()).
+    const shared = process.platform === 'win32' && !process.env['UA_ADDONS_FOLDER'];
     let note = '';
     if (!existsSync(folder)) {
       try {
+        if (shared) throw new Error('not created without the setup');
         mkdirSync(folder, { recursive: true });
         note = ' (created)';
       } catch {
-        note = process.platform === 'darwin' ? ` (could not create it; run: sudo mkdir -p "${folder}")` : ' (could not create it)';
+        note = canSetUp ? ` (missing;${setup})` : ' (could not create it)';
       }
+    } else if (!canWriteFolder(folder)) {
+      note = canSetUp ? ` (not writable;${setup})` : ' (not writable)';
+    } else if (!isAddOnsFolderReady(folder)) {
+      note = ` (writable by you only, not set up for every user;${setup})`;
     }
     rows.push(['Add Ons folder', `${folder}${note}`]);
   } catch (e) {

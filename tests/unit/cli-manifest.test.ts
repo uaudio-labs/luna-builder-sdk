@@ -130,6 +130,20 @@ describe('readManifest', () => {
     expect(() => readManifest(addOn({ show_with_session: 'true' }))).toThrow(/"show_with_session" must be true or false/);
   });
 
+  it('accepts run_hidden true, false, or absent on any target, and rejects a non-boolean', () => {
+    expect(readManifest(addOn({ run_hidden: true })).entries[0]!.run_hidden).toBe(true);
+    expect(readManifest(addOn({ run_hidden: false })).entries[0]!.run_hidden).toBe(false);
+    expect(readManifest(addOn({})).entries[0]!.run_hidden).toBeUndefined();
+    expect(() => readManifest(addOn({ run_hidden: 'yes' }))).toThrow(/"run_hidden" must be true or false/);
+  });
+
+  it('accepts fixed_size true, false, or absent, and rejects a non-boolean', () => {
+    expect(readManifest(addOn({ fixed_size: true })).entries[0]!.fixed_size).toBe(true);
+    expect(readManifest(addOn({ fixed_size: false })).entries[0]!.fixed_size).toBe(false);
+    expect(readManifest(addOn({})).entries[0]!.fixed_size).toBeUndefined();
+    expect(() => readManifest(addOn({ fixed_size: 1 }))).toThrow(/"fixed_size" must be true or false/);
+  });
+
   it('requires width and height only for a window, which a missing target means', () => {
     for (const target of ['app', 'page', 'browser', 'editor']) {
       expect(readManifest(addOn({ target }, ['width', 'height'])).entries[0]!.width).toBeUndefined();

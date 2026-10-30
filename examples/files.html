@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LUNA · File routes</title>
+<title>LUNA · Files</title>
 <style>
   :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
   body { max-width: 1050px; margin: 32px auto; padding: 0 24px; }
@@ -20,14 +20,76 @@
   #env { font: 13px ui-monospace, monospace; color: #acb9c8; white-space: pre-wrap; }
   #log { width: 100%; height: 260px; font: 12px ui-monospace, monospace; background: #0f1216; color: #e4eaf1; border: 1px solid #343d48; border-radius: 8px; padding: 8px; box-sizing: border-box; }
   progress { width: 200px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 1px solid #343d48; }
+  .tabs button { margin: 0; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: none; color: #acb9c8; cursor: pointer; }
+  .tabs button[aria-selected=true] { border-color: #343d48; background: #1b2026; color: #e4eaf1; margin-bottom: -1px; }
+  [role=tabpanel] { padding-top: 10px; }
+  [role=tabpanel][hidden] { display: none; }
+
+  /* Folders: a Finder-style window */
+  .finder { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: auto 1fr auto; height: 540px; margin-top: 14px; border: 1px solid #343d48; border-radius: 10px; overflow: hidden; background: #181c22; }
+  .finder .toolbar { grid-column: 1 / 3; display: flex; align-items: center; gap: 6px; padding: 7px 10px; background: #20262d; border-bottom: 1px solid #343d48; }
+  .finder .toolbar button { margin: 0; padding: 4px 10px; }
+  .finder .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; font-size: 13px; color: #acb9c8; }
+  .finder .crumbs button { padding: 2px 6px; background: none; border: 0; color: #e4eaf1; cursor: pointer; border-radius: 5px; }
+  .finder .crumbs button:hover { background: #2a313a; }
+  .finder .crumbs button:disabled { color: #8fa1b5; cursor: default; background: none; opacity: 1; }
+  .finder aside { overflow-y: auto; padding: 8px 6px; background: #1b2026; border-right: 1px solid #343d48; font-size: 14px; }
+  .finder aside h3 { margin: 4px 8px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #8fa1b5; }
+  .finder aside ul { list-style: none; margin: 0; padding: 0; }
+  .finder aside li { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+  .finder aside li:hover { background: #262d36; }
+  .finder aside li.current { background: #2f4a66; }
+  .finder aside li.missing { color: #8fa1b5; }
+  .finder aside li .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .finder aside li .flag { font-size: 11px; color: #f08c74; }
+  .finder aside li .remove { flex: none; width: auto; margin: 0; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: #8fa1b5; font-size: 13px; line-height: 1.5; cursor: pointer; visibility: hidden; }
+  .finder aside li:hover .remove, .finder aside li:focus-within .remove, .finder aside li.missing .remove, .finder aside li .remove.confirm { visibility: visible; }
+  .finder aside li .remove:hover { background: #3a434e; color: #e4eaf1; }
+  .finder aside li .remove.confirm { background: #8a3b2c; color: #fff; }
+  .finder aside li .twisty { width: 1em; flex: none; text-align: center; color: #8fa1b5; cursor: pointer; }
+  .finder tbody tr.dir { cursor: pointer; }
+  .finder tbody tr.dir:hover { background: #262d36; }
+  .finder td .chevron { color: #8fa1b5; font-size: 16px; }
+  .finder aside .none { padding: 5px 8px; color: #8fa1b5; font-size: 13px; }
+  .finder aside #fAdd { width: calc(100% - 16px); margin: 8px; padding: 5px 8px; font-size: 13px; }
+  .finder .pane { position: relative; overflow-y: auto; }
+  .finder table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .finder th { position: sticky; top: 0; text-align: left; font-weight: 500; font-size: 12px; color: #8fa1b5; padding: 6px 10px; background: #181c22; border-bottom: 1px solid #343d48; }
+  .finder td { padding: 5px 10px; white-space: nowrap; }
+  .finder tbody tr:nth-child(even) { background: #1c2128; }
+  .finder tbody tr { cursor: default; user-select: none; }
+  .finder tbody tr.selected { background: #2f4a66; }
+  .finder tbody tr[draggable=true] { cursor: grab; }
+  .finder td.name { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .finder td.name .icon { display: inline-block; width: 1.5em; }
+  .finder td.kind { color: #acb9c8; }
+  .finder td button { margin: 0; padding: 2px 9px; font-size: 12px; }
+  .finder .notice { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 30px; text-align: center; color: #acb9c8; }
+  /* display: flex above would override the hidden attribute, leaving an invisible layer over the list that takes every click. */
+  .finder .notice[hidden] { display: none; }
+  .finder .notice b { color: #e4eaf1; font-size: 16px; }
+  .finder .notice .big { font-size: 40px; }
+  .finder .notice.error b { color: #f08c74; }
+  .finder footer { grid-column: 1 / 3; padding: 5px 12px; font-size: 12px; color: #8fa1b5; background: #20262d; border-top: 1px solid #343d48; display: flex; gap: 12px; }
+  .finder footer #fMessage { flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .finder footer #fMessage.error { color: #f08c74; }
 </style>
-<h1>File routes</h1>
+<h1>Files</h1>
+<p id="status" role="status">Connecting…</p>
+<div class="tabs" role="tablist">
+  <button id="tabRoutes" role="tab" aria-controls="routes" aria-selected="true">File routes</button>
+  <button id="tabFolders" role="tab" aria-controls="folders" aria-selected="false">Folders</button>
+</div>
+
+<section id="routes" role="tabpanel" aria-labelledby="tabRoutes">
 <p>A user's file reaches an Add On by one of two routes (<code>docs/FILES.md</code>). The
 <b>File route</b> gives the page <code>File</code> objects it can decode, and
 <code>session.uploadFile()</code> copies them into the session. The <b>path route</b> gives
 absolute paths the page cannot read; <code>session.importPath()</code> has the engine copy
 them. Try each panel and read the log: every event the page sees is written there.</p>
-<p id="status" role="status">Connecting…</p>
 <div id="env"></div>
 <p><label><input id="upload" type="checkbox" checked> Also add each <code>File</code> to the session with <code>uploadFile()</code></label>
   <progress id="progress" max="1" value="0"></progress></p>
@@ -62,6 +124,41 @@ them. Try each panel and read the log: every event the page sees is written ther
 <h2 style="margin-top:22px">Log</h2>
 <button id="copy">Select the log</button><button id="clear">Clear</button>
 <textarea id="log" readonly></textarea>
+</section>
+
+<section id="folders" role="tabpanel" aria-labelledby="tabFolders" hidden>
+<p>Browses the <b>blessed folders</b>, the folders you let every Add On read, like a Finder
+window. The sidebar is <code>luna.gui.blessedFolders</code>; LUNA lists them in Settings &gt;
+Add Ons &gt; FOLDERS. <b>Add Folder…</b> picks one with LUNA's dialog
+(<code>chooseFolders()</code>), which blesses it; <b>✕</b> beside a blessed folder, clicked twice,
+removes it (<code>removeBlessedFolder()</code>). Each folder is listed with
+<code>luna.gui.listFiles(path)</code>. Double-click a folder to open it, or open its triangle in
+the sidebar to see the folders inside it. <b>Import</b> copies an
+audio file into the open session (<code>session.importPath()</code>) and puts it on a new track
+at the playhead, in one undo entry; or drag it onto LUNA's timeline. A folder that was moved,
+is on a drive that is not connected, or is no longer blessed shows as not available.</p>
+<div class="finder" id="finder">
+  <div class="toolbar">
+    <button id="fBack" disabled title="Back" aria-label="Back">‹</button>
+    <button id="fForward" disabled title="Forward" aria-label="Forward">›</button>
+    <button id="fUp" disabled title="Enclosing folder" aria-label="Enclosing folder">↑</button>
+    <nav class="crumbs" id="fCrumbs" aria-label="Current folder"></nav>
+  </div>
+  <aside>
+    <h3>Blessed folders</h3>
+    <ul id="fSidebar" aria-label="Blessed folders"></ul>
+    <button id="fAdd" disabled>Add Folder…</button>
+  </aside>
+  <div class="pane" id="fPane">
+    <table>
+      <thead><tr><th>Name</th><th>Kind</th><th></th></tr></thead>
+      <tbody id="fList" tabindex="0" aria-label="Folder contents"></tbody>
+    </table>
+    <div class="notice" id="fNotice" hidden></div>
+  </div>
+  <footer><span id="fCount"></span><span id="fMessage" role="status"></span></footer>
+</div>
+</section>
 
 <script src="../dist/luna.global.js"></script>
 <script>
@@ -187,6 +284,7 @@ async function start() {
     $('paths').disabled = !canPaths;
     $('pathLabel').classList.toggle('off', !canPaths);
     $('pathNote').textContent = canPaths ? 'Off by default, so drops start on the HTML route.' : 'Not inside LUNA: drops can only be HTML drops here.';
+    void startFolders().catch((e) => message(`${e.code ?? ''} ${e.message}`, true));
     await luna.sessions.ready();
     // Follow the session: one opened, closed or focused after the page loaded is picked up.
     luna.sessions.focused.onChange(bindSession);
@@ -201,6 +299,7 @@ async function bindSession() {
   const next = luna.sessions.current();
   if (!next) {
     session = undefined;
+    updateImportButtons();
     $('status').textContent = 'No session open in LUNA: files are read but not added.';
     return;
   }
@@ -208,8 +307,508 @@ async function bindSession() {
   await next.ready();
   if (mine !== binding) return; // a later change won
   session = next;
+  updateImportButtons();
   $('status').textContent = `Session "${session.name.value ?? session.id}": sources added here stay in it.`;
   log(`session: "${session.name.value ?? session.id}"`);
+}
+
+// ---------------------------------------------------------------------------------------
+// Tabs. ?tab=folders opens on Folders; the last tab is remembered.
+function showTab(name) {
+  for (const [tab, panel] of [['tabRoutes', 'routes'], ['tabFolders', 'folders']]) {
+    $(tab).setAttribute('aria-selected', String(panel === name));
+    $(panel).hidden = panel !== name;
+  }
+  try { localStorage.setItem('files.tab', name); } catch {}
+}
+$('tabRoutes').onclick = () => showTab('routes');
+$('tabFolders').onclick = () => showTab('folders');
+{
+  let tab = new URLSearchParams(location.search).get('tab');
+  if (!tab) try { tab = localStorage.getItem('files.tab'); } catch {}
+  showTab(tab === 'folders' ? 'folders' : 'routes');
+}
+
+// ---------------------------------------------------------------------------------------
+// Folders: a Finder-style window over the blessed folders.
+const AUDIO = /\.(wav|aiff?|aifc|mp3|flac|m4a|caf|ogg|oga|opus)$/i;
+const KINDS = [
+  [AUDIO, '🎵', 'Audio'],
+  [/\.(mid|midi)$/i, '🎹', 'MIDI file'],
+  [/\.(mp4|m4v|mov|webm|ogv)$/i, '🎞️', 'Movie'],
+  [/\.(png|jpe?g|gif|webp|svg|heic|tiff?)$/i, '🖼️', 'Image'],
+  [/\.(txt|md|rtf|json|xml|csv)$/i, '📄', 'Text'],
+  [/\.pdf$/i, '📕', 'PDF document'],
+  [/\.lunaaddon$/i, '🧩', 'LUNA Add On'],
+];
+const finder = { current: undefined, back: [], forward: [], entries: [], selected: -1, missing: new Set(), listing: 0, hasGui: false,
+  expanded: new Set(), subfolders: new Map() };   // sidebar tree: open folders, and each folder's subfolders once listed
+
+const baseName = (path) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+const kindOf = (entry) => {
+  if (entry.isDirectory) return ['📁', 'Folder'];
+  const kind = KINDS.find(([re]) => re.test(entry.name));
+  return kind ? [kind[1], kind[2]] : ['📄', 'Document'];
+};
+
+/** The blessed folder `path` is in (the deepest, if they nest); undefined for none. */
+function rootOf(path) {
+  const inside = (root) => path === root || path.startsWith(root.endsWith('/') || root.endsWith('\\') ? root : root + '/') || path.startsWith(root + '\\');
+  return (luna?.gui.blessedFolders.value ?? []).filter(inside).sort((a, b) => b.length - a.length)[0];
+}
+
+/** The folder above `path` while it stays inside its blessed folder; undefined at the top. */
+function enclosing(path) {
+  const root = rootOf(path);
+  if (!root || path === root) return undefined;
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return cut <= 0 ? root : trimmed.slice(0, cut);
+}
+
+function message(text, isError = false) {
+  $('fMessage').textContent = text;
+  $('fMessage').classList.toggle('error', isError);
+}
+
+/** Open `path` in the window. `how` is 'go' (a new place), 'back' or 'forward'. */
+async function openFolder(path, how = 'go') {
+  if (how === 'go' && finder.current && finder.current !== path) {
+    finder.back.push(finder.current);
+    finder.forward = [];
+  }
+  finder.current = path;
+  try { localStorage.setItem('files.folder', path); } catch {}
+  renderCrumbs();
+  void revealInSidebar(path);
+  await relist();
+}
+
+/** List the current folder again, showing why when it cannot be listed. */
+async function relist() {
+  const path = finder.current;
+  const mine = ++finder.listing;
+  updateToolbar();
+  if (!path) return showNotice('📂', 'No folder open', 'Pick a blessed folder in the sidebar, or click Add Folder….');
+  try {
+    const entries = await luna.gui.listFiles(path);
+    if (mine !== finder.listing) return; // a later click won
+    finder.entries = entries;
+    finder.selected = -1;
+    finder.missing.delete(rootOf(path));
+    finder.subfolders.set(path, entries.filter((e) => e.isDirectory));
+    renderList();
+    renderSidebar();
+  } catch (e) {
+    if (mine !== finder.listing) return;
+    finder.entries = [];
+    renderList(false);
+    const root = rootOf(path);
+    if (e.code === 'uasrv.filesystem_error') {
+      if (root === path) finder.missing.add(root);
+      // A blessed folder that is gone can be taken off the list from here.
+      const actions = root === path ? [{ label: 'Remove from Blessed Folders', run: () => removeBlessed(root) }] : [];
+      showNotice('⚠️', `“${baseName(path)}” is not available`, 'It was moved, renamed or deleted, or the drive it is on is not connected.', true, actions);
+    } else if (e.code === 'uasrv.not_permitted') {
+      showNotice('🔒', `“${baseName(path)}” is not available`, 'It is not in a blessed folder: LUNA lets Add Ons read only folders you allow.', true, [{
+        label: 'Ask LUNA for access…',
+        run: async () => {
+          try {
+            await luna.gui.addBlessedFolder(path);
+            message('LUNA is asking you to allow it.');
+          } catch (e) { message(`addBlessedFolder: ${e.code ?? ''} ${e.message}`, true); }
+        },
+      }]);
+    } else {
+      showNotice('⚠️', `“${baseName(path)}” cannot be listed`, `${e.code ?? ''} ${e.message}`, true);
+    }
+    renderSidebar();
+  }
+}
+
+/** Show `title` and `detail` over the list, with a button for each of `actions` ({ label, run }). */
+function showNotice(icon, title, detail, isError = false, actions = []) {
+  const notice = $('fNotice');
+  notice.replaceChildren();
+  notice.className = 'notice' + (isError ? ' error' : '');
+  const big = document.createElement('div');
+  big.className = 'big';
+  big.textContent = icon;
+  const b = document.createElement('b');
+  b.textContent = title;
+  const p = document.createElement('div');
+  p.textContent = detail;
+  notice.append(big, b, p);
+  for (const action of actions) {
+    const button = document.createElement('button');
+    button.textContent = action.label;
+    button.onclick = () => void action.run();
+    notice.append(button);
+  }
+  notice.hidden = false;
+  $('fCount').textContent = '';
+}
+
+function renderCrumbs() {
+  const crumbs = $('fCrumbs');
+  crumbs.replaceChildren();
+  const path = finder.current;
+  if (!path) return;
+  const root = rootOf(path) ?? path;
+  // The blessed folder's own name, then each folder below it.
+  const parts = [[baseName(root), root]];
+  let at = root;
+  for (const part of path.slice(root.length).split(/[\\/]/).filter(Boolean)) {
+    at = at.replace(/[\\/]+$/, '') + '/' + part;
+    parts.push([part, at]);
+  }
+  parts.forEach(([label, target], i) => {
+    if (i) crumbs.append('›');
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = target;
+    b.disabled = i === parts.length - 1;
+    b.onclick = () => void openFolder(target);
+    crumbs.append(b);
+  });
+}
+
+function updateToolbar() {
+  $('fBack').disabled = !finder.back.length;
+  $('fForward').disabled = !finder.forward.length;
+  $('fUp').disabled = !finder.current || enclosing(finder.current) === undefined;
+}
+
+/**
+ * A blessed folder's ✕. LUNA removes a blessed folder without asking (only adding one needs
+ * consent), so the page asks: the first click turns it into "Remove", a second removes it.
+ * It goes back to ✕ after 3 s or when focus leaves it.
+ */
+function removeButton(folder) {
+  const button = document.createElement('button');
+  button.className = 'remove';
+  button.textContent = '✕';
+  button.title = 'Remove from the blessed folders';
+  button.setAttribute('aria-label', `Remove ${baseName(folder)} from the blessed folders`);
+  let timer;
+  const reset = () => { clearTimeout(timer); button.classList.remove('confirm'); button.textContent = '✕'; };
+  button.onclick = (e) => {
+    e.stopPropagation();
+    if (!button.classList.contains('confirm')) {
+      button.classList.add('confirm');
+      button.textContent = 'Remove';
+      timer = setTimeout(reset, 3000);
+      return;
+    }
+    reset();
+    void removeBlessed(folder);
+  };
+  button.onblur = reset;
+  return button;
+}
+
+/**
+ * Stop letting Add Ons read `folder`. If the window is inside it, it moves to another blessed
+ * folder (or to none), and history inside it is dropped: those places are no longer readable.
+ */
+async function removeBlessed(folder) {
+  const inside = (path) => path === folder || path.startsWith(folder.replace(/[\\/]+$/, '') + '/') || path.startsWith(folder + '\\');
+  try {
+    await luna.gui.removeBlessedFolder(folder);
+  } catch (e) {
+    message(`Remove ${baseName(folder)}: ${e.code ?? ''} ${e.message}`, true);
+    return;
+  }
+  finder.missing.delete(folder);
+  for (const path of [...finder.expanded]) if (inside(path)) finder.expanded.delete(path);
+  for (const path of [...finder.subfolders.keys()]) if (inside(path)) finder.subfolders.delete(path);
+  finder.back = finder.back.filter((p) => !inside(p));
+  finder.forward = finder.forward.filter((p) => !inside(p));
+  message(`Removed “${baseName(folder)}”: Add Ons can no longer read it. Add Folder… brings it back.`);
+  if (finder.current && inside(finder.current)) {
+    const next = (luna.gui.blessedFolders.value ?? []).find((f) => f !== folder);
+    finder.current = undefined;
+    if (next) await openFolder(next, 'back');   // not a new history entry
+    else { renderCrumbs(); renderSidebar(); await relist(); }
+  } else renderSidebar();
+}
+
+/**
+ * The sidebar: the blessed folders as a folder tree. A triangle shows a folder's subfolders,
+ * listed on first open; clicking a folder opens it in the window. The folders down to the one
+ * open in the window are expanded, and that one is highlighted.
+ */
+function renderSidebar() {
+  const list = $('fSidebar');
+  list.replaceChildren();
+  const folders = luna?.gui.blessedFolders.value;
+  if (!finder.hasGui) return;
+  const note = (text) => {
+    const li = document.createElement('li');
+    li.className = 'none';
+    li.textContent = text;
+    list.append(li);
+  };
+  if (folders === undefined) return note('This LUNA does not list blessed folders.');
+  if (!folders.length) return note('None yet. Add one, or add it in Settings › Add Ons › Folders.');
+  const addNode = (path, depth, label) => {
+    const missing = depth === 0 && finder.missing.has(path);
+    const li = document.createElement('li');
+    li.dataset.path = path;
+    li.title = path;
+    li.tabIndex = 0;
+    li.style.paddingLeft = `${8 + depth * 14}px`;
+    li.classList.toggle('current', path === finder.current);
+    li.classList.toggle('missing', missing);
+    const known = finder.subfolders.get(path);
+    const open = finder.expanded.has(path) && !missing;
+    const twisty = document.createElement('span');
+    twisty.className = 'twisty';
+    // No triangle once a folder is known to have no subfolders.
+    twisty.textContent = missing || (Array.isArray(known) && !known.length) ? '' : open ? '▾' : '▸';
+    twisty.onclick = (e) => { e.stopPropagation(); void toggleNode(path); };
+    const icon = document.createElement('span');
+    icon.textContent = missing ? '⚠️' : '📁';
+    const text = document.createElement('span');
+    text.className = 'label';
+    text.textContent = label;
+    li.append(twisty, icon, text);
+    if (missing) {
+      const flag = document.createElement('span');
+      flag.className = 'flag';
+      flag.textContent = 'Not available';
+      li.append(flag);
+    }
+    if (depth === 0) li.append(removeButton(path));
+    li.onclick = () => void openFolder(path);
+    li.onkeydown = (e) => {
+      if (e.key === 'Enter') void openFolder(path);
+      else if (depth === 0 && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); e.stopPropagation(); li.querySelector('.remove')?.click(); }
+      else if (e.key === 'ArrowRight' && !open) { e.preventDefault(); void toggleNode(path); }
+      else if (e.key === 'ArrowLeft' && open) { e.preventDefault(); void toggleNode(path); }
+    };
+    list.append(li);
+    if (open && Array.isArray(known)) for (const sub of known) addNode(sub.path, depth + 1, sub.name);
+  };
+  for (const folder of [...folders].sort((a, b) => baseName(a).localeCompare(baseName(b)))) addNode(folder, 0, baseName(folder));
+}
+
+/** The subfolders of `path` for the tree, listed once; a folder that cannot be listed has none. */
+async function loadSubfolders(path) {
+  if (finder.subfolders.has(path)) return;
+  try {
+    const entries = await luna.gui.listFiles(path);
+    finder.subfolders.set(path, entries.filter((e) => e.isDirectory));
+  } catch {
+    finder.subfolders.set(path, []);
+  }
+}
+
+async function toggleNode(path) {
+  if (finder.expanded.has(path)) finder.expanded.delete(path);
+  else {
+    finder.expanded.add(path);
+    await loadSubfolders(path);
+  }
+  renderSidebar();
+}
+
+/** Expand the tree down to `path`, so the folder open in the window shows in it. */
+async function revealInSidebar(path) {
+  const root = rootOf(path);
+  if (!root) return renderSidebar();
+  const chain = [];
+  for (let at = enclosing(path); at !== undefined; at = enclosing(at)) chain.unshift(at);
+  if (path !== root) chain.unshift(root);
+  for (const folder of new Set(chain)) {
+    finder.expanded.add(folder);
+    await loadSubfolders(folder);
+  }
+  renderSidebar();
+}
+
+/** Probe each blessed folder once, so one that is gone shows as not available. */
+async function checkSidebar() {
+  for (const folder of luna.gui.blessedFolders.value ?? []) {
+    try {
+      // The probe's listing is the tree's too, so a folder with no subfolders shows no triangle.
+      finder.subfolders.set(folder, (await luna.gui.listFiles(folder)).filter((e) => e.isDirectory));
+      finder.missing.delete(folder);
+    }
+    catch (e) { if (e.code === 'uasrv.filesystem_error') finder.missing.add(folder); }
+  }
+  renderSidebar();
+}
+
+function renderList(showEmpty = true) {
+  const body = $('fList');
+  body.replaceChildren();
+  $('fNotice').hidden = true;
+  finder.entries.forEach((entry, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.path = entry.path;
+    tr.classList.toggle('selected', i === finder.selected);
+    const [icon, kind] = kindOf(entry);
+    const name = document.createElement('td');
+    name.className = 'name';
+    name.title = entry.path;
+    const ic = document.createElement('span');
+    ic.className = 'icon';
+    ic.textContent = icon;
+    name.append(ic, entry.name);
+    const kindCell = document.createElement('td');
+    kindCell.className = 'kind';
+    kindCell.textContent = kind;
+    const action = document.createElement('td');
+    if (!entry.isDirectory && AUDIO.test(entry.name)) {
+      const add = document.createElement('button');
+      add.textContent = 'Import';
+      add.className = 'import';
+      add.disabled = !session;
+      add.title = session ? 'Put it on a new track at the playhead' : 'Open a session in LUNA first';
+      add.onclick = (e) => { e.stopPropagation(); void importAudio(entry, add); };
+      action.append(add);
+      // Drag out to LUNA's timeline: LUNA reads a dragged file:// URL or absolute path.
+      tr.draggable = true;
+      tr.ondragstart = (e) => {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('text/uri-list', fileUrl(entry.path));
+        e.dataTransfer.setData('text/plain', entry.path);
+      };
+    }
+    if (entry.isDirectory) {
+      tr.className = 'dir';
+      const chevron = document.createElement('span');
+      chevron.className = 'chevron';
+      chevron.textContent = '›';
+      action.append(chevron);
+    }
+    tr.append(name, kindCell, action);
+    // As in the Finder: a click selects, a double-click (or Enter) opens a folder or imports audio.
+    tr.onclick = () => select(i);
+    tr.ondblclick = () => activate(i);
+    body.append(tr);
+  });
+  const folders = finder.entries.filter((e) => e.isDirectory).length;
+  const n = finder.entries.length;
+  $('fCount').textContent = `${n} item${n === 1 ? '' : 's'}${n ? ` (${folders} folder${folders === 1 ? '' : 's'}, ${n - folders} file${n - folders === 1 ? '' : 's'})` : ''}`;
+  updateImportButtons();
+  if (showEmpty && !n) showNotice('📂', 'Empty folder', 'Hidden files are not listed.');
+  if (showEmpty && !n) $('fCount').textContent = '0 items';
+}
+
+function select(i) {
+  finder.selected = i;
+  [...$('fList').children].forEach((tr, j) => tr.classList.toggle('selected', j === i));
+  $('fList').children[i]?.scrollIntoView?.({ block: 'nearest' });
+}
+
+/** Double-click or Enter: open a folder, import an audio file. */
+function activate(i) {
+  const entry = finder.entries[i];
+  if (!entry) return;
+  if (entry.isDirectory) void openFolder(entry.path);
+  else if (AUDIO.test(entry.name)) {
+    const button = $('fList').children[i]?.querySelector('button.import');
+    if (button && !button.disabled) void importAudio(entry, button);
+  }
+}
+
+// Arrows move the selection and Enter opens it, as in the Finder. Handled keys stop here, so
+// they do not also reach LUNA's shortcuts (Luna.bindShortcuts).
+$('fList').onkeydown = (e) => {
+  const n = finder.entries.length;
+  let handled = true;
+  if (e.key === 'ArrowDown' && n) select(Math.min(n - 1, finder.selected + 1));
+  else if (e.key === 'ArrowUp' && n) select(Math.max(0, finder.selected - 1));
+  else if (e.key === 'Enter' && finder.selected >= 0) activate(finder.selected);
+  else handled = false;
+  if (handled) { e.preventDefault(); e.stopPropagation(); }
+};
+$('fBack').onclick = () => { const to = finder.back.pop(); if (to) { finder.forward.push(finder.current); void openFolder(to, 'back'); } };
+$('fForward').onclick = () => { const to = finder.forward.pop(); if (to) { finder.back.push(finder.current); void openFolder(to, 'forward'); } };
+$('fUp').onclick = () => { const up = finder.current && enclosing(finder.current); if (up) void openFolder(up); };
+$('fAdd').onclick = async () => {
+  try {
+    const [folder] = await luna.gui.chooseFolders({ title: 'Choose a folder Add Ons may read' });
+    if (folder) await openFolder(folder);
+  } catch (e) { message(`chooseFolders: ${e.code ?? ''} ${e.message}`, true); }
+};
+
+/** A path as a file:// URL, each segment escaped; Windows drive paths get the extra slash. */
+function fileUrl(path) {
+  const posix = path.replace(/\\/g, '/');
+  return 'file://' + (posix.startsWith('/') ? '' : '/') + posix.split('/').map(encodeURIComponent).join('/').replace(/^\/([A-Za-z])%3A/, '/$1:');
+}
+
+/** Where the clip goes: the live playhead while playing, the resting one when stopped. */
+function playheadTick() {
+  const t = session.transport;
+  return Math.max(0, Math.round((t.playing.value ? t.location.value?.tick : undefined) ?? t.playStart.value ?? 0));
+}
+
+/** Copy an audio file into the session and put it on a new track at the playhead, one undo entry. */
+async function importAudio(entry, button) {
+  button.disabled = true;
+  message(`Importing ${entry.name}…`);
+  try {
+    const source = await session.importPath(entry.path);
+    const name = (source.name.value ?? entry.name).replace(/\.[^.]+$/, '');
+    const ns = source.length.value ?? 0;
+    const timeline = session.musical.timeline;
+    const start = playheadTick();
+    // The exact span for an unstretched source, walked through the tempo map.
+    const stop = Math.round(timeline.tickAtSeconds(timeline.seconds(start) + ns / 1e9));
+    await session.transaction(`Import ${name}`, async () => {
+      const reply = await session.newTrack({ name, trackType: 'audio', stemFormat: source.stemFormat.value === 'stereo' ? 'stereo' : 'mono', makeNameUnique: true });
+      const trackUid = reply?.track_uid ?? reply?.uid;
+      if (!trackUid) throw new Error('new_track answered without a track uid');
+      await session.insertClip({ trackUid, sourceUid: source.id, startTick: start, stopTick: stop, sourceStartNs: 0, sourceStopNs: ns, name });
+    });
+    message(`Imported “${name}” onto a new track at ${timeline.formatBarBeat(start)}.`);
+  } catch (e) {
+    // The file can go between the listing and the click.
+    message(`Import ${entry.name}: ${e.code === 'uasrv.filesystem_error' ? 'the file is not available' : `${e.code ?? ''} ${e.message}`}`, true);
+  } finally {
+    button.disabled = !session;
+  }
+}
+
+const NO_SESSION = 'Import needs a session: open or create one in LUNA.';
+
+/** Import buttons follow whether a session is open, and the footer says why they are off. */
+function updateImportButtons() {
+  const buttons = document.querySelectorAll('#fList button.import');
+  for (const button of buttons) {
+    button.disabled = !session;
+    button.title = session ? 'Put it on a new track at the playhead' : 'Open a session in LUNA first';
+  }
+  if (!session && buttons.length) message(NO_SESSION);
+  else if ($('fMessage').textContent === NO_SESSION) message('');
+}
+
+async function startFolders() {
+  finder.hasGui = await luna.gui.available();
+  if (!finder.hasGui) {
+    showNotice('🚫', 'No folders here', 'This engine has no /gui (a headless engine), so it lists no folders.', true);
+    return;
+  }
+  $('fAdd').disabled = false;
+  await luna.gui.watchBlessedFolders();
+  luna.gui.blessedFolders.onChange(() => {
+    finder.subfolders.clear();
+    renderSidebar();
+    void checkSidebar();
+    // A folder removed from the list (or added back) changes what the window may show.
+    if (finder.current) { renderCrumbs(); void relist(); }
+  });
+  renderSidebar();
+  await checkSidebar();
+  let first = new URLSearchParams(location.search).get('folder');
+  if (!first) try { first = localStorage.getItem('files.folder'); } catch {}
+  if (!first) first = luna.gui.blessedFolders.value?.[0];
+  if (first) await openFolder(first);
+  else await relist();
 }
 
 void start();

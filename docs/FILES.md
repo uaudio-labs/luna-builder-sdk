@@ -33,7 +33,9 @@ page (fact 42). It is an optimization, not a way to read files.
 | `luna.gui.chooseFolders()` | LUNA's folder dialog | absolute folder paths, or `[]` if cancelled | `/gui` |
 | `luna.gui.listFiles(path)` | an absolute path in a folder the user gave LUNA | its entries `{ name, path, isDirectory }`, hidden ones left out, in natural order (`take2` before `take10`) | `/gui` |
 | `Luna.onPathDrop(handler)` | files dragged onto the page in LUNA | absolute paths with the drop's page `x`, `y` | LUNA's webview |
-| `luna.gui.serveMediaFile(addOnId, path)` | an audio or video file path | a URL your page loads it from (`<video src>`, XMLHttpRequest) | `/gui` |
+| `luna.gui.listAllFiles(path)` | a blessed folder, or a folder in one | `{ files, truncated }`: everything below it, each with `relativePath` | `/gui` |
+| `luna.gui.addBlessedFolder(path)` / `removeBlessedFolder(path)` | a folder | LUNA asks the user to let every Add On read it / stops letting them; watch `luna.gui.blessedFolders` | `/gui` |
+| `luna.gui.serveMediaFile(addOnId, path)` | any file in a blessed folder, else an audio, video or MIDI file | a URL your page loads it from (`<video src>`, `<img src>`, XMLHttpRequest) | `/gui` |
 
 - Place a source with `session.insertClip({ sourceUid: source.id, ... })`.
 - A MIDI file: `importFile(path)` from a path, or parse a `File` in the page and write notes
@@ -90,18 +92,30 @@ if (Luna.canDropPaths()) {
   Check `luna.gui.available()`, not `Luna.isEmbeddedInLuna()`.
 - `importPath` needs no `/gui`, but the engine must be able to open the path.
 - `listFiles` lists only folders the user gave LUNA, and the folders inside them: one picked
-  with `chooseFolders` or dropped on an Add On (`onPathDrop`). Anything else, even a path
+  with `chooseFolders` or dropped on an Add On (`onPathDrop`) **and allowed** when LUNA asks
+  "Allow Add Ons to Read a Folder". If the user says DON'T ALLOW, the dialog or drop still
+  gives the paths (for `importPath`) but `listFiles` refuses them. Anything else, even a path
   where nothing exists, rejects with code `uasrv.not_permitted`; ask with `chooseFolders`.
-  LUNA keeps the folders across restarts, at most 64, the oldest forgotten first, until the
-  user clicks FORGET FOLDERS in Settings > Add Ons. They are LUNA-wide, not per Add On. A path
-  is judged where it really is: `..` or a link out of a granted folder is refused, and so is
-  a path spelled in a different case from the folder. A path you saved can stop working, so
+  These are the **blessed folders** (`luna.gui.blessedFolders`); a page can also ask for one
+  with `addBlessedFolder(path)`, which LUNA confirms with the user. LUNA keeps them across
+  restarts, at most 64, the oldest forgotten first, until the user removes them in Settings >
+  Add Ons > FOLDERS. They are LUNA-wide, not per Add On. A path
+  is judged where it really is: `..` or a link out of a granted folder is refused, and so are
+  a hidden folder inside one (`.git`) and a path spelled in a different case from the folder.
+  LUNA never asks for a disk's root, the home folder, a folder holding it or `~/Library`
+  (`addBlessedFolder` rejects with `uasrv.not_permitted`; a picked or dropped one is just not
+  blessed), and once the user says DON'T ALLOW it does not ask for that folder again until it
+  restarts. Ask for a folder inside the home folder (`~/Music`) instead. A path you saved can stop working, so
   handle `uasrv.not_permitted` by asking again.
-- `listFiles` reads the disk as LUNA sees it, one level deep; recurse into `isDirectory`
-  entries yourself. It rejects with code `uasrv.filesystem_error` when nothing is at the
+- `listFiles` reads the disk as LUNA sees it, one level deep; `listAllFiles` returns
+  everything below the folder in one call, each entry with its `relativePath` (links to
+  folders are not followed, and `truncated` is true past 10,000 entries or 5 seconds of reading).
+- `serveMediaFile` serves any file in a blessed folder, of any type (but hidden ones), so a
+  page can show images or read JSON from one; outside them it serves media only. It rejects with code `uasrv.filesystem_error` when nothing is at the
   path or LUNA cannot read it, and `uasrv.invalid_value` for a relative path or a file. A
   LUNA older than `chooseFolders` and `listFiles` rejects them with `Luna.Unsupported`
-  (fact 106). `examples/browse.html` is a folder browser built on the two.
+  (fact 106). `examples/browse.html` is a folder browser built on the two, and the Folders tab
+  of `examples/files.html` a Finder-style window over the blessed folders.
 - While a path-drop handler is registered, LUNA claims every file drag, so HTML `drop`
   events carry no files (fact 102). One page can still offer both: an `<input type="file">`
   for the File route and path drops for the session.

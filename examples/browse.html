@@ -31,9 +31,9 @@
 <p>Walks the disk as LUNA sees it with <code>luna.gui.listFiles(path)</code>: the entries
 directly inside a folder, hidden ones left out, sorted by name. LUNA lists only folders you
 gave it, and the folders inside them: pick one with LUNA's dialog
-(<code>luna.gui.chooseFolders()</code>) or drop one on this page. LUNA remembers them until
-you click FORGET FOLDERS in Settings &gt; Add Ons, so a typed path works inside a folder you
-gave it before. Click a folder to open it. <b>Import</b> copies an audio file into the open session with
+(<code>luna.gui.chooseFolders()</code>) or drop one on this page. LUNA remembers them, the
+blessed folders, until you remove them in Settings &gt; Add Ons &gt; FOLDERS, so a typed path
+works inside a folder you gave it before. Click a folder to open it. <b>Import</b> copies an audio file into the open session with
 <code>session.importPath()</code>, then puts it on a new track at the playhead
 (<code>newTrack()</code> and <code>insertClip()</code>, one undo entry). Or drag an audio
 file onto LUNA's timeline: the drag carries its path, and LUNA places it on the lane or a
@@ -199,7 +199,8 @@ async function start() {
       return;
     }
     for (const id of ['open', 'choose']) $(id).disabled = false;
-    // A folder dropped on the page is one LUNA may list from then on; open the first one.
+    // A folder dropped on the page is one LUNA may list from then on, once the user allows it
+    // in LUNA's prompt; open the first one (a refusal shows as not_permitted).
     if (Luna.canDropPaths()) Luna.onPathDrop({ drop: ({ paths }) => { if (paths[0]) void show(paths[0]); } });
     await luna.sessions.ready();
     luna.sessions.focused.onChange(bindSession);

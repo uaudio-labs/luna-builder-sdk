@@ -9,7 +9,7 @@ import { addOnClashes, bundlePath, flagNumber, flagString, installedAddOns, isWi
 const DOTFILES: Record<string, string> = { npmrc: '.npmrc', gitignore: '.gitignore' };
 
 /** Manifest fields only a `"window"` uses; a browser, app or editor scaffold leaves them out. */
-const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'width', 'height'];
+const WINDOW_ONLY_FIELDS = ['floating', 'show_with_session', 'fixed_size', 'width', 'height'];
 
 /** Drop the named lines from the template's manifest and the comma they leave dangling. */
 function withoutFields(manifest: string, fields: string[]): string {

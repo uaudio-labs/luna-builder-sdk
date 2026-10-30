@@ -46,7 +46,7 @@ export type { ContextType, SelectedNotes, SelectionSnapshot } from './context';
 export { Automation, BreakpointNode, AUTOMATION_MODES, automationModeOrdinal } from './automation';
 export type { AutomationModeName, Breakpoint } from './automation';
 export { Gui, AddOn, GuiWindow } from './gui';
-export type { GuiPage, AddOnTarget, AddOnInstalledFrom, ProgressTask, FileEntry, PluginWindow } from './gui';
+export type { GuiPage, AddOnTarget, AddOnInstalledFrom, ProgressTask, FileEntry, NestedFileEntry, PluginWindow } from './gui';
 export type { MidiEvent, ClipNote } from './clip';
 export { MidiClip, pairNotes, decodeMidiData, encodeMidiData } from './midi';
 export type { MidiRow, Note, MidiRowData, MidiHost } from './midi';

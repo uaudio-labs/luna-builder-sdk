@@ -24,11 +24,13 @@ new MockEngine(options): MockEngine;
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="addoninstalls"></a> `addOnInstalls` | `public` | ( \| \{ `id`: `string`; \} \| \{ `url`: `string`; \})[] | `[]` | Every install `/gui/install_add_on` started, in order: `{ id }` with the package id, or `{ url }` with what LUNA fetches: a repo's URL (`https://github.com/<owner>/<repo>`), or a Drive file's direct download (`https://drive.usercontent.google.com/download?id=<id>&export=download&confirm=t`), or an iCloud Drive share as `https://www.icloud.com/iclouddrive/<id>`, which LUNA resolves, or a Dropbox file's download (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=1`). |
 | <a id="addonuninstalls"></a> `addOnUninstalls` | `public` | `string`[] | `[]` | Every Add On id (lowercase) `/gui/uninstall_add_on` asked the user about, in order, whatever the answer. |
+| <a id="blessanswer"></a> `blessAnswer` | `public` | `"allow"` \| `"dont_allow"` | `'allow'` | How the user answers LUNA's prompt for `/gui/add_blessed_folder` and for folders picked in `show_folder_dialog`: `'allow'` (the default) blesses them, `'dont_allow'` leaves them out. |
+| <a id="blessrequests"></a> `blessRequests` | `public` | `string`[] | `[]` | Every folder LUNA asked the user about (`/gui/add_blessed_folder`, `show_folder_dialog`), in order, whatever the answer. |
 | <a id="builtinaddons"></a> `builtInAddOns` | `public` | `string`[] | `[]` | Add On ids (lowercase) under `/gui/add_ons` that are built into LUNA, which `/gui/uninstall_add_on` refuses. |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
-| <a id="grantedfolders"></a> `grantedFolders` | `public` | `string`[] | `[]` | The folders `/gui/list_files` may read, it and every folder inside them (fact 106). LUNA grants a folder the user picks in `show_folder_dialog` (the mock does too, for each of `nextDialogFiles`) or drops on an Add On; set this, or call [grantFolder](#grantfolder), to model a drop or a grant saved from an earlier run. Anything else is `uasrv.not_permitted`. The mock does not model links or LUNA's cap on how many folders it keeps. **Example** `engine.folders['/Samples'] = ['kick.wav']; engine.grantFolder('/Samples');` |
 | <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [marketplace](#marketplace) that were imported from a link, which `/gui/remove_imported_add_on` removes (from here and from `marketplace`); any other package is the marketplace's own and is refused. |
 | <a id="installingpackages"></a> `installingPackages` | `public` | `string`[] | `[]` | Package ids `/gui/install_add_on` treats as already installing. |
+| <a id="listlimit"></a> `listLimit` | `public` | `number` | `10000` | Entries a recursive `/gui/list_files` returns before it sets `truncated` (LUNA: 10,000). |
 | <a id="marketplace"></a> `marketplace` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The marketplace `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
 | <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio, video or MIDI file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
 | <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
@@ -38,6 +40,51 @@ new MockEngine(options): MockEngine;
 | <a id="touches"></a> `touches` | `readonly` | `string`[] | `[]` | `set_touch` calls, as `<control path>:on|off`, oldest first. |
 | <a id="transactions"></a> `transactions` | `readonly` | `string`[] | `[]` | Transaction commands seen: `begin`, `commit`, `abort`. |
 | <a id="uninstallanswer"></a> `uninstallAnswer` | `public` | `"remove"` \| `"cancel"` | `'remove'` | How the user answers LUNA's prompt for `/gui/uninstall_add_on`: `'remove'` (the default) takes the Add On out of `/gui/add_ons`, `'cancel'` leaves it. |
+
+## Accessors
+
+### grantedFolders
+
+#### Get Signature
+
+```ts
+get grantedFolders(): string[];
+```
+
+The folders `/gui/list_files` may read, it and every folder inside them (facts 106, 133):
+the blessed folders. LUNA asks the user before blessing a folder picked in
+`show_folder_dialog` (the mock asks [blessAnswer](#blessanswer) for each of `nextDialogFiles`
+that is in [folders](#folders)) or dropped on an Add On; set this, or call
+[grantFolder](#grantfolder), to model an allowed drop or a folder blessed in an earlier run.
+Anything else is `uasrv.not_permitted`.
+The mock does not model links or LUNA's cap on how many folders it keeps.
+
+##### Example
+
+```ts
+engine.folders['/Samples'] = ['kick.wav'];
+engine.grantFolder('/Samples');
+```
+
+##### Returns
+
+`string`[]
+
+#### Set Signature
+
+```ts
+set grantedFolders(folders): void;
+```
+
+##### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `folders` | `string`[] |
+
+##### Returns
+
+`void`
 
 ## Methods
 

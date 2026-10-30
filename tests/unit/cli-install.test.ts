@@ -1,10 +1,20 @@
 /** `ua-builder install` refuses an Add On whose id or name another installed Add On uses. */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { install } from '../../cli/install';
-import { parseArgs } from '../../cli/util';
+import {
+  ADD_ONS_SETUP_SCRIPT,
+  addOnsFolder,
+  canWriteFolder,
+  parseArgs,
+  prepareAddOnsFolder,
+  runAddOnsFolderScript,
+  WINDOWS_ADD_ONS_CHECK_SCRIPT,
+  WINDOWS_ADD_ONS_SETUP_SCRIPT,
+} from '../../cli/util';
 
 const dirs: string[] = [];
 let addOns = '';
@@ -56,5 +66,87 @@ describe.skipIf(process.platform === 'win32')('ua-builder install', () => {
     expect(await run(dir)).toBe(0);
     expect(await run(dir)).toBe(0);
     expect(existsSync(join(addOns, 'Mine', 'manifest.json'))).toBe(true);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('prepareAddOnsFolder', () => {
+  it('creates a missing Add Ons folder without asking for a password', () => {
+    const folder = join(addOns, 'nested', 'Add Ons');
+    vi.stubEnv('UA_ADDONS_FOLDER', folder);
+    prepareAddOnsFolder(folder);
+    expect(existsSync(folder)).toBe(true);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('never escalates an overridden folder it cannot write', () => {
+    const folder = join(addOns, 'locked');
+    mkdirSync(folder);
+    chmodSync(folder, 0o555);
+    try {
+      expect(() => prepareAddOnsFolder(folder)).toThrow('cannot write the Add Ons folder');
+    } finally {
+      chmodSync(folder, 0o755);
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('has a setup script AppleScript compiles', () => {
+    const out = join(addOns, 'setup.scpt');
+    execFileSync('/usr/bin/osacompile', ['-e', ADD_ONS_SETUP_SCRIPT, '-o', out]);
+    expect(existsSync(out)).toBe(true);
+  });
+});
+
+// The same cases on Windows, where the folder is in ProgramData and set up with icacls.
+describe.skipIf(process.platform !== 'win32')('prepareAddOnsFolder (Windows)', () => {
+  const icacls = (...args: string[]) => execFileSync('icacls', args, { stdio: 'ignore' });
+
+  it('creates a missing overridden Add Ons folder without asking for approval', () => {
+    const folder = join(addOns, 'nested', 'Add Ons');
+    vi.stubEnv('UA_ADDONS_FOLDER', folder);
+    prepareAddOnsFolder(folder);
+    expect(existsSync(folder)).toBe(true);
+    expect(canWriteFolder(folder)).toBe(true);
+  });
+
+  it('never escalates an overridden folder it cannot write', () => {
+    const folder = join(addOns, 'locked');
+    mkdirSync(folder);
+    // Everyone may not add files or folders here.
+    icacls(folder, '/deny', '*S-1-1-0:(WD,AD)');
+    try {
+      expect(canWriteFolder(folder)).toBe(false);
+      expect(() => prepareAddOnsFolder(folder)).toThrow('cannot write the Add Ons folder');
+    } finally {
+      icacls(folder, '/remove:d', '*S-1-1-0');
+    }
+  });
+
+  it('has setup and check scripts PowerShell parses', () => {
+    for (const script of [WINDOWS_ADD_ONS_SETUP_SCRIPT, WINDOWS_ADD_ONS_CHECK_SCRIPT]) {
+      const parse =
+        '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:UA_ADDONS_SETUP_FOLDER, [ref]$null, [ref]$errors); ' +
+        'if ($errors.Count) { $errors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 }';
+      const result = runAddOnsFolderScript(parse, script);
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+    }
+  });
+
+  it('tells a folder set up for every user from one only this user can write', () => {
+    const folder = join(addOns, 'Add Ons');
+    mkdirSync(folder);
+    // Only its owner, as when a standard user creates it in ProgramData (CREATOR OWNER), and
+    // nothing inherited: a temp folder may inherit a grant to Everyone.
+    icacls(folder, '/inheritance:r', '/grant:r', '*S-1-3-4:(OI)(CI)F');
+    expect(canWriteFolder(folder)).toBe(true);
+    expect(runAddOnsFolderScript(WINDOWS_ADD_ONS_CHECK_SCRIPT, folder).status).toBe(1);
+    // What the setup grants; this user owns the folder, so it needs no elevation here.
+    icacls(folder, '/grant', '*S-1-5-32-545:(OI)(CI)M');
+    expect(runAddOnsFolderScript(WINDOWS_ADD_ONS_CHECK_SCRIPT, folder).status).toBe(0);
+  });
+
+  it('puts the real Add Ons folder in ProgramData, shared by every account', () => {
+    vi.stubEnv('UA_ADDONS_FOLDER', '');
+    vi.stubEnv('ProgramData', 'D:\\Data');
+    expect(addOnsFolder()).toBe('D:\\Data\\Universal Audio\\LUNA\\Add Ons');
   });
 });

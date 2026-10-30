@@ -1,6 +1,6 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { addOnClashes, addOnsFolder, flagString, installedAddOns, menuFor, readManifest, type Args } from './util';
+import { addOnClashes, addOnsFolder, flagString, installedAddOns, menuFor, prepareAddOnsFolder, readManifest, type Args } from './util';
 
 /**
  * Put an Add On folder where LUNA looks for it. macOS: a symlink, so edits are live.
@@ -12,7 +12,7 @@ export async function install(args: Args): Promise<number> {
   const name = flagString(args, 'name') ?? (typeof manifest.package_name === 'string' && manifest.package_name.trim() ? manifest.package_name.trim() : basename(dir));
   if (/[\\/]/.test(name) || name === '.' || name === '..') throw new Error(`invalid link name "${name}"`);
   const folder = addOnsFolder();
-  mkdirSync(folder, { recursive: true });
+  prepareAddOnsFolder(folder);
   const target = join(folder, name);
   // The entry being replaced, and any other link to this same folder, are this Add On.
   const installed = installedAddOns(folder);

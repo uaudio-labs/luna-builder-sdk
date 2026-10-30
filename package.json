@@ -28,6 +28,7 @@
   "files": [
     "CHANGELOG.md",
     "RELEASE_NOTES.md",
+    "FEATURES_LIST.md",
     "LICENSE",
     "NOTICE",
     "dist",

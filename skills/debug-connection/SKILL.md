@@ -75,9 +75,9 @@ Works in a browser, nothing inside LUNA? See docs/FILES.md, "Inside LUNA today".
 - `uploadFile` resolved to an older source: the bytes were already in the session (fact 42).
 - `chooseFiles` or `importFile` rejects `unsupported`: no `/gui` (a headless engine).
   `chooseFolders` and `listFiles` also reject it on a LUNA older than those commands (fact 106).
-- `listFiles` rejects `uasrv.not_permitted`: the folder is not one the user gave LUNA. Ask with
-  `chooseFolders` (or take a dropped folder); the user may have clicked FORGET FOLDERS in
-  Settings > Add Ons since the path was saved (fact 106).
+- `listFiles` rejects `uasrv.not_permitted`: the folder is not a blessed folder. Ask with
+  `chooseFolders` or `addBlessedFolder` (or take a dropped folder); the user may have removed
+  it in Settings > Add Ons > FOLDERS since the path was saved (facts 106, 133).
 
 ## SDK feedback
 

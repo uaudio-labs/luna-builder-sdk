@@ -92,7 +92,7 @@ DOM helpers sit on top of the model: `bindRange`, `bindDrag`, `bindGesture` (tou
 
 package.json `files` is the one list of what ships: `dist`, `docs`, `skills`, `templates`,
 `examples`, `plugins`, the two marketplace catalogs, `CHANGELOG.md`, `RELEASE_NOTES.md`,
-`LICENSE`, `NOTICE`. `design/`, `DEVELOPING.md`, `CLAUDE.md`, `tests/` do not ship.
+`FEATURES_LIST.md`, `LICENSE`, `NOTICE`. `design/`, `DEVELOPING.md`, `CLAUDE.md`, `tests/` do not ship.
 
 Distribution channels:
 
@@ -118,12 +118,14 @@ the hosted URL does not exist yet, so `engineUrl` defaults to `/__engine/`, whic
 | `test [dir]` | vitest; `--live` adds the LUNA lane |
 | `probe <url>` | Headless Chrome: wait for a connected, settled `Luna` client, eval an expression, optional screenshot or `--mock` |
 | `tree [path]` | Shape of LUNA's tree (properties, children, commands); `--out` snapshots a build, as in `docs/tree/` |
-| `doctor` | Node/npm versions, whether LUNA is reachable, creates the Add Ons folder |
+| `doctor` | Node/npm versions, whether LUNA is reachable, the Add Ons folder's state (creates it where that needs no setup) |
 | `install [dir]` | Validates the manifest, links (macOS) or copies (Windows) into the Add Ons folder; LUNA rescans |
 | `pack [dir]` | Validates, refreshes the vendored bundle, zips the folder into `<name>.lunaaddon` |
 
 Add Ons folder: macOS `/Library/Application Support/Universal Audio/LUNA/Add Ons`, Windows
-`%LOCALAPPDATA%\Universal Audio\LUNA\Add Ons`. Manifest rules are in `docs/MANIFEST.md`.
+`%ProgramData%\Universal Audio\LUNA\Add Ons` (shared by every account; LUNA's installer
+grants BUILTIN\Users Modify on it, otherwise LUNA or `ua-builder install` does with one UAC
+prompt, HBH-35640). Manifest rules are in `docs/MANIFEST.md`.
 
 ## 5. Testing lanes
 

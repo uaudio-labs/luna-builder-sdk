@@ -3,14 +3,35 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
-## Unreleased
+## 3.1.1 Beta 1 — 2026-10-30
 
-- **Breaking:** `session.preferences` is now `session.storage`, with records and fields in
-  place of preferences and properties (`context.records`; `add`/`set`/`remove`/`value(record,
-  field, ...)`); rename your calls, needs a LUNA with session storage, and existing sessions
-  keep their data (see `CHANGELOG.md` for the full table and upgrade steps).
-- A session storage `set` of a value with `undefined` keys resolves at once instead of
-  waiting 4 s and rejecting with `no_effect`.
+- **Breaking:** `session.preferences` is now `session.storage`, with records and fields in place of
+  preferences and properties (`context.records`, `add`/`set`/`remove`/`value(record, field, ...)`),
+  so rename your calls; it needs a LUNA with session storage, existing sessions keep their data, and
+  `CHANGELOG.md` has the full table.
+- The SDK's version now follows LUNA's: 3.1.1 is the SDK for LUNA 3.1.1.
+- New blessed folders, the folders the user lets every Add On read: `luna.gui.blessedFolders`,
+  `addBlessedFolder` (LUNA asks the user), `removeBlessedFolder`, and `listAllFiles` for everything
+  below a folder in one call.
+- Folders picked with `chooseFolders()` or dropped on an Add On can be listed only after the user
+  allows it in LUNA's prompt.
+- `luna.gui.serveMediaFile` serves any file in a blessed folder, and MIDI files anywhere.
+- New `luna.gui.installAddOn` installs Add Ons from LUNA's marketplace, a GitHub repo or a Google
+  Drive, iCloud Drive or Dropbox link, and `removeImportedAddOn` forgets a saved link.
+- New `luna.gui.uninstallAddOn` asks the user to remove an installed Add On.
+- `luna.gui.addOns` items have `version` and `installedFrom`.
+- New track presets: `luna.presets.trackSelection`, `session.newTrackFromPreset`, `track.loadPreset`
+  and `track.presetName`, including instrument plugins' presets.
+- New `luna.plugins.query` and `effect.validPlugins()` list the plugins LUNA offers for a slot.
+- New `effect.openEditor()`, `closeEditor()` and `editorOpen` open, close and follow a plugin's
+  window in LUNA.
+- New manifest `fixed_size` gives a window Add On a size the user cannot change.
+- New manifest `run_hidden` keeps an Add On's page running at full speed while it is hidden.
+- `ua-builder install` sets up LUNA's Add Ons folder once for every user on the computer, and on
+  Windows that folder moves to `%ProgramData%\Universal Audio\LUNA\Add Ons`.
+- A session storage `set` of a value with `undefined` keys resolves at once instead of waiting 4 s
+  and rejecting with `no_effect`.
+- New `docs/FILES-GUIDE.md` walks through getting files in and out of an Add On.
 
 ## 0.2.1 — 2026-10-22
 

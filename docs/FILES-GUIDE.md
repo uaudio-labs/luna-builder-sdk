@@ -203,15 +203,25 @@ if (folder) {
 `listFiles` has a permission model:
 
 - It lists only folders the **user gave LUNA**: a folder picked with `chooseFolders()` or
-  dropped on an Add On, plus any folder inside one. Any other path rejects with error code
+  dropped on an Add On, plus any folder inside one. LUNA asks the user first ("Allow Add Ons to
+  Read a Folder"); a folder they do not allow is still handed to the page as a path, but is not
+  listed. Any other path rejects with error code
   `uasrv.not_permitted`, even if the path exists.
-- LUNA remembers these folders across restarts. It keeps at most 64, and the user can clear
-  them with **FORGET FOLDERS** in Settings > Add Ons. The folders are shared by all Add Ons.
+- These are the **blessed folders** (`luna.gui.blessedFolders`). LUNA remembers them across
+  restarts, keeps at most 64, and lists them in Settings > Add Ons > **FOLDERS**, where the
+  user adds and removes them. They are shared by all Add Ons. To ask for one yourself, call
+  `luna.gui.addBlessedFolder(path)`: LUNA asks the user, and the folder shows up in
+  `blessedFolders` if they allow it. LUNA will not ask for a disk's root, the home folder or
+  `~/Library` (ask for `~/Music` or a project folder instead), nor again for a folder the
+  user refused, until LUNA restarts: both reject with `uasrv.not_permitted`.
 - Because the user can revoke them, a folder path you saved can stop working. Catch
   `uasrv.not_permitted` and ask again with `chooseFolders()`.
-- `listFiles` lists one level only. To go deeper, call it again on the `isDirectory`
-  entries. Hidden files are left out, and entries are in natural order (`take2` before
-  `take10`).
+- `listFiles` lists one level only; `listAllFiles(path)` lists everything below the folder
+  in one call, each entry with its `relativePath`. Hidden files are left out, and entries are
+  in natural order (`take2` before `take10`).
+- Any file in a blessed folder, of any type, can be loaded in the page: pass its path to
+  `serveMediaFile` and use the URL (an `<img>`, a JSON `XMLHttpRequest`). Hidden files are
+  never served.
 
 `examples/browse.html` is a working folder browser built on `chooseFolders` and `listFiles`.
 
@@ -301,7 +311,8 @@ else zone.addEventListener('drop', handleFileDrop);   // HTML drops in a browser
 | HTML drop gets no files inside LUNA | A path-drop handler is registered and claims file drags | Handle the drop in `onPathDrop`, or call its `stop()` |
 | `importPath` succeeds but nothing is on the timeline | It makes a source, not a clip | Call `session.insertClip({ sourceUid: source.id, ... })`, or use `importFile` |
 | `Luna.Unsupported` from `chooseFiles` | No `/gui` (headless engine, mock with `gui: false`) or an older LUNA | Check `luna.gui.available()` first; fall back to the File route |
-| `uasrv.not_permitted` from `listFiles` | The folder was not granted, or the user clicked FORGET FOLDERS | Ask with `chooseFolders()` |
+| `uasrv.not_permitted` from `listFiles` | The folder is not blessed, is hidden (`.git`) inside a blessed one, or the user removed it in Settings > Add Ons > FOLDERS | Ask with `chooseFolders()` or `addBlessedFolder()` |
+| `uasrv.not_permitted` from `addBlessedFolder` | The folder is too broad (a disk's root, the home folder, `~/Library`), or the user refused it this session | Ask for a narrower folder; the user can add any folder in Settings > Add Ons > FOLDERS |
 | A saved media URL stops working after a restart | Served URLs last only until LUNA quits | Save the path; call `serveMediaFile` again on load |
 | File picker opens nothing inside LUNA | LUNA 3.1.0.4589 or earlier | Offer a drop zone or `chooseFiles()` as well |
 
@@ -322,7 +333,8 @@ else zone.addEventListener('drop', handleFileDrop);   // HTML drops in a browser
 
 - [FILES.md](FILES.md): the full reference, with every method, error code and LUNA version
   note
-- `examples/files.html`: all file routes side by side
+- `examples/files.html`: all file routes side by side, and a Finder-style Folders tab over
+  the blessed folders that imports audio files
 - `examples/browse.html`: a folder browser using `chooseFolders` and `listFiles`
 - `examples/import.html`: importing into the session
 - [QUICKSTART.md](QUICKSTART.md): connecting, sessions, tracks and clips

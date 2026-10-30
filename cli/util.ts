@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -99,8 +100,146 @@ export function addOnsFolder(): string {
   const override = process.env['UA_ADDONS_FOLDER'];
   if (override) return override;
   if (process.platform === 'darwin') return '/Library/Application Support/Universal Audio/LUNA/Add Ons';
-  if (process.platform === 'win32') return join(process.env['LOCALAPPDATA'] ?? join(process.env['USERPROFILE'] ?? '', 'AppData', 'Local'), 'Universal Audio', 'LUNA', 'Add Ons');
+  if (process.platform === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'Universal Audio', 'LUNA', 'Add Ons');
   throw new Error('LUNA Add Ons are supported on macOS and Windows only');
+}
+
+/**
+ * LUNA's one-time macOS setup of the Add Ons folder, run as root through osascript's
+ * administrator prompt; the folder is argv item 1. The same script as LUNA's
+ * Rack_AddOnInstaller (HBH-35640): owned by root, group staff, with an inherited ACL that
+ * lets every local account add, change and remove Add Ons. find skips symlinks, so a linked
+ * project folder is never touched.
+ */
+export const ADD_ONS_SETUP_SCRIPT = [
+  'on run argv',
+  'set d to quoted form of (item 1 of argv)',
+  'do shell script "/bin/mkdir -p " & d & " && /usr/sbin/chown root:staff " & d & " && /bin/chmod 0775 " & d & ' +
+    '" && /usr/bin/find " & d & " ! -type l -exec /bin/chmod +a \'group:staff allow list,add_file,search,add_subdirectory,' +
+    'delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit\' {} +" ' +
+    'with prompt "ua-builder wants to set up the LUNA Add Ons folder so everyone on this Mac can install Add Ons." ' +
+    'with administrator privileges',
+  'end run',
+].join('\n');
+
+/**
+ * LUNA's one-time Windows setup of the Add Ons folder, the same as LUNA's Rack_AddOnInstaller
+ * (HBH-35640): one UAC prompt runs cmd.exe elevated to create the folder and grant
+ * BUILTIN\Users (by SID, so on any Windows language) Modify, inherited by files and folders.
+ * /T also fixes what is already in it; /L changes a link itself, never its target. A
+ * PowerShell script; the folder comes in as `UA_ADDONS_SETUP_FOLDER`. Exits 1223
+ * (ERROR_CANCELLED) when the UAC prompt is declined.
+ */
+export const WINDOWS_ADD_ONS_SETUP_SCRIPT = [
+  '$d = $env:UA_ADDONS_SETUP_FOLDER',
+  'try {',
+  '  $p = Start-Process -FilePath "$env:SystemRoot\\System32\\cmd.exe" -Verb RunAs -Wait -PassThru -WindowStyle Hidden ' +
+    '-ArgumentList "/c mkdir `"$d`" & icacls `"$d`" /grant *S-1-5-32-545:(OI)(CI)M /T /L"',
+  '  exit $p.ExitCode',
+  '} catch {',
+  '  for ($e = $_.Exception; $e; $e = $e.InnerException) { if ($e.NativeErrorCode -eq 1223) { exit 1223 } }',
+  '  [Console]::Error.WriteLine($_.Exception.Message)',
+  '  exit 1',
+  '}',
+].join('\n');
+
+/**
+ * Exits 0 when the folder in `UA_ADDONS_SETUP_FOLDER` has an allow rule for every local
+ * account (BUILTIN\Users, Authenticated Users or Everyone, by SID) that grants Modify on the
+ * folder and is inherited by files and folders: what the setup above and LUNA's installer
+ * give it. 197055 is FileSystemRights.Modify.
+ */
+export const WINDOWS_ADD_ONS_CHECK_SCRIPT = [
+  '$d = $env:UA_ADDONS_SETUP_FOLDER',
+  '$rules = (Get-Acl -LiteralPath $d).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])',
+  "$ok = @($rules | Where-Object { $_.AccessControlType -eq 'Allow' -and " +
+    "@('S-1-5-32-545', 'S-1-5-11', 'S-1-1-0') -contains $_.IdentityReference.Value -and " +
+    '($_.InheritanceFlags -band 3) -eq 3 -and ($_.PropagationFlags -band 2) -eq 0 -and ' +
+    '($_.FileSystemRights -band 197055) -eq 197055 }).Count -gt 0',
+  'if ($ok) { exit 0 } else { exit 1 }',
+].join('\n');
+
+/** Runs a Windows PowerShell script with `UA_ADDONS_SETUP_FOLDER` set to `folder`. */
+export function runAddOnsFolderScript(script: string, folder: string) {
+  const powershell = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
+    encoding: 'utf8',
+    env: { ...process.env, UA_ADDONS_SETUP_FOLDER: folder },
+    windowsHide: true,
+  });
+}
+
+/** Whether this user can add and remove entries in `folder` (ACLs included). */
+export function canWriteFolder(folder: string): boolean {
+  try {
+    if (!statSync(folder).isDirectory()) return false;
+    if (process.platform === 'win32') {
+      // access() sees only the read-only attribute on Windows, so try it.
+      const probe = join(folder, `.ua_builder_write_test_${process.pid}`);
+      writeFileSync(probe, '', { flag: 'wx' });
+      unlinkSync(probe);
+      return true;
+    }
+    accessSync(folder, constants.W_OK | constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the Add Ons folder is ready for installs. On Windows the real folder must also be
+ * set up for every user: one a standard user creates in ProgramData is theirs alone, so other
+ * accounts could add Add Ons but not replace or remove that user's. Elsewhere, and for
+ * `UA_ADDONS_FOLDER`, the same as `canWriteFolder()`.
+ */
+export function isAddOnsFolderReady(folder: string = addOnsFolder()): boolean {
+  if (!canWriteFolder(folder)) return false;
+  if (process.platform !== 'win32' || process.env['UA_ADDONS_FOLDER']) return true;
+  return runAddOnsFolderScript(WINDOWS_ADD_ONS_CHECK_SCRIPT, folder).status === 0;
+}
+
+/**
+ * Make sure this user can add and remove entries in the Add Ons folder, creating it if it is
+ * missing. When the user cannot (macOS: the folder is in /Library; Windows: it is in
+ * ProgramData and not set up for every user), sets it up for every user as LUNA does: macOS
+ * asks once for an administrator's password, Windows shows one UAC prompt. After that no
+ * install needs either. On Windows the real folder is never created without that setup.
+ * `UA_ADDONS_FOLDER` (tests, staging) is never escalated. Throws when the folder stays
+ * unwritable or the prompt is cancelled.
+ */
+export function prepareAddOnsFolder(folder: string = addOnsFolder()): void {
+  if (isAddOnsFolderReady(folder)) return;
+  const overridden = !!process.env['UA_ADDONS_FOLDER'];
+  if (process.platform !== 'win32' || overridden) {
+    try {
+      mkdirSync(folder, { recursive: true });
+    } catch {
+      // Not ours to create; the setup below makes it.
+    }
+    if (isAddOnsFolderReady(folder)) return;
+  }
+  if ((process.platform !== 'darwin' && process.platform !== 'win32') || overridden) {
+    throw new Error(`cannot write the Add Ons folder ${folder}`);
+  }
+  if (process.platform === 'darwin') {
+    console.log('Setting up the LUNA Add Ons folder for every user on this Mac (one time; asks for an administrator password)...');
+    const result = spawnSync('/usr/bin/osascript', ['-e', ADD_ONS_SETUP_SCRIPT, folder], { encoding: 'utf8' });
+    if (result.status !== 0) {
+      const detail = (result.stderr ?? '').trim() || (result.error?.message ?? 'osascript failed');
+      throw new Error(detail.includes('(-128)') ? 'Setting up the Add Ons folder was cancelled' : `could not set up ${folder}: ${detail}`);
+    }
+  } else {
+    console.log('Setting up the LUNA Add Ons folder for every user on this PC (one time; asks for administrator approval)...');
+    const result = runAddOnsFolderScript(WINDOWS_ADD_ONS_SETUP_SCRIPT, folder);
+    if (result.status === 1223) throw new Error('Setting up the Add Ons folder was cancelled');
+    if (result.status !== 0) {
+      const detail = (result.stderr ?? '').trim() || (result.error?.message ?? `exit ${result.status}`);
+      throw new Error(`could not set up ${folder}: ${detail}`);
+    }
+  }
+  if (!isAddOnsFolderReady(folder)) throw new Error(`${folder} is still not writable after setup`);
 }
 
 export interface Manifest {
@@ -130,6 +269,10 @@ export interface ManifestEntry {
   target?: string;
   floating?: boolean;
   show_with_session?: boolean;
+  /** `"window"` only: open at `width` x `height` and never resize. */
+  fixed_size?: boolean;
+  /** Keep running at full speed while hidden (no throttling, no suspension). */
+  run_hidden?: boolean;
   version?: string;
   /** Who makes the Add On; LUNA shows it in Settings > Add Ons. Overrides a top-level one. */
   manufacturer?: string;
@@ -267,7 +410,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
     if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
     if (e.target !== undefined && !['window', 'app', 'page', 'browser', 'editor'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
-    for (const k of ['floating', 'show_with_session'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
+    for (const k of ['floating', 'show_with_session', 'fixed_size', 'run_hidden'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
     if (e.manufacturer !== undefined && typeof e.manufacturer !== 'string') problems.push(`${where}: "manufacturer" must be a string`);
     if (e.description !== undefined && !isDescription(e.description)) problems.push(`${where}: "description" must be a string or an array of strings`);
   }

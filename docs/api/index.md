@@ -126,6 +126,7 @@
 | [MockMidiRow](interfaces/MockMidiRow.md) | A row for [MockEngine.midiEdit](classes/MockEngine.md#midiedit). |
 | [MockMidiSent](interfaces/MockMidiSent.md) | One live MIDI message the mock delivered, in [MockEngine.midiSent](classes/MockEngine.md#midisent). |
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
+| [NestedFileEntry](interfaces/NestedFileEntry.md) | One entry of [Gui.listAllFiles](classes/Gui.md#listallfiles): a [FileEntry](interfaces/FileEntry.md) anywhere below the listed folder. |
 | [NewBusOptions](interfaces/NewBusOptions.md) | - |
 | [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute (session ticks), as LUNA's verb takes them, unlike the clip-relative ticks of the [Note](interfaces/Note.md)s it returns. There is no channel: LUNA's `create_note` writes every note on channel 0 (fact 111). For another channel, add the notes to a clip with [Clip.addNotes](classes/Clip.md#addnotes), which takes one. |
 | [NewTrackFromPresetOptions](interfaces/NewTrackFromPresetOptions.md) | - |

@@ -10,6 +10,7 @@
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="addons"></a> `addOns` | `readonly` | [`Collection`](Collection.md)\<[`AddOn`](AddOn.md)\> | Installed Add Ons, by manifest id in lowercase (`byId('com.example.foo')`). | - |
 | <a id="armmode"></a> `armMode` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Record-arm mode of LUNA's transport bar. | - |
+| <a id="blessedfolders"></a> `blessedFolders` | `readonly` | [`Prop`](../interfaces/Prop.md)\<readonly `string`[] \| `undefined`\> | The blessed folders (fact 133): the folders the user lets every Add On read, as absolute paths with links resolved. [listFiles](#listfiles) and [listAllFiles](#listallfiles) list anything in them, and [serveMediaFile](#servemediafile) gives a URL for any file in them, of any type, but hidden ones. The user manages them in LUNA's Settings > Add Ons > FOLDERS; a page asks for one with [addBlessedFolder](#addblessedfolder). `undefined` until known, and on a LUNA without them. Follows LUNA once [watchBlessedFolders](#watchblessedfolders) has run. | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="pluginwindows"></a> `pluginWindows` | `readonly` | [`Prop`](../interfaces/Prop.md)\<readonly [`PluginWindow`](../interfaces/PluginWindow.md)[] \| `undefined`\> | The plugin editor windows open in LUNA, opened from the page or by the user (fact 126). `undefined` until known, and on a LUNA that does not publish them. Follows LUNA once [watchPluginWindows](#watchpluginwindows) has run, which `session.ready()` does. Read one slot's state from `effect.editorOpen`. | - |
@@ -74,6 +75,50 @@ The main window.
 [`GuiWindow`](GuiWindow.md)
 
 ## Methods
+
+### addBlessedFolder()
+
+```ts
+addBlessedFolder(path): Promise<void>;
+```
+
+Ask the user to let every Add On read the folder at `path` and every folder inside it,
+making it a blessed folder (fact 133). LUNA shows its own prompt ("An Add On wants to read
+the folder ..."), with DON'T ALLOW as the default, so a page can never bless one
+silently. Resolves as the prompt opens, not once answered: watch [blessedFolders](#blessedfolders)
+(after [watchBlessedFolders](#watchblessedfolders)) for the result. Resolves at once, without asking, when
+the folder is already blessed or inside one that is.
+
+LUNA never asks for a folder too broad for one answer: a disk's root, the home folder or
+a folder holding it (`/Users`), or `~/Library`; ask for a folder inside one instead
+(`~/Music`). Once the user says DON'T ALLOW, LUNA does not ask for that folder again until
+it restarts. The user can still add any folder in Settings > Add Ons > FOLDERS.
+
+Rejects with a `Luna.Error` whose `code` is `uasrv.invalid_value` for a relative path or
+a file, `uasrv.filesystem_error` when nothing is at `path`, `uasrv.not_permitted`
+(without asking) for a folder too broad or one the user refused this session, and
+`uasrv.too_many_requests` while LUNA is already asking. A LUNA without the command
+rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.gui.watchBlessedFolders();
+await luna.gui.addBlessedFolder('/Users/me/Samples');
+luna.gui.blessedFolders.onChange(() => console.log(luna.gui.blessedFolders.value));
+```
+
+***
 
 ### available()
 
@@ -147,8 +192,12 @@ chooseFolders(options): Promise<string[]>;
 
 LUNA's native folder dialog. Resolves to the chosen folders' **absolute paths**, or `[]`
 if cancelled. A path route like [chooseFiles](#choosefiles): hand the paths to
-[listFiles](#listfiles) or the engine, not to `fetch`. Picking a folder lets [listFiles](#listfiles)
-read it and every folder inside it, from now on and after LUNA restarts. Needs `/gui` ([Gui.available](#available)) and a
+[listFiles](#listfiles) or the engine, not to `fetch`. LUNA then asks the user, once for all the
+folders picked, whether every Add On may read them (fact 133). If they allow it, each
+becomes a blessed folder: [listFiles](#listfiles) reads it and every folder inside it, from now on
+and after LUNA restarts. If not, you still get the paths (for `session.importPath()`), but
+[listFiles](#listfiles) refuses them; check [blessedFolders](#blessedfolders). Nothing is asked for a folder
+already blessed or inside one. Needs `/gui` ([Gui.available](#available)) and a
 LUNA that has the dialog (fact 106); an older one rejects with `Luna.Unsupported`.
 
 #### Parameters
@@ -364,6 +413,45 @@ True when LUNA has the editor of `slot` on `channelUid` open; `undefined` until 
 
 ***
 
+### listAllFiles()
+
+```ts
+listAllFiles(path): Promise<{
+  files: NestedFileEntry[];
+  truncated: boolean;
+}>;
+```
+
+Everything below the folder at `path`, every folder inside it included (fact 133): each
+folder's entry is followed by its own contents, each level in [listFiles](#listfiles)' order,
+and every entry has its `relativePath`. Hidden files and folders are left out, and a link
+to a folder is listed but not followed. `truncated` is true when LUNA stopped at its
+limit (10,000 entries, or 5 seconds of reading); list a folder further down to see the rest. `path` must be a
+blessed folder or inside one, with the same errors as [listFiles](#listfiles). A LUNA that
+cannot list recursively rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`Promise`\<\{
+  `files`: [`NestedFileEntry`](../interfaces/NestedFileEntry.md)[];
+  `truncated`: `boolean`;
+\}\>
+
+#### Example
+
+```ts
+const { files } = await luna.gui.listAllFiles('/Users/me/Samples');
+const loops = files.filter((f) => !f.isDirectory && f.relativePath.startsWith('Loops/'));
+```
+
+***
+
 ### listFiles()
 
 ```ts
@@ -375,12 +463,15 @@ The files and folders directly inside the folder at `path`, as LUNA sees the dis
 sort: case ignored, and numbers by value, so `take2` comes before `take10`. `path` must
 be absolute.
 
-LUNA lists only folders the user gave it: one picked with [chooseFolders](#choosefolders) or
-dropped on an Add On (`Luna.onPathDrop()`), or a folder inside one. LUNA remembers
-them across restarts, at most 64 (the oldest are forgotten first), until the user
-clicks FORGET FOLDERS in Settings > Add Ons. They are LUNA-wide, not per Add On. A
-path is judged where it really is, so `..` or a link out of a granted folder is
-refused.
+LUNA lists only the blessed folders ([blessedFolders](#blessedfolders)) and the folders inside them:
+one picked with [chooseFolders](#choosefolders) or dropped on an Add On (`Luna.onPathDrop()`) and
+allowed in LUNA's prompt, allowed through [addBlessedFolder](#addblessedfolder), or added in Settings >
+Add Ons > FOLDERS. LUNA
+remembers them across restarts, at most 64 (the oldest are forgotten first), until the
+user removes them there. They are LUNA-wide, not per Add On. A path is judged where it
+really is, so `..` or a link out of a blessed folder is refused, and so is a hidden
+folder inside one (`.git`). For everything below a
+folder in one call, use [listAllFiles](#listallfiles).
 
 Rejects with a `Luna.Error` whose `code` is `uasrv.not_permitted` when `path` is not in
 a granted folder (whether or not anything is there: ask with [chooseFolders](#choosefolders)),
@@ -568,6 +659,36 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ***
 
+### removeBlessedFolder()
+
+```ts
+removeBlessedFolder(path): Promise<void>;
+```
+
+Stop letting Add Ons read a blessed folder (fact 133), without asking: removing access
+needs no consent. `path` must be one of [blessedFolders](#blessedfolders); a folder inside one cannot
+be removed on its own. [blessedFolders](#blessedfolders) has changed by the time this resolves.
+Rejects with a `Luna.Error` whose `code` is `uasrv.invalid_value` for any other path. A
+LUNA without the command rejects with `Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+for (const folder of luna.gui.blessedFolders.value ?? []) await luna.gui.removeBlessedFolder(folder);
+```
+
+***
+
 ### removeImportedAddOn()
 
 ```ts
@@ -627,10 +748,16 @@ Reveal a file or folder in Finder / Explorer.
 serveMediaFile(addOnId, path): Promise<string>;
 ```
 
-The URL your Add On's page loads a local audio or video file from, given its absolute
-`path` (from [chooseFiles](#choosefiles), `Luna.onPathDrop()`, or a path you saved, say in
-`session.storage`). Set it as a `<video>` or `<audio>` `src`, or read the bytes with
-XMLHttpRequest (fact 114). This is how a page plays or reads a file it knows only by path.
+The URL your Add On's page loads a local file from, given its absolute `path` (from
+[chooseFiles](#choosefiles), [listFiles](#listfiles), `Luna.onPathDrop()`, or a path you saved, say in
+`session.storage`). Set it as a `<video>`, `<audio>` or `<img>` `src`, or read the bytes
+with XMLHttpRequest (fact 114). This is how a page plays or reads a file it knows only by
+path.
+
+Any file in a blessed folder ([blessedFolders](#blessedfolders)) is served whatever its type: JSON,
+text, images, PDFs as well as media (fact 133). Hidden files below the blessed folder
+(`.git`, `.env`) and links that lead out of it are not. Outside the blessed folders only
+audio, video and MIDI are served, as below.
 
 `addOnId` is your manifest's `id`: the file is served to that Add On's pages only. On
 macOS the URL is `ua-content://<your Add On>/<path>` and supports byte ranges, so media
@@ -638,12 +765,12 @@ seeks without reading the whole file; on Windows it is a `file:///` URL, which m
 elements and XMLHttpRequest load but `fetch()` refuses. Ask again
 after every reload: LUNA forgets the files it served when it quits.
 
-Only real media is served. LUNA follows links and checks the file they lead to: it needs
+Outside the blessed folders only real media is served. LUNA follows links and checks the file they lead to: it needs
 an audio, video or MIDI extension (`mp4`, `m4v`, `mov`, `webm`, `ogv`, `wav`, `aif`,
 `aiff`, `mp3`, `m4a`, `flac`, `ogg`, `oga`, `opus`, `mid`, `midi`) and that format's
 signature in its first bytes (`MThd` for a Standard MIDI File). Rejects with a
 `Luna.Error` whose `code` is `uasrv.invalid_value` for a relative path, a folder, or a
-file that is not audio, video or MIDI; `uasrv.filesystem_error` when
+file outside the blessed folders that is not audio, video or MIDI; `uasrv.filesystem_error` when
 nothing is at `path` (a session opened on another computer, a file moved) or it cannot
 be read; `uasrv.not_installed` when `addOnId` names no installed Add On with a local
 page. A LUNA without the command rejects with `Luna.Unsupported`.
@@ -862,6 +989,28 @@ session that called `ready()` are already covered; use this for nodes outside a 
 #### Inherited from
 
 [`Node`](Node.md).[`watch`](Node.md#watch)
+
+***
+
+### watchBlessedFolders()
+
+```ts
+watchBlessedFolders(): Promise<void>;
+```
+
+Follow [blessedFolders](#blessedfolders) for the life of the connection. Idempotent; resolves once
+the first list is in, or at once on an engine without `/gui`.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.gui.watchBlessedFolders();
+luna.gui.blessedFolders.onChange(() => render(luna.gui.blessedFolders.value ?? []));
+```
 
 ***
 

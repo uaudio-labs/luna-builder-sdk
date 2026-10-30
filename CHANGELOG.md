@@ -2,7 +2,10 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
-## Unreleased
+## 3.1.1 Beta 1
+
+The SDK's version now follows LUNA's: this is the SDK for LUNA 3.1.1. Versions before it
+(up to 0.2.1) used their own numbering.
 
 Changed (breaking)
 - Session preferences are now **session storage**, to keep them apart from LUNA's own
@@ -46,11 +49,68 @@ Fixed
   storage values as JSON too, as LUNA does (fact 129).
 
 Changed
+- macOS: when the LUNA Add Ons folder (`/Library/Application Support/Universal Audio/LUNA/Add
+  Ons`) is missing or not writable, `ua-builder install` asks once for an administrator password
+  and sets it up for every user on the Mac, as LUNA now does: owned by root, group
+  `staff`, with an inherited ACL that lets every local account add, change and remove Add Ons.
+  After that no install needs a password. `ua-builder doctor` reports a folder that still needs
+  it, and the setup installer sets it up the same way instead of handing it to one user.
+- Windows: LUNA's Add Ons folder moves to `%ProgramData%\Universal Audio\LUNA\Add Ons`, one
+  folder for every account on the PC, matching LUNA. When it is missing or not set up for every
+  user, `ua-builder install` shows one UAC prompt and grants every local account Modify on it,
+  inherited, as LUNA does; after that no install needs one. `ua-builder doctor` reports a
+  folder that still needs it and no longer creates it, and the setup installer leaves it to
+  LUNA. Add Ons in the old `%LOCALAPPDATA%\Universal Audio\LUNA\Add Ons` are not moved:
+  reinstall them.
+- `luna.gui.serveMediaFile(addOnId, path)` serves **any** file in a blessed folder, whatever its
+  type (JSON, text, images, PDFs as well as media), so a page can load everything in a folder
+  the user let Add Ons read. Hidden files below the blessed folder (`.git`, `.env`) and links
+  that lead out of it are not served; outside the blessed folders only audio, video and MIDI
+  are, as before (fact 133). Needs a LUNA with blessed folders; an older one serves media only.
+- Picking a folder with `luna.gui.chooseFolders()` or dropping one on an Add On no longer lets
+  `listFiles` read it at once: LUNA first asks the user ("Allow Add Ons to Read a Folder"),
+  once for all the folders. With DON'T ALLOW the page still gets the paths, for `importPath`,
+  but `listFiles` refuses them with `uasrv.not_permitted`; check `luna.gui.blessedFolders`.
+  The mock's `blessAnswer` answers for the dialog too (fact 133).
+- The folders `listFiles` may read are now called the **blessed folders**. LUNA lists them in
+  Settings > Add Ons > FOLDERS, where the user adds them (a folder dialog or a drop) and
+  removes them one at a time; FORGET FOLDERS is gone (fact 133).
 - `luna.gui.serveMediaFile(addOnId, path)` serves MIDI files too: `.mid` and `.midi` that
   start with a Standard MIDI File header (`MThd`), on a LUNA built with it. Read the bytes with
   `XMLHttpRequest` and parse them; a media element does not play MIDI (fact 114).
 
 Added
+- `luna.gui.blessedFolders` (with `luna.gui.watchBlessedFolders()`): the folders the user lets
+  every Add On read, as absolute paths, following LUNA (fact 133).
+- `luna.gui.addBlessedFolder(path)` asks the user to let every Add On read a folder; LUNA shows
+  its own prompt, with DON'T ALLOW as the default, and the answer arrives in
+  `blessedFolders`. It rejects with `uasrv.not_permitted`, without asking, for a disk's root,
+  the home folder or a folder holding it, `~/Library`, or a folder the user refused earlier in
+  the session. `luna.gui.removeBlessedFolder(path)` removes one without asking.
+- `luna.gui.listAllFiles(path)` lists everything below a blessed folder in one call: each
+  folder followed by its contents, every entry with its `relativePath`, hidden entries left
+  out and links to folders not followed. `truncated` is true past LUNA's 10,000-entry limit
+  or 5 seconds of reading.
+  New type `Luna.NestedFileEntry`.
+- `examples/files.html` has a second tab, **Folders**: a Finder-style window over the blessed
+  folders, with a sidebar tree of `blessedFolders` and the folders inside them, back, forward, up and a path bar, each
+  entry's kind, a "not available" view for a folder that is gone or no longer blessed (with
+  "Ask LUNA for access…", or "Remove from Blessed Folders" for one that is gone), a ✕ that
+  removes a blessed folder after a second click (`removeBlessedFolder()`), and Import for audio files onto a new track at the playhead. The
+  File routes demo is the first tab, unchanged.
+- `Luna.MockEngine` models the blessed folders: `blessAnswer`, `blessRequests`, `listLimit`,
+  the `/gui/add_ons` `blessed_folders` property, and serving any file in one.
+- Manifest `fixed_size` (boolean, default `false`) for `"window"` Add Ons: with `true` the
+  window always opens at the manifest's `width` and `height` and has no resize controls (no
+  resizable edges, no maximize button, and on macOS a greyed-out zoom and full-screen button).
+  LUNA keeps restoring its position but not a saved size or full screen. `ua-builder` rejects a
+  non-boolean, and `Luna.AddOn.fixedSize` reads it. Needs a LUNA that reads the field; an older
+  one ignores it and the window stays resizable.
+- Manifest `run_hidden` (boolean, default `false`), for any target: with `true` LUNA keeps the
+  page running at full speed while it is hidden (another page in front, its window closed,
+  LUNA covered) instead of slowing its timers and suspending it. For Add Ons that keep time,
+  such as a sequencer. `ua-builder` rejects a non-boolean, and `Luna.AddOn.runHidden` reads it.
+  Needs a LUNA that reads the field; an older one ignores it and the page sleeps when hidden.
 - Track presets, as LUNA's New Track From Preset browser offers them (fact 132).
   `luna.presets.trackSelection({ category })` is a live selection over track presets by
   category (`Luna.TRACK_PRESET_CATEGORIES`: Audio, Instrument, Bus, Multi-Track, or `null` for
@@ -92,11 +152,23 @@ Added
 - `examples/inserts.html` picks plugins that way: a target slot (the next empty one, a given
   effect slot, or the instrument slot), search text, a category and Favorites, and the list is
   what LUNA offers that slot on that channel. On an older LUNA it falls back to the catalog.
+- Plugin editor windows (fact 126): `effect.openEditor()` and `effect.closeEditor()` open and
+  close the plugin's window in LUNA, as clicking it in LUNA's mixer does, and resolve once
+  LUNA shows the change; `effect.editorOpen` follows the window, whoever opens or closes it.
+  Without an `Effect`: `luna.gui.showPlugin(channelUid, slot)`, `luna.gui.hidePlugin(...)` and
+  `luna.gui.pluginWindows`. `session.ready()` now also follows `/gui/plugin_windows`. Needs
+  a LUNA that has them; an older one rejects with `Luna.Unsupported`, and `editorOpen` stays
+  `undefined` there.
+  `examples/inserts.html` shows it: click a plugin's name to show or hide its window, and the
+  name stays lit while the window is open.
 
 Documentation
 - Session storage: a context is any name without `/`, not only the Add On's id. The docs
   now show an Add On using one context per kind of data (`com.example.seq.tracks`), a
   record per item and a field per part, instead of one record in one value (fact 129).
+- `docs/FILES-GUIDE.md`, a walkthrough of getting files in and out of an Add On: picking,
+  dropping, folders and media by path, with recipes, a common-mistakes table and testing
+  notes. `docs/FILES.md` points to it.
 
 ## 0.2.1
 
@@ -117,15 +189,6 @@ Added
   `luna.gui.addOns` items (`''` when the manifest has none). `ua-builder new --description "Text"`
   writes it; without the flag it is left out. In the `add_ons` shape a top-level `description`
   is the default for every entry without its own, as `manufacturer` is.
-- Plugin editor windows (fact 126): `effect.openEditor()` and `effect.closeEditor()` open and
-  close the plugin's window in LUNA, as clicking it in LUNA's mixer does, and resolve once
-  LUNA shows the change; `effect.editorOpen` follows the window, whoever opens or closes it.
-  Without an `Effect`: `luna.gui.showPlugin(channelUid, slot)`, `luna.gui.hidePlugin(...)` and
-  `luna.gui.pluginWindows`. `session.ready()` now also follows `/gui/plugin_windows`. Needs
-  a LUNA that has them; an older one rejects with `Luna.Unsupported`, and `editorOpen` stays
-  `undefined` there.
-  `examples/inserts.html` shows it: click a plugin's name to show or hide its window, and the
-  name stays lit while the window is open.
 
 ## 0.2.0
 

@@ -514,6 +514,8 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(luna.gui.addOns.items.map((a) => a.name.value)).toEqual(['Demo']);
     expect(luna.gui.addOns.items[0]!.floating.value).toBe(true);
     expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
+    expect(luna.gui.addOns.items[0]!.fixedSize.value).toBe(false);
+    expect(luna.gui.addOns.items[0]!.runHidden.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.manufacturer.value).toBe('Example Co');
     expect(luna.gui.addOns.items[0]!.description.value).toBe('A demo Add On.');
     expect(luna.gui.addOns.items[0]!.version.value).toBe('1.0.0');
@@ -597,7 +599,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(await code(luna.gui.listFiles('/Users/me'))).toBe('uasrv.not_permitted');
     expect(await code(luna.gui.listFiles('/Users/me/Samples Old'))).toBe('uasrv.not_permitted');
     expect(await code(luna.gui.listFiles('/Users/me/Samples/..'))).toBe('uasrv.not_permitted');
-    // Clearing them, as FORGET FOLDERS does, withdraws access.
+    // Clearing them, as removing them in Settings does, withdraws access.
     engine.grantedFolders = [];
     expect(await code(luna.gui.listFiles('/Users/me/Samples'))).toBe('uasrv.not_permitted');
   });
@@ -625,6 +627,100 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Movies/gone.mov'))).toBe('uasrv.filesystem_error');
     expect(await code(luna.gui.serveMediaFile('com.example.not-installed', '/Movies/cut.mov'))).toBe('uasrv.not_installed');
     expect(engine.mediaServed).toEqual([]);
+  });
+
+  it('lists everything below a blessed folder, each folder followed by its contents (fact 133)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Samples'] = ['take10.wav', 'Loops/', '.git/', 'take2.wav'];
+    engine.folders['/Samples/Loops'] = ['b.wav', 'a.wav', '.DS_Store'];
+    engine.folders['/Samples/.git'] = ['config'];
+    engine.grantFolder('/Samples');
+    const { files, truncated } = await luna.gui.listAllFiles('/Samples');
+    expect(files.map((f) => f.relativePath)).toEqual(['Loops', 'Loops/a.wav', 'Loops/b.wav', 'take2.wav', 'take10.wav']);
+    expect(files[1]).toEqual({ name: 'a.wav', path: '/Samples/Loops/a.wav', isDirectory: false, relativePath: 'Loops/a.wav' });
+    expect(truncated).toBe(false);
+    engine.listLimit = 2;
+    expect(await luna.gui.listAllFiles('/Samples')).toEqual({ files: files.slice(0, 2), truncated: true });
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.listAllFiles('/Elsewhere'))).toBe('uasrv.not_permitted');
+  });
+
+  it('reports a LUNA that cannot list recursively as Luna.Unsupported', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Samples'] = ['kick.wav'];
+    engine.grantFolder('/Samples');
+    // An older LUNA ignores `recursive` and answers one level without `truncated`.
+    engine.overrideCommand('/gui/list_files', () => ({ files: [{ name: 'kick.wav', path: '/Samples/kick.wav', is_directory: false }] }));
+    await expect(luna.gui.listAllFiles('/Samples')).rejects.toBeInstanceOf(Luna.Unsupported);
+  });
+
+  it('follows the blessed folders, adding one only when the user allows it (fact 133)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Users/me/Samples'] = ['Loops/'];
+    engine.folders['/Users/me/Samples/Loops'] = [];
+    engine.folders['/Users/me/Video'] = ['notes.txt'];
+    await luna.gui.watchBlessedFolders();
+    expect(luna.gui.blessedFolders.value).toEqual([]);
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.addBlessedFolder('Samples'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.addBlessedFolder('/Users/me/Video/notes.txt'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.addBlessedFolder('/Users/me/Nope'))).toBe('uasrv.filesystem_error');
+    engine.blessAnswer = 'dont_allow';
+    await luna.gui.addBlessedFolder('/Users/me/Samples');
+    await engine.settled();
+    expect(luna.gui.blessedFolders.value).toEqual([]);
+    engine.blessAnswer = 'allow';
+    await luna.gui.addBlessedFolder('/Users/me/Samples');
+    await Luna.settle(() => luna.gui.blessedFolders.value?.length === 1, 'blessed');
+    expect(luna.gui.blessedFolders.value).toEqual(['/Users/me/Samples']);
+    // Inside a blessed folder: no prompt.
+    await luna.gui.addBlessedFolder('/Users/me/Samples/Loops');
+    expect(engine.blessRequests).toEqual(['/Users/me/Samples', '/Users/me/Samples']);
+    expect(await code(luna.gui.removeBlessedFolder('/Users/me/Samples/Loops'))).toBe('uasrv.invalid_value');
+    await luna.gui.removeBlessedFolder('/Users/me/Samples');
+    await Luna.settle(() => luna.gui.blessedFolders.value?.length === 0, 'removed');
+    expect(await code(luna.gui.listFiles('/Users/me/Samples'))).toBe('uasrv.not_permitted');
+    engine.fail('/gui/add_blessed_folder', 'uasrv.invalid_object');
+    await expect(luna.gui.addBlessedFolder('/x')).rejects.toBeInstanceOf(Luna.Unsupported);
+    engine.fail('/gui/remove_blessed_folder', 'uasrv.invalid_object');
+    await expect(luna.gui.removeBlessedFolder('/x')).rejects.toBeInstanceOf(Luna.Unsupported);
+  });
+
+  it('asks before a folder picked in the dialog is blessed; refused, the path still comes back (fact 133)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Users/me/Samples'] = ['kick.wav'];
+    engine.folders['/Users/me/Video'] = [];
+    engine.blessAnswer = 'dont_allow';
+    engine.nextDialogFiles = ['/Users/me/Samples'];
+    expect(await luna.gui.chooseFolders()).toEqual(['/Users/me/Samples']);
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    expect(await code(luna.gui.listFiles('/Users/me/Samples'))).toBe('uasrv.not_permitted');
+    engine.blessAnswer = 'allow';
+    engine.nextDialogFiles = ['/Users/me/Samples', '/Users/me/Video'];
+    expect(await luna.gui.chooseFolders({ allowMultiple: true })).toEqual(['/Users/me/Samples', '/Users/me/Video']);
+    expect((await luna.gui.listFiles('/Users/me/Samples')).map((e) => e.name)).toEqual(['kick.wav']);
+    // Once blessed, picking it again asks nothing.
+    engine.nextDialogFiles = ['/Users/me/Samples'];
+    await luna.gui.chooseFolders();
+    expect(engine.blessRequests).toEqual(['/Users/me/Samples', '/Users/me/Samples', '/Users/me/Video']);
+  });
+
+  it('serves any file in a blessed folder but hidden ones (fact 133)', async () => {
+    const { engine, luna } = await connected();
+    engine.folders['/Project'] = ['data.json', '.env', 'img/', '.git/'];
+    engine.folders['/Project/img'] = ['cover.png'];
+    engine.folders['/Project/.git'] = ['config'];
+    engine.folders['/Other'] = ['notes.txt'];
+    engine.mediaFiles['/Other/notes.txt'] = null;
+    engine.grantFolder('/Project');
+    expect(await luna.gui.serveMediaFile('com.example.demo', '/Project/data.json')).toBe('ua-content://com.example.demo/Project/data.json');
+    expect(await luna.gui.serveMediaFile('com.example.demo', '/Project/img/cover.png')).toBe('ua-content://com.example.demo/Project/img/cover.png');
+    const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
+    // Hidden files below it, and anything outside it that is not media, take the media rule.
+    expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Project/.env'))).toBe('uasrv.filesystem_error');
+    expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Project/.git/config'))).toBe('uasrv.filesystem_error');
+    expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Other/notes.txt'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.serveMediaFile('com.example.not-installed', '/Project/data.json'))).toBe('uasrv.not_installed');
   });
 
   it('installs Add Ons by marketplace id or GitHub repo URL (fact 128)', async () => {

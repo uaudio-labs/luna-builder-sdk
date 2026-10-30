@@ -681,6 +681,267 @@ describe('examples/files.html', () => {
   });
 });
 
+describe('examples/files.html Folders tab', () => {
+  function engineWithDisk() {
+    const engine = engineWithSession(['Vocal']);
+    engine.folders['/Users/me/Samples'] = ['kick.wav', 'Loops/', '.DS_Store', 'notes.txt', 'cover.png'];
+    engine.folders['/Users/me/Samples/Loops'] = ['beat.aif'];
+    engine.folders['/Users/me/Movies'] = [];
+    engine.grantFolder('/Users/me/Samples');
+    engine.grantFolder('/Users/me/Movies');
+    engine.grantFolder('/Volumes/Gone/Takes');   // blessed, on a drive that is not connected
+    return engine;
+  }
+  type Page = Awaited<ReturnType<typeof loadExamplePage>>;
+  const names = (page: Page) => page.all('#fList td.name').map((n) => n.textContent);
+  const kinds = (page: Page) => page.all('#fList td.kind').map((n) => n.textContent);
+  // Each sidebar row as its label, indented two spaces per level, '▸'/'▾' when it can open or is open.
+  const sidebar = (page: Page) => page.all('#fSidebar li').map((li) => {
+    const depth = (parseInt((li as HTMLElement).style.paddingLeft || '8', 10) - 8) / 14;
+    const twisty = li.querySelector('.twisty')?.textContent ?? '';
+    const flag = li.querySelector('.flag') ? ' (Not available)' : '';
+    return `${'  '.repeat(depth)}${twisty}${li.querySelector('.label')?.textContent ?? li.textContent}${flag}`;
+  });
+  const notice = (page: Page) => ((page.document.querySelector('#fNotice') as HTMLElement).hidden ? '' : page.text('#fNotice'));
+  const dblclick = (page: Page, el: Element) => el.dispatchEvent(new page.window.MouseEvent('dblclick', { bubbles: true }));
+
+  it('lists the blessed folders, opens one like the Finder, and walks into and back out of a subfolder', async () => {
+    const page = await loadExamplePage('files.html', engineWithDisk(), { search: '?tab=folders&folder=/Users/me/Samples' });
+    expect((page.document.querySelector('#folders') as HTMLElement).hidden).toBe(false);
+    expect((page.document.querySelector('#routes') as HTMLElement).hidden).toBe(true);
+    await page.waitFor(() => names(page).length === 4, 'the listing');
+    expect(names(page)).toEqual(['📄cover.png', '🎵kick.wav', '📁Loops', '📄notes.txt'].map((n) => n.replace('📄cover', '🖼️cover')));
+    expect(kinds(page)).toEqual(['Image', 'Audio', 'Folder', 'Text']);
+    expect(page.text('#fCount')).toBe('4 items (1 folder, 3 files)');
+    expect(page.all('#fSidebar li.current .label').map((li) => li.textContent)).toEqual(['Samples']);
+    // Only audio gets an Import button.
+    expect(page.all('#fList button.import')).toHaveLength(1);
+    expect((page.document.querySelector('#fUp') as HTMLButtonElement).disabled).toBe(true); // the top of the blessed folder
+    dblclick(page, page.all('#fList tr')[2]!);
+    await page.waitFor(() => names(page).join() === '🎵beat.aif', 'the subfolder');
+    expect(page.all('#fCrumbs button').map((b) => b.textContent)).toEqual(['Samples', 'Loops']);
+    (page.document.querySelector('#fBack') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 4, 'back');
+    (page.document.querySelector('#fForward') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 1, 'forward');
+    (page.document.querySelector('#fUp') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 4, 'up');
+    page.close();
+  });
+
+  it('shows a blessed folder that is not there as not available, and an empty one as empty', async () => {
+    const page = await loadExamplePage('files.html', engineWithDisk(), { search: '?tab=folders&folder=/Users/me/Movies' });
+    await page.waitFor(() => notice(page).includes('Empty folder'), 'the empty folder');
+    expect(page.text('#fCount')).toBe('0 items');
+    await page.waitFor(() => sidebar(page).some((t) => t.includes('Not available')), 'the missing folder flagged');
+    expect(sidebar(page)).toEqual(['Movies', '▸Samples', 'Takes (Not available)']);
+    (page.all('#fSidebar li')[2] as HTMLElement).click();
+    await page.waitFor(() => notice(page).includes('“Takes” is not available'), 'the not-available notice');
+    expect(notice(page)).toContain('drive it is on is not connected');
+    expect(names(page)).toEqual([]);
+    page.close();
+  });
+
+  it('a folder removed from the blessed folders while open becomes not available, and asking LUNA brings it back', async () => {
+    const engine = engineWithDisk();
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => names(page).length === 4, 'the listing');
+    engine.grantedFolders = engine.grantedFolders.filter((f) => f !== '/Users/me/Samples');
+    await page.waitFor(() => notice(page).includes('not in a blessed folder'), 'the not-permitted notice');
+    expect(sidebar(page).join()).not.toContain('Samples');
+    engine.blessAnswer = 'allow';
+    (page.document.querySelector('#fNotice button') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 4, 'the folder back');
+    expect(engine.blessRequests).toEqual(['/Users/me/Samples']);
+    page.close();
+  });
+
+  it('imports an audio file onto a new track at the playhead, with the button or by double-click', async () => {
+    const engine = engineWithDisk();
+    engine.setValue('/sessions/abc', 'play_start', 4 * Luna.TICKS_PER_BEAT);
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => page.all('#fList button.import').length === 1 && !(page.document.querySelector('#fList button.import') as HTMLButtonElement).disabled, 'an enabled Import');
+    const tracksBefore = engine.children('/sessions/abc/tracks').length;
+    (page.document.querySelector('#fList button.import') as HTMLButtonElement).click();
+    await page.waitFor(() => page.text('#fMessage').startsWith('Imported'), 'the import');
+    expect(page.text('#fMessage')).toContain('“kick” onto a new track at 2|1|');
+    expect(engine.children('/sessions/abc/tracks')).toHaveLength(tracksBefore + 1);
+    const insert = engine.requests.find((r) => r.path.endsWith('/insert_clip'))!.data as { start: number };
+    expect(insert.start).toBe(4 * Luna.TICKS_PER_BEAT);
+    dblclick(page, page.all('#fList tr')[1]!);
+    await page.waitFor(() => engine.children('/sessions/abc/tracks').length === tracksBefore + 2, 'the second import');
+    page.close();
+  });
+
+  it('Add Folder blesses and opens the folder chosen in LUNA’s dialog; arrows and Enter move and open', async () => {
+    const engine = engineWithDisk();
+    engine.grantedFolders = [];
+    engine.nextDialogFiles = ['/Users/me/Samples'];
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders' });
+    await page.waitFor(() => !(page.document.querySelector('#fAdd') as HTMLButtonElement).disabled, 'the page to connect');
+    expect(notice(page)).toContain('No folder open');
+    (page.document.querySelector('#fAdd') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 4 && sidebar(page).join() === '▸Samples', 'the chosen folder');
+    const list = page.document.querySelector('#fList')!;
+    const key = (k: string) => list.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    key('ArrowDown'); key('ArrowDown'); key('ArrowDown');
+    expect(page.all('#fList tr.selected').map((tr) => tr.textContent)).toEqual(['📁LoopsFolder›']);
+    key('Enter');
+    await page.waitFor(() => names(page).join() === '🎵beat.aif', 'the subfolder');
+    page.close();
+  });
+
+  it('a double-click opens a subfolder (a click only selects), and the sidebar tree follows it down and opens subfolders itself', async () => {
+    const engine = engineWithDisk();
+    engine.folders['/Users/me/Samples/Loops'] = ['beat.aif', 'Drums/'];
+    engine.folders['/Users/me/Samples/Loops/Drums'] = ['snare.wav'];
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => names(page).length === 4, 'the listing');
+    expect(sidebar(page)).toEqual(['Movies', '▸Samples', 'Takes (Not available)']);
+    // A click selects; a double-click opens.
+    (page.all('#fList tr.dir')[0] as HTMLElement).click();
+    expect(page.all('#fList tr.selected').map((tr) => tr.querySelector('td.name')!.textContent)).toEqual(['📁Loops']);
+    expect(names(page)).toHaveLength(4);
+    dblclick(page, page.all('#fList tr.dir')[0]!);
+    await page.waitFor(() => names(page).join() === '🎵beat.aif,📁Drums', 'Loops');
+    await page.waitFor(() => sidebar(page).join('|') === 'Movies|▾Samples|  ▸Loops|Takes (Not available)', 'the tree down to Loops');
+    expect(page.all('#fSidebar li.current .label').map((l) => l.textContent)).toEqual(['Loops']);
+    // The triangle opens Loops in the tree without leaving the window's folder...
+    const loops = () => page.all('#fSidebar li').find((li) => li.querySelector('.label')?.textContent === 'Loops') as HTMLElement;
+    (loops().querySelector('.twisty') as HTMLElement).click();
+    await page.waitFor(() => sidebar(page).includes('    ▸Drums'), 'Drums in the tree');
+    expect(names(page).join()).toBe('🎵beat.aif,📁Drums');
+    // ...and a folder in the tree opens in the window.
+    (page.all('#fSidebar li').find((li) => li.querySelector('.label')?.textContent === 'Drums') as HTMLElement).click();
+    await page.waitFor(() => names(page).join() === '🎵snare.wav', 'Drums');
+    expect(page.all('#fCrumbs button').map((b) => b.textContent)).toEqual(['Samples', 'Loops', 'Drums']);
+    // Closing a branch hides it.
+    (loops().querySelector('.twisty') as HTMLElement).click();
+    await page.waitFor(() => !sidebar(page).includes('    ▸Drums'), 'Loops closed');
+    page.close();
+  });
+
+  it('says why Import is off while no session is open, and turns it on when one opens', async () => {
+    const engine = new Luna.MockEngine();
+    engine.folders['/Users/me/Samples'] = ['kick.wav'];
+    engine.grantFolder('/Users/me/Samples');
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => page.text('#fMessage').startsWith('Import needs a session'), 'the no-session message');
+    expect((page.document.querySelector('#fList button.import') as HTMLButtonElement).disabled).toBe(true);
+    engine.addSession('abc', { tracks: ['Vocal'], name: 'Later', packageUid: 'pkg_abc' });
+    engine.setValue('/sessions', 'focused_session', 'abc');
+    await page.waitFor(() => !(page.document.querySelector('#fList button.import') as HTMLButtonElement).disabled, 'Import on');
+    expect(page.text('#fMessage')).toBe('');
+    page.close();
+  });
+
+  it('a hidden notice is not displayed, so it cannot cover the list and take its clicks', async () => {
+    const page = await loadExamplePage('files.html', engineWithDisk(), { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => names(page).length === 4, 'the listing');
+    expect((page.document.querySelector('#fNotice') as HTMLElement).hidden).toBe(true);
+    // `.finder .notice` sets display: flex, which beats the hidden attribute: without a rule
+    // for `[hidden]` the empty notice sat over the list in a real browser and took every
+    // click. jsdom does not cascade that, so check the rule is there.
+    const rules = [...page.document.styleSheets].flatMap((sheet) => [...sheet.cssRules]) as CSSStyleRule[];
+    expect(rules.some((r) => /\.notice\[hidden\]/.test(r.selectorText ?? '') && r.style.display === 'none')).toBe(true);
+    page.close();
+  });
+
+  it('removes a blessed folder from the sidebar with a confirmed ✕, moving the window off it', async () => {
+    const engine = engineWithDisk();
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => names(page).length === 4, 'the listing');
+    const row = (label: string) => page.all('#fSidebar li').find((li) => li.querySelector('.label')?.textContent === label) as HTMLElement | undefined;
+    // Only the blessed folders have one, not the folders inside them.
+    (row('Samples')!.querySelector('.twisty') as HTMLElement).click();
+    await page.waitFor(() => row('Loops') !== undefined, 'Loops in the tree');
+    expect(row('Loops')!.querySelector('.remove')).toBeNull();
+    const x = row('Samples')!.querySelector('.remove') as HTMLButtonElement;
+    expect(x.textContent).toBe('✕');
+    x.click();
+    // The first click only asks.
+    expect(x.textContent).toBe('Remove');
+    expect(engine.grantedFolders).toContain('/Users/me/Samples');
+    x.click();
+    await page.waitFor(() => !engine.grantedFolders.includes('/Users/me/Samples'), 'the removal');
+    expect(engine.requests.some((r) => r.path === '/gui/remove_blessed_folder')).toBe(true);
+    // The window was inside it, so it moves to another blessed folder, with no way back into it.
+    await page.waitFor(() => page.all('#fCrumbs button').map((b) => b.textContent).join() === 'Movies', 'the next folder');
+    await page.waitFor(() => !sidebar(page).some((t) => t.includes('Samples')), 'Samples gone from the sidebar');
+    expect(page.text('#fMessage')).toContain('Removed “Samples”');
+    expect((page.document.querySelector('#fBack') as HTMLButtonElement).disabled).toBe(true);
+    page.close();
+  });
+
+  it('removes a blessed folder that is not there from its notice, and one with the Delete key', async () => {
+    const engine = engineWithDisk();
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Volumes/Gone/Takes' });
+    await page.waitFor(() => notice(page).includes('“Takes” is not available'), 'the not-available notice');
+    (page.document.querySelector('#fNotice button') as HTMLButtonElement).click();
+    await page.waitFor(() => !engine.grantedFolders.includes('/Volumes/Gone/Takes'), 'the removal');
+    await page.waitFor(() => page.all('#fCrumbs button').map((b) => b.textContent).join() === 'Samples', 'the next folder');
+    const movies = page.all('#fSidebar li').find((li) => li.querySelector('.label')?.textContent === 'Movies')!;
+    const key = (k: string) => movies.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    key('Delete');
+    expect(engine.grantedFolders).toContain('/Users/me/Movies');   // asked, not removed
+    key('Delete');
+    await page.waitFor(() => engine.grantedFolders.join() === '/Users/me/Samples', 'Movies removed');
+    page.close();
+  });
+
+  it('removing the last blessed folder leaves no folder open', async () => {
+    const engine = new Luna.MockEngine();
+    engine.folders['/Users/me/Samples'] = ['kick.wav'];
+    engine.grantFolder('/Users/me/Samples');
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => names(page).length === 1, 'the listing');
+    const x = page.document.querySelector('#fSidebar .remove') as HTMLButtonElement;
+    x.click(); x.click();
+    await page.waitFor(() => notice(page).includes('No folder open'), 'no folder open');
+    expect(page.all('#fCrumbs button')).toHaveLength(0);
+    await page.waitFor(() => page.text('#fSidebar').includes('None yet'), 'the empty sidebar');
+    page.close();
+  });
+
+  it('Add Folder with DON’T ALLOW in LUNA’s prompt shows the folder as not available, with a way to ask again', async () => {
+    const engine = engineWithDisk();
+    engine.grantedFolders = [];
+    engine.blessAnswer = 'dont_allow';
+    engine.nextDialogFiles = ['/Users/me/Samples'];
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders' });
+    await page.waitFor(() => !(page.document.querySelector('#fAdd') as HTMLButtonElement).disabled, 'the page to connect');
+    (page.document.querySelector('#fAdd') as HTMLButtonElement).click();
+    await page.waitFor(() => notice(page).includes('not in a blessed folder'), 'the not-allowed notice');
+    expect(engine.blessRequests).toEqual(['/Users/me/Samples']);
+    expect(page.text('#fSidebar')).toContain('None yet');
+    engine.blessAnswer = 'allow';
+    (page.document.querySelector('#fNotice button') as HTMLButtonElement).click();
+    await page.waitFor(() => names(page).length === 4, 'the folder once allowed');
+    page.close();
+  });
+
+  it('a blessed folder’s ✕ takes only its own width, leaving the row to the folder’s name', async () => {
+    const page = await loadExamplePage('files.html', engineWithDisk(), { search: '?tab=folders&folder=/Users/me/Samples' });
+    await page.waitFor(() => page.all('#fSidebar .remove').length === 3, 'the sidebar');
+    // jsdom does not lay out, so check the rules: none that reaches the ✕ may size it, as the
+    // sidebar's full-width Add Folder rule once did, squeezing the name to nothing.
+    const x = page.document.querySelector('#fSidebar .remove')!;
+    const rules = [...page.document.styleSheets].flatMap((sheet) => [...sheet.cssRules]) as CSSStyleRule[];
+    const sizing = rules.filter((r) => r.selectorText && x.matches(r.selectorText) && r.style.width && r.style.width !== 'auto');
+    expect(sizing.map((r) => `${r.selectorText} { width: ${r.style.width} }`)).toEqual([]);
+    page.close();
+  });
+
+  it('without /gui says there are no folders', async () => {
+    const engine = new Luna.MockEngine({ gui: false });
+    engine.addSession('abc', { tracks: ['Vocal'], name: 'Demo', packageUid: 'pkg_abc' });
+    const page = await loadExamplePage('files.html', engine, { search: '?tab=folders' });
+    await page.waitFor(() => notice(page).includes('no /gui'), 'the no-gui notice');
+    expect((page.document.querySelector('#fAdd') as HTMLButtonElement).disabled).toBe(true);
+    page.close();
+  });
+});
+
 describe('examples/import.html', () => {
   it('uploads bytes, lists the source, and places it as a clip', async () => {
     const engine = engineWithSession(['Vocal']);

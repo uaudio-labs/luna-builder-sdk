@@ -40,7 +40,8 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 ## Docs and skills
 
 - What ships (package.json `files`, and so the installer zip) is public: `README.md`,
-  `CHANGELOG.md`, `NOTICE`, `docs/`, `skills/`, `templates/`, `examples/`, `plugins/`. Keep
+  `CHANGELOG.md`, `RELEASE_NOTES.md`, `FEATURES_LIST.md`, `NOTICE`, `docs/`, `skills/`,
+  `templates/`, `examples/`, `plugins/`. Keep
   tree paths, pac, Jira and planning out of them. Internal material goes in `design/`
   (DESIGN.md, PLAN.md, PLATFORM.md), `DEVELOPING.md` or here.
 - Wasm engine support (`WasmPort`, `src/engine/`, `engine: 'wasm'`, the `serve` engine mount)
@@ -49,6 +50,10 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
 - `docs/QUICKSTART.md` is the user-facing entry point; keep it under 300 lines and keep every
   snippet runnable. `docs/api/` is generated (`npm run docs:api`); never edit it by hand.
 - `docs/llms.txt` indexes everything for agents; update it when a doc or skill is added.
+- `FEATURES_LIST.md` is the current feature set by area, as short bullets: no versions, and
+  no fixes, docs or other changes that add no feature. Update it whenever `RELEASE_NOTES.md`
+  gets a bullet for a feature: add a bullet for a new one, reword one that changed (a rename,
+  a breaking change), and delete one that was removed. Add a section when no area fits.
 - `skills/*/SKILL.md` are shared Claude Code and Codex skills. Keep them procedural and short, pointing at doc
   sections rather than repeating them.
 - `templates/add-on-basic/` is what `ua-builder new` copies, and `templates/add-on-typescript/`

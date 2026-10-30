@@ -6,7 +6,7 @@ folder, their identity, their page and how they open. `ua-builder new` writes on
 
 This page describes what LUNA does with the manifest. `ua-builder` is stricter: it refuses
 to install or pack a manifest that LUNA would partly drop or silently correct (a missing
-required field, an unknown `target`, a `floating` or `show_with_session` that is not a boolean, a
+required field, an unknown `target`, a `floating`, `show_with_session`, `fixed_size` or `run_hidden` that is not a boolean, a
 `manufacturer` that is not a string, a `description` that is not a string or array of strings, an `html` file that does not exist), so you see the problem before LUNA does.
 
 ## Where it lives
@@ -14,7 +14,13 @@ required field, an unknown `target`, a `floating` or `show_with_session` that is
 | Platform | Add Ons folder |
 |---|---|
 | macOS | `/Library/Application Support/Universal Audio/LUNA/Add Ons` |
-| Windows | `%LOCALAPPDATA%\Universal Audio\LUNA\Add Ons` |
+| Windows | `%ProgramData%\Universal Audio\LUNA\Add Ons` |
+
+The folder is shared by every account on the computer, so any user can install, replace and
+remove Add Ons in it. LUNA's Windows installer sets it up; otherwise the first install sets it
+up, from LUNA or `ua-builder install`, asking once for administrator approval (macOS: an
+administrator password). Add Ons installed by an older release in
+`%LOCALAPPDATA%\Universal Audio\LUNA\Add Ons` are not moved; reinstall them.
 
 Each entry in that folder is the Add On folder or a symlink to one (`ua-builder install`
 makes the symlink on macOS and copies on Windows). Only a file named exactly `manifest.json`
@@ -81,9 +87,11 @@ size; see `width`, `height` below.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `target` | string | `"window"` | Where the Add On opens. See below. |
-| `width`, `height` | int | none | Initial window size in pixels. **Required for a `"window"`**: one without them is dropped. Optional for `"browser"`, `"editor"` and `"app"`, which LUNA sizes itself and which ignore them; `ua-builder new` leaves them out. |
+| `width`, `height` | int | none | Initial window size in pixels (the size of the page, not counting the title bar); with `fixed_size`, the window's only size. **Required for a `"window"`**: one without them is dropped. Optional for `"browser"`, `"editor"` and `"app"`, which LUNA sizes itself and which ignore them; `ua-builder new` leaves them out. |
 | `floating` | boolean | `true` | `"window"` only: whether the window floats with LUNA's plugin windows or is an ordinary window. See below. |
 | `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
+| `fixed_size` | boolean | `false` | `"window"` only: the window always opens at `width` x `height` and the user cannot resize, maximize or zoom it, or make it full screen. See below. |
+| `run_hidden` | boolean | `false` | The page keeps running at full speed while it is hidden: timers are not slowed and the page is not suspended. For Add Ons that keep time, such as a sequencer. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
 | `manufacturer` | string | none | Who makes the Add On: your company or your own name. LUNA shows it in the **MANUFACTURER** column of **Settings > Add Ons**, where it also sorts and is matched by the search field; the column is blank without it. LUNA reports it as the `manufacturer` property under `/gui/add_ons/<id>` (`manufacturer` on `luna.gui.addOns` items in the SDK), `""` when there is none. A non-string value is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value that is not a string is ignored. |
 | `description` | string or string[] | none | What the Add On does. An array of strings is concatenated with no separator, so a long description can be split across lines of JSON; the text carries its own line breaks: write `\n` where a new line should start (`["First sentence. ", "Second sentence.\n", "A new line."]`). LUNA reports the concatenated text as the `description` property under `/gui/add_ons/<id>` (`description` on `luna.gui.addOns` items in the SDK), `""` when there is none. It is not yet shown in LUNA's UI. Any other value, including an array holding something that is not a string, is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, describing the Add Ons together, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value LUNA cannot read is ignored. |
@@ -175,12 +183,48 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 - LUNA reports it as the `show_with_session` property under `/gui/add_ons/<id>`
   (`showWithSession` on `luna.gui.addOns` items in the SDK).
 
+`fixed_size`:
+
+- `true`: the window has no resize controls. Its edges and corners do not resize it, and it has no
+  maximize button (Windows) or working zoom and full-screen button (macOS, where the green
+  button is greyed out). It keeps its close and minimize buttons.
+- It always opens at the manifest's `width` and `height`. LUNA still remembers where the user
+  put the window and reopens it there, but not a size the user gave it before the Add On set
+  `fixed_size`, and not full screen. Changing `width` and `height` changes the window's size
+  the next time LUNA creates it.
+- Lay the page out for exactly that size: the user cannot make the window bigger to show
+  content that does not fit.
+- `false` (the default): the window opens at `width` and `height` the first time, and the user
+  can resize it; LUNA reopens it at the size the user left it.
+- A value that is not a boolean is ignored, so the window is resizable. `ua-builder` rejects it.
+- It has no effect on `"app"`, `"browser"` or `"editor"` entries.
+- If you change it while LUNA is running and the window has already been opened, the change
+  applies after LUNA restarts (or after the Add On is uninstalled and installed again).
+- LUNA reports it as the `fixed_size` property under `/gui/add_ons/<id>`
+  (`fixedSize` on `luna.gui.addOns` items in the SDK). A LUNA that predates `fixed_size`
+  ignores it and the window is resizable.
+
+`run_hidden`:
+
+- A hidden page normally sleeps: when another LUNA page is in front of an `"app"` Add On, a
+  window Add On is closed (LUNA keeps its page loaded), or LUNA's window is covered, the web
+  view slows the page's timers to about once a second and may suspend it. That suits most Add
+  Ons and saves power.
+- `true`: the page keeps running at full speed while hidden. Use it only for an Add On that
+  must keep time with nobody looking, such as a sequencer that sends MIDI from a timer.
+  `requestAnimationFrame` still stops while the page is not shown, so drive timing from
+  `setInterval` or `setTimeout`, not from animation frames.
+- It applies to every target.
+- LUNA reports it as the `run_hidden` property under `/gui/add_ons/<id>` (`runHidden` on
+  `luna.gui.addOns` items in the SDK). A LUNA that predates `run_hidden` ignores it, and the
+  page sleeps when hidden.
+
 `icon`:
 
 - LUNA does not check that the file exists or read it when the manifest loads; a bad path is
   not an error, and an empty string is the same as leaving it out.
 - LUNA reports the resolved absolute path as the `icon` property under `/gui/add_ons/<id>`
-  (next to `id`, `name`, `target`, `floating`, `show_with_session`, `manufacturer` and `description`), or an empty string when there is none. It is not yet
+  (next to `id`, `name`, `target`, `floating`, `show_with_session`, `fixed_size`, `run_hidden`, `manufacturer` and `description`), or an empty string when there is none. It is not yet
   drawn in LUNA's menus.
 
 `local_content_offset`:
@@ -301,8 +345,9 @@ await luna.secrets.delete('openai.api_key'); // a "Disconnect" button
    or Mixer, which should lay out for a narrow, user-resizable width; `"editor"` for the
    panel under the Timeline, which should lay out for a wide, short, user-resizable height.
    For a `"window"`, set `floating: false` if it should be an ordinary window rather than
-   float with the plugin windows, and `show_with_session: true` if it only makes sense with
-   a session open. Leave `floating`, `show_with_session`, `width` and `height` out of browser,
+   float with the plugin windows, `show_with_session: true` if it only makes sense with
+   a session open, and `fixed_size: true` if its page is laid out for one size only. Leave
+   `floating`, `show_with_session`, `fixed_size`, `width` and `height` out of browser,
    editor and app entries.
 5. Fill `version`, `manufacturer`, `description`, `sdk_version`, `min_luna_version`, `engines`.
 6. Add `icon` with a relative path if the Add On ships one.

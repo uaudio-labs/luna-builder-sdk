@@ -555,36 +555,92 @@ export class MockEngine {
           engine.addNode(`/gui/file_chooser/${uid}`, { properties: { status: 'pending', files: [] } });
           setTimeout(() => {
             if (!engine.has(`/gui/file_chooser/${uid}`)) return;
-            // Fact 106: LUNA grants the picked folders to list_files before it reports them.
-            for (const p of engine.nextDialogFiles) engine.grantFolder(p);
+            // Facts 106, 133: LUNA asks the user to bless the picked folders (blessAnswer), once,
+            // before it reports them; the paths come back either way.
+            const ask = engine.nextDialogFiles.map(normalizeFolder).filter((p) => engine.folders[p] !== undefined && engine.blessedRootOf(p) === undefined);
+            if (ask.length) {
+              engine.blessRequests.push(...ask);
+              if (engine.blessAnswer === 'allow') for (const p of ask) engine.grantFolder(p);
+            }
             engine.setValue(`/gui/file_chooser/${uid}`, 'files', engine.nextDialogFiles.map((p) => ({ path: p })));
             engine.setValue(`/gui/file_chooser/${uid}`, 'status', engine.nextDialogFiles.length ? 'selected' : 'cancelled');
           }, 5);
           return { uid };
         },
         // Fact 106: validation, hidden entries and order (naturalCompare) as LUNA's list_files.
+        // Fact 133: recursive lists each folder followed by its contents, with relative_path,
+        // and stops at listLimit entries with truncated.
         list_files: (data, engine) => {
           const fail = (code: string, why: string) => new UAError(code, `list_files: ${why}`, { cmd: 'post', path: '/gui/list_files' });
-          const path = typeof data === 'object' && data !== null ? (data as { path?: unknown }).path : undefined;
+          const body = typeof data === 'object' && data !== null ? (data as { path?: unknown; recursive?: unknown }) : {};
+          const path = body.path;
           if (path === undefined || path === null) throw fail('uasrv.missing_field', 'path is required');
           if (typeof path !== 'string' || !/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
+          if (body.recursive !== undefined && body.recursive !== null && typeof body.recursive !== 'boolean') throw fail('uasrv.invalid_value', 'recursive must be a bool');
+          const recursive = body.recursive === true;
           const dir = normalizeFolder(path);
           // Before the path is looked at, as in LUNA: a refusal does not tell whether it exists.
-          if (!engine.grantedFolders.some((root) => dir === root || dir.startsWith(root === '/' ? '/' : `${root}/`))) {
+          if (engine.blessedRootOf(dir) === undefined) {
             throw fail('uasrv.not_permitted', 'path is not in a folder the user granted');
           }
-          const names = engine.folders[dir];
-          if (!names) {
+          if (!engine.folders[dir]) {
             const cut = dir.lastIndexOf('/');
             const isFile = engine.folders[cut > 0 ? dir.slice(0, cut) : '/']?.includes(dir.slice(cut + 1));
             throw fail(isFile ? 'uasrv.invalid_value' : 'uasrv.filesystem_error', isFile ? 'path is a file' : 'no folder at path');
           }
-          const files = names
-            .map((raw) => ({ name: raw.replace(/\/$/, ''), is_directory: raw.endsWith('/') }))
-            .filter((e) => !e.name.startsWith('.'))
-            .sort((a, b) => naturalCompare(a.name, b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-            .map((e) => ({ name: e.name, path: `${dir === '/' ? '' : dir}/${e.name}`, is_directory: e.is_directory }));
-          return { files };
+          const files: { name: string; path: string; is_directory: boolean; relative_path?: string }[] = [];
+          let truncated = false;
+          const walk = (folder: string, relative: string): void => {
+            const entries = (engine.folders[folder] ?? [])
+              .map((raw) => ({ name: raw.replace(/\/$/, ''), is_directory: raw.endsWith('/') }))
+              .filter((e) => !e.name.startsWith('.'))
+              .sort((a, b) => naturalCompare(a.name, b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+            for (const e of entries) {
+              if (recursive && files.length === engine.listLimit) {
+                truncated = true;
+                return;
+              }
+              const entryPath = `${folder === '/' ? '' : folder}/${e.name}`;
+              const rel = relative ? `${relative}/${e.name}` : e.name;
+              files.push(recursive ? { name: e.name, path: entryPath, is_directory: e.is_directory, relative_path: rel } : { name: e.name, path: entryPath, is_directory: e.is_directory });
+              if (recursive && e.is_directory) {
+                walk(entryPath, rel);
+                if (truncated) return;
+              }
+            }
+          };
+          walk(dir, '');
+          return recursive ? { files, truncated } : { files };
+        },
+        // Fact 133: add_blessed_folder's checks and codes as LUNA's. LUNA's prompt is answered
+        // with blessAnswer; it answers before asking, so a page reads the outcome from
+        // /gui/add_ons blessed_folders.
+        add_blessed_folder: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `add_blessed_folder: ${why}`, { cmd: 'post', path: '/gui/add_blessed_folder' });
+          const path = typeof data === 'object' && data !== null ? (data as { path?: unknown }).path : undefined;
+          if (path === undefined || path === null) throw fail('uasrv.missing_field', 'path is required');
+          if (typeof path !== 'string' || !/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
+          const dir = normalizeFolder(path);
+          if (!engine.folders[dir]) {
+            const cut = dir.lastIndexOf('/');
+            const isFile = engine.folders[cut > 0 ? dir.slice(0, cut) : '/']?.includes(dir.slice(cut + 1));
+            throw fail(isFile ? 'uasrv.invalid_value' : 'uasrv.filesystem_error', isFile ? 'path is a file' : 'no folder at path');
+          }
+          if (engine.blessedRootOf(dir) !== undefined) return null;   // already readable: no prompt
+          engine.blessRequests.push(dir);
+          if (engine.blessAnswer === 'allow') engine.grantFolder(dir);
+          return null;
+        },
+        // Fact 133: remove_blessed_folder takes a listed folder out, without asking.
+        remove_blessed_folder: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `remove_blessed_folder: ${why}`, { cmd: 'post', path: '/gui/remove_blessed_folder' });
+          const path = typeof data === 'object' && data !== null ? (data as { path?: unknown }).path : undefined;
+          if (path === undefined || path === null) throw fail('uasrv.missing_field', 'path is required');
+          if (typeof path !== 'string') throw fail('uasrv.invalid_value', 'path must be a string');
+          const dir = normalizeFolder(path);
+          if (!engine.grantedFolders.includes(dir)) throw fail('uasrv.invalid_value', 'path is not a blessed folder');
+          engine.grantedFolders = engine.grantedFolders.filter((f) => f !== dir);
+          return null;
         },
         // Fact 114: serve_media_file's checks, codes and URL as LUNA's (macOS form).
         serve_media_file: (data, engine) => {
@@ -594,6 +650,15 @@ export class MockEngine {
           if (typeof body.add_on_id !== 'string' || typeof body.path !== 'string') throw fail('uasrv.invalid_type', 'add_on_id and path must be strings');
           const path = body.path;
           if (!/^(\/|[A-Za-z]:[\\/])/.test(path)) throw fail('uasrv.invalid_value', 'path must be absolute');
+          // Fact 133: any file in a blessed folder, but hidden ones, is served whatever its type.
+          if (engine.isBlessedFile(path)) {
+            const id = body.add_on_id.toLowerCase();
+            if (!engine.has(`/gui/add_ons/${id}`)) throw fail('uasrv.not_installed', `no Add On ${id}`);
+            const linked = engine.mediaFiles[path];
+            const target = typeof linked === 'string' ? linked : normalizeFolder(path);   // LUNA serves the real file
+            engine.mediaServed.push({ addOnId: id, path: target });
+            return { url: `ua-content://${localContentHost(id)}${encodeMediaPath(target)}` };
+          }
           const file = engine.mediaFiles[path];
           if (file === undefined) throw fail('uasrv.filesystem_error', 'no file at path');
           if (file === null) throw fail('uasrv.invalid_value', 'not an audio, video or MIDI file');
@@ -617,7 +682,8 @@ export class MockEngine {
     });
     this.addNode('/gui/windows/main', { properties: { page: 'timeline' } });
     this.addNode('/gui/transport', { properties: { arm_mode: false } });
-    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, manufacturer: 'Example Co', description: 'A demo Add On.', version: '1.0.0', installed_from: 'folder' } });
+    this.addNode('/gui/add_ons', { properties: { blessed_folders: [] }, readOnly: ['blessed_folders'] });
+    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, fixed_size: false, run_hidden: false, manufacturer: 'Example Co', description: 'A demo Add On.', version: '1.0.0', installed_from: 'folder' } });
     this.addNode('/gui/file_chooser');
     this.addNode('/gui/plugin_windows', { properties: { open: [] }, readOnly: ['open'] });
     if (options.gui === false) this.removeNode('/gui');
@@ -709,22 +775,65 @@ export class MockEngine {
   folders: Record<string, string[]> = {};
 
   /**
-   * The folders `/gui/list_files` may read, it and every folder inside them (fact 106). LUNA
-   * grants a folder the user picks in `show_folder_dialog` (the mock does too, for each of
-   * `nextDialogFiles`) or drops on an Add On; set this, or call {@link grantFolder}, to model
-   * a drop or a grant saved from an earlier run. Anything else is `uasrv.not_permitted`.
+   * The folders `/gui/list_files` may read, it and every folder inside them (facts 106, 133):
+   * the blessed folders. LUNA asks the user before blessing a folder picked in
+   * `show_folder_dialog` (the mock asks {@link blessAnswer} for each of `nextDialogFiles`
+   * that is in {@link folders}) or dropped on an Add On; set this, or call
+   * {@link grantFolder}, to model an allowed drop or a folder blessed in an earlier run.
+   * Anything else is `uasrv.not_permitted`.
    * The mock does not model links or LUNA's cap on how many folders it keeps.
    *
    * @example
    * engine.folders['/Samples'] = ['kick.wav'];
    * engine.grantFolder('/Samples');
    */
-  grantedFolders: string[] = [];
+  get grantedFolders(): string[] {
+    return this.blessed;
+  }
+  set grantedFolders(folders: string[]) {
+    this.blessed = [...folders];
+    // /gui/add_ons blessed_folders follows, as LUNA's does (fact 133).
+    if (this.has('/gui/add_ons')) this.setValue('/gui/add_ons', 'blessed_folders', [...this.blessed]);
+  }
+  private blessed: string[] = [];
 
   /** Let `/gui/list_files` read the folder at `path` and the folders inside it. */
   grantFolder(path: string): void {
     const dir = normalizeFolder(path);
-    if (!this.grantedFolders.includes(dir)) this.grantedFolders.push(dir);
+    if (!this.grantedFolders.includes(dir)) this.grantedFolders = [...this.grantedFolders, dir];
+  }
+
+  /** How the user answers LUNA's prompt for `/gui/add_blessed_folder` and for folders picked in `show_folder_dialog`: `'allow'` (the default) blesses them, `'dont_allow'` leaves them out. */
+  blessAnswer: 'allow' | 'dont_allow' = 'allow';
+
+  /** Every folder LUNA asked the user about (`/gui/add_blessed_folder`, `show_folder_dialog`), in order, whatever the answer. */
+  blessRequests: string[] = [];
+
+  /** Entries a recursive `/gui/list_files` returns before it sets `truncated` (LUNA: 10,000). */
+  listLimit = 10000;
+
+  /** @internal The blessed folder `dir` (normalized) is, or is inside; `undefined` for none. */
+  blessedRootOf(dir: string): string | undefined {
+    return this.grantedFolders.find((root) => dir === root || dir.startsWith(root === '/' ? '/' : `${root}/`));
+  }
+
+  /**
+   * @internal Whether `path` is a file in {@link folders} (or {@link mediaFiles}) inside a
+   * blessed folder with no hidden name below it, which serve_media_file serves whatever its
+   * type (fact 133).
+   */
+  isBlessedFile(path: string): boolean {
+    const file = normalizeFolder(path);
+    const root = this.blessedRootOf(file);
+    if (root === undefined || file === root) return false;
+    const below = file.slice(root === '/' ? 1 : root.length + 1).split('/');
+    if (below.some((part) => part.startsWith('.'))) return false;
+    const cut = file.lastIndexOf('/');
+    const listed = this.folders[cut > 0 ? file.slice(0, cut) : '/']?.includes(file.slice(cut + 1)) ?? false;
+    const media = this.mediaFiles[path];
+    // A link (a path in mediaFiles) counts only while it leads to a file inside the same folder.
+    if (typeof media === 'string') return this.blessedRootOf(normalizeFolder(media)) === root;
+    return listed || media !== undefined;
   }
 
   private rowCounter = 100;

@@ -85,7 +85,7 @@ effect).
 
 ## 3. Beta only: write the notes
 
-Two files, two audiences, one section per Beta. Commits leave bullets under
+Two notes files, two audiences, one section per Beta, and the features list. Commits leave bullets under
 `## Unreleased` as they land; that section becomes the Beta's section — keep every bullet
 it has, add the rest from the log, and leave no `Unreleased` section behind (a later change
 adds a fresh one).
@@ -112,6 +112,12 @@ adds a fresh one).
   older section since then into the new one — a section must describe only its Beta.
   Mirror the existing "Measured against LUNA <version>" line when the changes were verified
   against a live LUNA; ask the user for the LUNA build if unclear.
+
+- **`FEATURES_LIST.md`** — the current feature set by area, with no versions. Check it
+  against every feature bullet in the new section: add a bullet for a new feature (in its
+  area, or a new section), reword one whose API changed, delete one that was removed. Fixes,
+  docs and other changes that add no feature stay out. Usually the changes already did this
+  as they landed; the Beta is where gaps get caught.
 
 Show the drafted notes to the user for review before moving on — they know which changes
 matter to consumers better than the git log does.
