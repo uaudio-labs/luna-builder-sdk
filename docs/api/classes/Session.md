@@ -52,6 +52,33 @@ True while a [transaction](#transaction) is open, of either kind.
 
 ***
 
+### channelsInOrder
+
+#### Get Signature
+
+```ts
+get channelsInOrder(): (Bus | Track)[];
+```
+
+Every track and bus in LUNA's order (fact 137): one `order` runs 1..N across both, each
+folder followed at once by everything inside it. This includes LUNA's system tracks
+(click, count-in) and buses (master, cues); filter on `trackType` and `busType` for what
+a page shows. [tracksInOrder](#tracksinorder) is the same order with the buses left out.
+
+##### Example
+
+```ts
+// LUNA's track list as an indented outline.
+const depth = (ch) => (ch?.folderUid.value ? 1 + depth(session.buses.byId(ch.folderUid.value)) : 0);
+for (const ch of session.channelsInOrder) console.log('  '.repeat(depth(ch)) + ch.name.value);
+```
+
+##### Returns
+
+([`Bus`](Bus.md) \| [`Track`](Track.md))[]
+
+***
+
 ### disposed
 
 #### Get Signature
@@ -70,6 +97,29 @@ props stop updating and its commands reject with [Disposed](Disposed.md).
 #### Inherited from
 
 [`Node`](Node.md).[`disposed`](Node.md#disposed)
+
+***
+
+### folders
+
+#### Get Signature
+
+```ts
+get folders(): Bus[];
+```
+
+The folder tracks, in no particular order: the buses whose folder mode is not `'none'`.
+Use [folderContents](#foldercontents) for the hierarchy.
+
+##### Example
+
+```ts
+for (const folder of session.folders) console.log(folder.name.value, folder.folderMode.value);
+```
+
+##### Returns
+
+[`Bus`](Bus.md)[]
 
 ***
 
@@ -137,7 +187,7 @@ Source audio files of this session, under `/workspace/sessions/<package uid>/aud
 get tracksInOrder(): Track[];
 ```
 
-Tracks sorted by their `order` key.
+Tracks sorted by their `order` key; buses and folders, which share it, are left out (fact 137).
 
 ##### Returns
 
@@ -357,6 +407,40 @@ const { render, file } = await session.exportMain({ name: 'Rough mix' });
 
 ***
 
+### folderContents()
+
+```ts
+folderContents(folder): (Bus | Track)[];
+```
+
+The tracks and buses directly inside `folder`, or at the session root for `null`, sorted
+by their `order`. Their own `folderUid` names the folder. At the root this includes
+LUNA's system tracks and buses (click, count-in, master, cues).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `folder` | `string` \| [`Bus`](Bus.md) \| `null` |
+
+#### Returns
+
+([`Bus`](Bus.md) \| [`Track`](Track.md))[]
+
+#### Example
+
+```ts
+const walk = (folder, depth = 0) => {
+  for (const ch of session.folderContents(folder)) {
+    console.log('  '.repeat(depth) + ch.name.value);
+    if (ch instanceof Luna.Bus && ch.isFolder) walk(ch, depth + 1);
+  }
+};
+walk(null);
+```
+
+***
+
 ### importFile()
 
 ```ts
@@ -432,34 +516,44 @@ if (path) {
 ### insertClip()
 
 ```ts
-insertClip(options): Promise<unknown>;
+insertClip(options): Promise<Clip>;
 ```
 
-Insert a clip from a source file onto a track's active playlist. Timeline position is in
-ticks; source offsets are nanoseconds (fact 16).
+Insert a clip onto a track's active playlist, or onto a given playlist, in one undo step,
+and resolve to the new [Clip](Clip.md) once its playlist lists it with its properties
+loaded. LUNA answers the clip's uid. Timeline position is in ticks; source offsets are
+nanoseconds (fact 16).
 
 `sourceUid` is required for every clip type, MIDI included: LUNA answers
 `uasrv.invalid_property` without one (fact 112). To start a MIDI clip of your own, write
-its notes with [Playlist.createNotes](Playlist.md#createnotes), which makes the clip.
+its notes with [Playlist.createNotes](Playlist.md#createnotes), which makes the clip. With `copyOf` the new
+clip is a copy of another (its gain, fades, warps and MIDI), and the source, its offsets
+and the name default to that clip's (fact 135).
+
+Inside a batch [transaction](#transaction) this resolves at once to the clip with its `id` set
+and its props `undefined` until the commit, as [newTrack](#newtrack) does.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `options` | \{ `clipType?`: `"midi"` \| `"audio"` \| `"video"`; `name?`: `string`; `playlistUid?`: `string`; `sourceStartNs?`: `number`; `sourceStopNs?`: `number`; `sourceUid`: `string`; `startTick`: `number`; `stopTick`: `number`; `trackUid?`: `string`; \} |
-| `options.clipType?` | `"midi"` \| `"audio"` \| `"video"` |
-| `options.name?` | `string` |
-| `options.playlistUid?` | `string` |
-| `options.sourceStartNs?` | `number` |
-| `options.sourceStopNs?` | `number` |
-| `options.sourceUid` | `string` |
-| `options.startTick` | `number` |
-| `options.stopTick` | `number` |
-| `options.trackUid?` | `string` |
+| `options` | [`InsertClipOptions`](../interfaces/InsertClipOptions.md) |
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<[`Clip`](Clip.md)\>
+
+#### Examples
+
+```ts
+const clip = await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+clip.start.value; // 0
+```
+
+```ts
+// Repeat a slice four bars later, in front of what is there.
+const again = await session.insertClip({ playlistUid: lane.id, copyOf: slice, startTick: slice.start.value! + 4 * Luna.WHOLE_NOTE, stopTick: slice.stop.value! + 4 * Luna.WHOLE_NOTE });
+```
 
 ***
 
@@ -515,6 +609,48 @@ start at `toTick`.
 
 ***
 
+### moveToFolder()
+
+```ts
+moveToFolder(
+   items, 
+   folder, 
+options): Promise<void>;
+```
+
+Move tracks and buses (folders too, with everything inside them) into `folder`, or to
+the session root with `null`, in one undo step (LUNA's `move_to_folder`, fact 136), and
+resolve once each one's [Channel.folderUid](Channel.md#folderuid) shows it. They go first in the folder, or
+after `options.after` (fact 137); [reorder](#reorder) moves them within it. LUNA reroutes the main output
+of everything moved to the nearest summing folder it is now in, else the master.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `items` | readonly (`string` \| [`Channel`](Channel.md))[] |
+| `folder` | `string` \| [`Bus`](Bus.md) \| `null` |
+| `options` | [`MoveToFolderOptions`](../interfaces/MoveToFolderOptions.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Throws
+
+`uasrv.invalid_value` when `folder` is not a folder, or would end up
+inside itself.
+
+#### Example
+
+```ts
+const vocals = await session.newFolder({ name: 'Vocals' });
+await session.moveToFolder([lead, harmony], vocals);
+await session.moveToFolder([harmony], null); // back to the root
+```
+
+***
+
 ### newBus()
 
 ```ts
@@ -539,6 +675,47 @@ resolve to the [Bus](Bus.md) once it is listed in [buses](#buses) with its prope
 ```ts
 const reverb = await session.newBus({ name: 'Reverb' });
 await track.outputs.byId('send_0').assign(reverb);
+```
+
+***
+
+### newFolder()
+
+```ts
+newFolder(options): Promise<Bus>;
+```
+
+Create a folder track in one undo step, and resolve to it once it is listed in
+[buses](#buses) with its properties loaded (fact 136). A folder is an aux bus whose
+[Bus.folderMode](Bus.md#foldermode) is not `'none'`, so it is a [Bus](Bus.md) with `isFolder` true. It goes
+last in the session, or first inside `folderUid` (fact 137). Put
+tracks in it with `newTrack({ folderUid })` or [moveToFolder](#movetofolder); list them with
+[folderContents](#foldercontents).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`NewFolderOptions`](../interfaces/NewFolderOptions.md) |
+
+#### Returns
+
+`Promise`\<[`Bus`](Bus.md)\>
+
+#### Throws
+
+`device.database_error` when `folderUid` is not a folder.
+
+#### Examples
+
+```ts
+const drums = await session.newFolder({ name: 'Drums' });
+const [kick, snare] = await session.newTrack({ name: 'Drum', count: 2, makeNameUnique: true, folderUid: drums.id });
+```
+
+```ts
+// A folder that only groups, inside another folder.
+const perc = await session.newFolder({ name: 'Perc', mode: 'container', folderUid: drums.id });
 ```
 
 ***
@@ -568,10 +745,16 @@ Create a new playlist version on the given tracks, empty or duplicating the curr
 ### newTrack()
 
 ```ts
-newTrack(options): Promise<unknown>;
+newTrack(options): Promise<Track[]>;
 ```
 
-Create a track. Resolves to the engine reply.
+Create tracks in one undo step, and resolve to them once they are listed in
+[tracks](#tracks) with their properties loaded: one [Track](Track.md), or `count` of them. LUNA
+answers the new uids (fact 135), so nothing has to be found by name.
+
+Inside a batch [transaction](#transaction) LUNA holds the new tracks back until the commit (facts
+74, 135), so this resolves at once to tracks whose `id` is set and whose props read
+`undefined` until then. They are the objects `session.tracks` lists after the commit.
 
 #### Parameters
 
@@ -581,7 +764,22 @@ Create a track. Resolves to the engine reply.
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<[`Track`](Track.md)[]\>
+
+#### Examples
+
+```ts
+const [bass] = await session.newTrack({ name: 'Bass', stemFormat: 'mono' });
+bass.name.value; // 'Bass'
+```
+
+```ts
+// A track and its clip as one undo entry.
+await session.transaction('Add loop', async () => {
+  const [track] = await session.newTrack({ name: 'Loop', stemFormat: 'stereo' });
+  await session.insertClip({ trackUid: track.id, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+});
+```
 
 ***
 
@@ -811,6 +1009,47 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 #### Inherited from
 
 [`Node`](Node.md).[`reload`](Node.md#reload)
+
+***
+
+### reorder()
+
+```ts
+reorder(items, options): Promise<void>;
+```
+
+Move tracks and buses to just after `after`, or first, in one undo step (LUNA's
+`change_order`, fact 137), and resolve once [channelsInOrder](#channelsinorder) shows the new order.
+The items keep their order among themselves as given, and a folder moves with everything
+inside it.
+
+Nothing changes folder: LUNA keeps each folder's contents together right after it, so an
+anchor inside another folder only decides where the item lands among its own siblings.
+Use [moveToFolder](#movetofolder) to change folder. LUNA answers the same whether or not anything
+moved, so an id this session does not list rejects here rather than doing nothing.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `items` | readonly (`string` \| [`Channel`](Channel.md))[] |
+| `options` | [`ReorderOptions`](../interfaces/ReorderOptions.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Throws
+
+`out_of_range` for a track or bus (or anchor) the session does not list.
+
+#### Example
+
+```ts
+// Put the bass just after the drums, then the vocal first.
+await session.reorder([bass], { after: drums });
+await session.reorder([vocal]);
+```
 
 ***
 

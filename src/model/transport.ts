@@ -60,7 +60,9 @@ export class Transport extends Node {
   /**
    * Tempo in effect at the playhead (BPM), carved out of the `location` pushes (fact 95: a
    * tempo edit shows here at once). Notifies only when the number moves, so a BPM display is
-   * not re-rendered on every playhead push.
+   * not re-rendered on every playhead push. It follows the playhead only: to recompute
+   * anything planned from the tempo map (clip lengths, seconds) when the tempo is edited, use
+   * `session.musical.timeline.onChange` and `session.musical.tempoAt(tick)`.
    *
    * @example
    * t.tempo.onChange(() => bpm.textContent = `${t.tempo.value ?? '--'} BPM`);
@@ -130,7 +132,7 @@ export class Transport extends Node {
   get seconds(): number {
     if (!this.musical) throw new UAError('unavailable', 'transport.seconds: this transport has no timeline', { path: this.path });
     const musical = this.musical();
-    if (musical.tempoMap.items.length === 0) {
+    if (!musical.timeline.tempoLoaded) {
       throw new UAError('unavailable', 'transport.seconds: the tempo map is not loaded; await session.ready() (or session.musical.ready()) first', { path: this.path });
     }
     return musical.timeline.seconds(this.tick);

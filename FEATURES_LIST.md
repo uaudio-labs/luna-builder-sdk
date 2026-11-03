@@ -41,11 +41,16 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 ## Tracks, buses and mixing
 
 - List tracks in order, the master bus and aux buses; find the track the user is working on.
-- Create and delete tracks and buses.
+- List tracks and buses together in LUNA's order, and reorder them.
+- Create and delete tracks and buses; creating one hands back the new track or bus.
+- Folder tracks: create summing or container folders, create tracks inside a folder, move
+  tracks and folders between folders, change a folder's mode, and read the hierarchy.
 - Read and set track name, type, colour and record enable.
 - Gain, pan, mute and solo as controls with real, normalized and display values, and reset to
   default.
 - Stereo pans (left and right) as well as mono pan.
+- Fader tapers (`Luna.Taper`, `control.taper`): LUNA's dB ↔ fader-position tables and hash-mark
+  dB values, following LUNA when a summing console changes a fader's taper.
 - Meters that subscribe only while something watches them.
 - Sends: assign, unassign, retarget and move, and read where each send goes.
 - Bind sliders, knobs and drag gestures to controls so each user edit is one undo step and one
@@ -61,7 +66,9 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 ## Clips and sources
 
 - List a lane's clips with their positions in ticks and source offsets in nanoseconds.
-- Insert, trim, move, split, slip, mute, duplicate, heal and delete clips, each one undo step.
+- Insert, trim, move, split, slip, mute, duplicate, heal and delete clips, each one undo step;
+  inserting hands back the new clip, and can set its layer, what its length follows on a tempo
+  change, its time-stretch algorithm, or copy another clip.
 - Compiled clips: what each lane actually plays once overlapping clips are resolved.
 - Fades and crossfades on audio clips, with fade shapes and curves.
 - Take lanes: make new playlists and switch the active one.
@@ -122,14 +129,19 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Add, rename, move and delete markers, with bar|beat and seconds that follow the tempo map.
 - Set tempo, time signature and key signature, and read the key in effect at any tick.
 - Read and write LUNA's Chord ruler, and parse chord symbols (`Luna.parseChord`).
-- Convert between ticks, bars and beats, and seconds through the tempo map.
+- Convert between ticks, bars and beats, and seconds through the tempo map; reads report a
+  tempo map that has not loaded instead of assuming a tempo, and a change event follows tempo edits.
 
 ## Files
 
 - Get a user's file into the page with a file picker or an HTML drop, and upload it to the
   session.
 - Open LUNA's file and folder dialogs, and receive files dropped from the desktop as paths.
-- Import a file by its path, as a source or with a clip, without it passing through the page.
+- Import a file by its path without it passing through the page.
+- Add a file to the session as an audio source without inserting a clip
+  (`session.uploadFile` for a `File`, `session.importPath` for a path), and place it later
+  with `session.insertClip`; or run LUNA's own File > Import, which makes a clip
+  (`session.importFile`).
 - List the files in folders the user picked or dropped, one level or everything below
   (`luna.gui.listFiles`, `luna.gui.listAllFiles`).
 - Blessed folders the user lets every Add On read: follow them (`luna.gui.blessedFolders`), ask

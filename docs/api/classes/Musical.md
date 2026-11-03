@@ -301,6 +301,9 @@ Set the time signature from `bar` (1-based).
 tempoAt(tick): number;
 ```
 
+BPM in effect at `tick`; see [Timeline.tempoAt](Timeline.md#tempoat). Throws `unavailable` until
+[ready](#ready) has loaded the tempo map, rather than assume 120.
+
 #### Parameters
 
 | Parameter | Type |
@@ -310,6 +313,13 @@ tempoAt(tick): number;
 #### Returns
 
 `number`
+
+#### Example
+
+```ts
+await session.musical.ready();
+session.musical.tempoAt(0);   // the session tempo
+```
 
 ***
 

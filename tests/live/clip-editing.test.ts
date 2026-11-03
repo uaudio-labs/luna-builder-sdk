@@ -42,7 +42,7 @@ describe.skipIf(!live)('live: clip and fade editing', () => {
   const seg = (clip: Luna.Clip) => lane.compiledClips.ofClip(clip.id)[0];
   const insert = async (startTick: number, stopTick: number, sourceStartNs: number, name: string): Promise<Luna.Clip> => {
     const sourceStopNs = sourceStartNs + Math.round((t.seconds(stopTick) - t.seconds(startTick)) * 1e9);
-    const reply = (await session.insertClip({ playlistUid: lane.id, sourceUid: source, startTick, stopTick, sourceStartNs, sourceStopNs, name })) as { uid: string };
+    const reply = { uid: (await session.insertClip({ playlistUid: lane.id, sourceUid: source, startTick, stopTick, sourceStartNs, sourceStopNs, name })).id };
     await wait(`clip ${name}`, () => lane.clips.byId(reply.uid)?.stop.value !== undefined);
     return lane.clips.byId(reply.uid)!;
   };

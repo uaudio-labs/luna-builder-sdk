@@ -412,6 +412,40 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ***
 
+### setFolderMode()
+
+```ts
+setFolderMode(mode): Promise<void>;
+```
+
+Change this aux bus's [FolderMode](../type-aliases/FolderMode.md) in one undo step, and resolve once
+[folderMode](#foldermode) shows it (fact 136). LUNA reroutes the main output of everything inside
+it: into a `'summing'` folder, past a `'container'` one. `'none'` makes it an ordinary bus
+and moves what was directly inside it to the session root.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `mode` | [`FolderMode`](../type-aliases/FolderMode.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Throws
+
+`uasrv.invalid_value` for a bus that is not an aux bus.
+
+#### Example
+
+```ts
+const drums = await session.newFolder({ name: 'Drums', mode: 'container' });
+await drums.setFolderMode('summing'); // its tracks now play through it
+```
+
+***
+
 ### watch()
 
 ```ts

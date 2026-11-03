@@ -33,8 +33,10 @@
  */
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
+import { derived } from '../store/prop';
 import { Automation } from './automation';
 import { Node } from './node';
+import { Taper } from './taper';
 
 export type ControlType =
   | 'gain'
@@ -78,6 +80,19 @@ export class Control extends Node {
   readonly realValues: Prop<(number | boolean)[]>;
   /** For discrete controls: the display string of each step. */
   readonly displayValues: Prop<string[]>;
+  /**
+   * The fader taper LUNA maps this control's `normalized` to dB with (fact 134): a
+   * {@link Taper} for gain-type controls (gain, gain trim, input trims), `null` for the rest,
+   * `undefined` until the control type arrives. It changes, and notifies, when LUNA swaps the
+   * taper, as it does for a summing console on a bus input.
+   *
+   * @example
+   * const taper = track.gain.taper.value!;
+   * taper.name;                     // '+12'
+   * taper.toNormalized(0);          // 0.7818
+   * track.gain.taper.onChange(() => redrawMarks(track.gain.taper.value));
+   */
+  readonly taper: Prop<Taper | null>;
 
   private gestureDepth = 0;
   /** Whether the outermost {@link begin} sent a touch, so {@link end} releases only that. */
@@ -107,6 +122,8 @@ export class Control extends Node {
     this.initialized = this.prop<boolean | null>('initialized');
     this.realValues = this.prop<(number | boolean)[]>('real_values');
     this.displayValues = this.prop<string[]>('string_values');
+    const taperName = this.prop<string | null>('taper');
+    this.taper = derived([this.controlType, taperName], () => Taper.forControl(this.controlType.value, taperName.value));
   }
 
   /** Playback automation lane. Call `load()` on it before reading breakpoints. */

@@ -3,6 +3,30 @@
 Pure tick arithmetic over the current tempo map and time signatures. Every method reads the
 maps as they are now; [onChange](#onchange) says when an answer may have moved.
 
+## Accessors
+
+### tempoLoaded
+
+#### Get Signature
+
+```ts
+get tempoLoaded(): boolean;
+```
+
+Whether the tempo map has at least one event whose tick and BPM have loaded, so
+[tempoAt](#tempoat), [seconds](#seconds) and [tickAtSeconds](#tickatseconds) can answer. Until then they throw
+`unavailable` rather than assume a tempo. [onChange](#onchange) fires when it becomes true.
+
+##### Example
+
+```ts
+const bpm = timeline.tempoLoaded ? timeline.tempoAt(tick) : undefined;
+```
+
+##### Returns
+
+`boolean`
+
 ## Methods
 
 ### barBeat()
@@ -66,9 +90,11 @@ timeline.formatBarBeat(marker.location.value!);   // "5|3|240"
 onChange(listener): Unsubscribe;
 ```
 
-Called when a tempo event or time signature is added, removed or edited, so anything
-computed from this timeline (bar|beat, seconds) should be recomputed. `marker.barBeat`
-and `marker.seconds` already follow it.
+Called when a tempo event or time signature is added, removed or edited (a tempo edit
+rewrites an existing event's `tempo`, so `tempoMap.onChange` alone does not see it), and
+when the maps finish loading, so anything computed from this timeline (bar|beat, seconds,
+clip lengths planned from the tempo) should be recomputed. `marker.barBeat` and
+`marker.seconds` already follow it.
 
 #### Parameters
 
@@ -84,6 +110,7 @@ and `marker.seconds` already follow it.
 
 ```ts
 session.musical.timeline.onChange(() => redrawRuler());
+session.musical.timeline.onChange(() => (bpm.textContent = `${session.musical.tempoAt(session.transport.tick)} BPM`));
 ```
 
 ***
@@ -94,7 +121,8 @@ session.musical.timeline.onChange(() => redrawRuler());
 seconds(tick): number;
 ```
 
-Ticks to seconds, integrating the tempo map (constant tempo between events).
+Ticks to seconds, integrating the tempo map (constant tempo between events). Throws
+`unavailable` while the tempo map is not loaded ([tempoLoaded](#tempoloaded)).
 
 #### Parameters
 
@@ -105,6 +133,12 @@ Ticks to seconds, integrating the tempo map (constant tempo between events).
 #### Returns
 
 `number`
+
+#### Example
+
+```ts
+timeline.seconds(Luna.TICKS_PER_BEAT * 8);   // 4 at 120 BPM, 5.333… at 90
+```
 
 ***
 
@@ -114,6 +148,10 @@ Ticks to seconds, integrating the tempo map (constant tempo between events).
 tempoAt(tick): number;
 ```
 
+BPM in effect at `tick`: the last tempo event at or before it, or the first event's when
+`tick` is before them all. Throws `unavailable` while the tempo map is not loaded
+([tempoLoaded](#tempoloaded)); it never assumes 120.
+
 #### Parameters
 
 | Parameter | Type |
@@ -123,6 +161,13 @@ tempoAt(tick): number;
 #### Returns
 
 `number`
+
+#### Example
+
+```ts
+await session.musical.ready();
+session.musical.timeline.tempoAt(session.transport.tick);   // 90
+```
 
 ***
 
@@ -186,7 +231,8 @@ tickAtSeconds(seconds): number;
 
 The inverse of [seconds](#tickatseconds-1): the tick a wall-clock offset lands on, walking the same
 tempo map. Use it to place a clip that must play unstretched — its span in ticks
-depends on the tempo where it sits.
+depends on the tempo where it sits. Throws `unavailable` while the tempo map is not
+loaded ([tempoLoaded](#tempoloaded)).
 
 #### Parameters
 

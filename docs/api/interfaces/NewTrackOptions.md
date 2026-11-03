@@ -2,11 +2,11 @@
 
 ## Properties
 
-| Property | Type |
-| ------ | ------ |
-| <a id="count"></a> `count?` | `number` |
-| <a id="folderuid"></a> `folderUid?` | `string` |
-| <a id="makenameunique"></a> `makeNameUnique?` | `boolean` |
-| <a id="name"></a> `name?` | `string` |
-| <a id="stemformat"></a> `stemFormat?` | `string` |
-| <a id="tracktype"></a> `trackType?` | `"instrument"` \| `"audio"` \| `"video"` \| `"midi_matrix"` |
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="count"></a> `count?` | `number` | How many tracks to make. Default 1. |
+| <a id="folderuid"></a> `folderUid?` | `string` | Place the new tracks in this folder track. |
+| <a id="makenameunique"></a> `makeNameUnique?` | `boolean` | Number the name when a track or bus already has it. |
+| <a id="name"></a> `name?` | `string` | Default `'Untitled'`. |
+| <a id="stemformat"></a> `stemFormat?` | `string` | Default `'mono'`. |
+| <a id="tracktype"></a> `trackType?` | `"instrument"` \| `"audio"` \| `"video"` \| `"midi_matrix"` | Default `'audio'`. |

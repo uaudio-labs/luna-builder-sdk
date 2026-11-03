@@ -22,7 +22,7 @@ async function lane() {
   await playlist.compiledClips.load();
   /** A clip whose source span matches its ticks at 120 bpm, starting `sourceStartS` into the file. */
   const insert = async (startBeat: number, stopBeat: number, sourceStartS = 0) => {
-    const reply = (await session.insertClip({ playlistUid: playlist.id, sourceUid: 'src1', startTick: startBeat * B, stopTick: stopBeat * B, sourceStartNs: sourceStartS * SECOND_NS, sourceStopNs: (sourceStartS + (stopBeat - startBeat) / 2) * SECOND_NS })) as { uid: string };
+    const reply = { uid: (await session.insertClip({ playlistUid: playlist.id, sourceUid: 'src1', startTick: startBeat * B, stopTick: stopBeat * B, sourceStartNs: sourceStartS * SECOND_NS, sourceStopNs: (sourceStartS + (stopBeat - startBeat) / 2) * SECOND_NS })).id };
     await engine.settled();
     await playlist.clips.membersReady();
     return playlist.clips.byId(reply.uid)!;

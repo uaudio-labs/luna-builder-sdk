@@ -62,7 +62,7 @@ describe('dispose', () => {
     engine.addSource('pkg_abc', 'src1', { lengthNs: 1_000_000_000 });
     const playlist = session.playlistFor(session.tracks.byId('Vocal')!)!;
     await playlist.clips.load();
-    const { uid } = (await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'audio' })) as { uid: string };
+    const { id: uid } = await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'audio' });
     await Luna.settle(() => playlist.clips.byId(uid) !== undefined, 'insert');
     const clip = playlist.clips.byId(uid)!;
     await clip.delete();

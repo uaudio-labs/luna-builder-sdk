@@ -13,7 +13,7 @@ plus the tempo-map seconds between the clip start and the tick. Linear in second
 ticks, so a tempo change inside the clip bends the mapping exactly as the engine does.
 
 The result can lie outside `[audio.startNs, audio.stopNs)` for ticks outside the clip;
-clamp before drawing there.
+clamp before drawing there. Throws `unavailable` while the tempo map is not loaded.
 
 ## Parameters
 

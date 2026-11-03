@@ -40,7 +40,7 @@ describe('edits wait for the model (fact 71)', () => {
     const { session } = await connected(['Vocal']);
     const playlist = session.playlistFor(session.tracks.byId('Vocal')!)!;
     await playlist.clips.load();
-    const { uid } = (await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'audio' })) as { uid: string };
+    const { id: uid } = await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, clipType: 'audio' });
     await Luna.settle(() => playlist.clips.byId(uid) !== undefined, 'insert');
     const clip = playlist.clips.byId(uid)!;
     await clip.load();

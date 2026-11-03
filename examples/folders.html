@@ -1,0 +1,256 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA folder tracks</title>
+<!--
+  Folder tracks (fact 136): the session's tracks and buses as a tree, a form that makes a
+  folder (session.newFolder), one that makes a track inside a folder (newTrack with folderUid),
+  a "Move to…" picker on every row (session.moveToFolder), ▲/▼ to move a row among the rows
+  in the same folder (session.reorder) and a mode picker on every folder (bus.setFolderMode).
+  Each action is one undo entry.
+
+  One order runs across tracks and buses, each folder followed at once by what is inside it
+  (fact 137), so the tree is LUNA's own track order. reorder() never changes folder: ▲/▼ stop
+  at the ends of the folder, and "Move to…" is how a row leaves it.
+
+  A folder is an aux bus whose folder mode is not "none". A summing folder is its children's
+  bus: their main outputs go to it. A container folder only groups; its children route past
+  it to the nearest summing folder above, else the master. The "routes to" column reads each
+  main output, so you can watch LUNA reroute as things move.
+-->
+<script src="../dist/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #16181b; color: #e6e9ee; font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #262b31; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; opacity: .55; margin: 14px 14px 6px; }
+  form { display: flex; gap: 8px; align-items: center; padding: 0 14px; flex-wrap: wrap; }
+  input, select, button { font: inherit; padding: 4px 9px; border-radius: 6px; border: 1px solid #39404a; background: #23272c; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #count { opacity: .7; }
+  #status { margin-left: auto; opacity: .7; }
+  table { border-collapse: collapse; width: calc(100% - 28px); margin: 0 14px 14px; }
+  th, td { padding: 4px 6px; border-bottom: 1px solid #232830; text-align: left; font-weight: 400; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .5; }
+  .name { white-space: nowrap; }
+  .folder .name { font-weight: 600; }
+  .kind { opacity: .65; }
+  .routes { opacity: .8; }
+  .empty { opacity: .5; font-style: italic; }
+  .step { padding: 2px 7px; }
+</style>
+<header>
+  <h1>LUNA folder tracks</h1>
+  <span id="count"></span>
+  <span id="status">connecting…</span>
+</header>
+
+<h2>New folder</h2>
+<form id="folderForm">
+  <input id="folderName" placeholder="Folder name" value="Folder" aria-label="folder name">
+  <select id="folderMode" aria-label="folder mode">
+    <option value="summing">Summing (a bus for what is inside)</option>
+    <option value="container">Container (groups only)</option>
+  </select>
+  <label>in <select id="folderParent" aria-label="parent folder"></select></label>
+  <button id="createFolder" type="submit">Create folder</button>
+</form>
+
+<h2>New track in a folder</h2>
+<form id="trackForm">
+  <input id="trackName" placeholder="Track name" value="Audio" aria-label="track name">
+  <select id="trackType" aria-label="track type">
+    <option value="audio">Audio</option>
+    <option value="instrument">Instrument</option>
+  </select>
+  <label>in <select id="trackParent" aria-label="track folder"></select></label>
+  <button id="createTrack" type="submit">New track</button>
+</form>
+
+<h2>Tracks and buses</h2>
+<table>
+  <thead><tr><th>name</th><th>kind</th><th>routes to</th><th>order</th><th>move</th><th>folder mode</th></tr></thead>
+  <tbody id="tree"></tbody>
+</table>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const say = (t) => { $('status').textContent = t; };
+  let luna, session;
+
+  /** Run an action, report it, and keep the forms from firing twice. */
+  const run = async (label, fn) => {
+    say(`${label}…`);
+    const enabled = [...document.querySelectorAll('button')].filter((b) => !b.disabled);
+    for (const b of enabled) b.disabled = true;
+    try { await fn(); say(`${label}: done`); }
+    catch (e) { say(`${label} failed: ${e.code ?? ''} ${e.message}`); }
+    finally { for (const b of enabled) b.disabled = false; }
+  };
+
+  const nameOf = (ch) => ch.name.value ?? ch.id;
+  const isFolder = (ch) => ch instanceof Luna.Bus && ch.isFolder;
+  // Leave out what LUNA owns: the click and count-in tracks, the master and the cue buses.
+  const shown = (ch) => ch instanceof Luna.Bus ? ch.busType.value === 'aux' : !['click', 'count_in'].includes(ch.trackType.value ?? '');
+
+  /** Depth-first: each folder followed by what is inside it, in LUNA's order. */
+  function walk(folder = null, depth = 0, out = []) {
+    for (const ch of session.folderContents(folder).filter(shown)) {
+      out.push({ ch, depth });
+      if (isFolder(ch)) walk(ch, depth + 1, out);
+    }
+    return out;
+  }
+
+  /** `folder` and everything inside it: where a folder cannot be moved to. */
+  function inside(folder) {
+    const ids = new Set([folder.id]);
+    for (const { ch } of walk(folder)) ids.add(ch.id);
+    return ids;
+  }
+
+  /** "Root" plus every folder, indented, for a <select>; `exclude` leaves some out. */
+  function folderOptions(exclude = new Set()) {
+    const options = [new Option('Session root', '')];
+    for (const { ch, depth } of walk()) {
+      if (isFolder(ch) && !exclude.has(ch.id)) options.push(new Option(`${'  '.repeat(depth + 1)}${nameOf(ch)}`, ch.id));
+    }
+    return options;
+  }
+
+  function kindOf(ch) {
+    if (isFolder(ch)) return `folder (${ch.folderMode.value})`;
+    if (ch instanceof Luna.Bus) return 'aux bus';
+    return `${ch.trackType.value ?? 'track'} track`;
+  }
+
+  function row({ ch, depth }) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = ch.id;
+    if (isFolder(ch)) tr.className = 'folder';
+    const cell = () => tr.appendChild(document.createElement('td'));
+
+    const name = cell();
+    name.className = 'name';
+    name.style.paddingLeft = `${6 + depth * 18}px`;
+    name.textContent = `${isFolder(ch) ? '▾ ' : ''}${nameOf(ch)}`;
+
+    const kind = cell();
+    kind.className = 'kind';
+    kind.textContent = kindOf(ch);
+
+    // Where the main output goes: LUNA reroutes it as folders and modes change.
+    const routes = cell();
+    routes.className = 'routes';
+    routes.textContent = (ch.main.destinations.value ?? []).map((d) => d.name).join(' + ') || '—';
+
+    // ▲/▼ among the rows in the same folder. reorder() places after an anchor (none: first),
+    // and LUNA keeps each folder's contents right after it, so an anchor that is a folder
+    // puts this row after everything in that folder.
+    const siblings = session.folderContents(ch.folderUid.value ?? null).filter(shown);
+    const at = siblings.indexOf(ch);
+    const step = (label, title, anchor) => {
+      const b = Object.assign(document.createElement('button'), { className: 'step', textContent: label, title });
+      b.setAttribute('aria-label', `${title} ${nameOf(ch)}`);
+      if (anchor === undefined) b.disabled = true;
+      else b.onclick = () => void run(`${title} ${nameOf(ch)}`, () => session.reorder([ch], { after: anchor }));
+      return b;
+    };
+    cell().append(
+      step('▲', 'Move up', at > 1 ? siblings[at - 2] : at === 1 ? null : undefined),
+      step('▼', 'Move down', at >= 0 && at < siblings.length - 1 ? siblings[at + 1] : undefined),
+    );
+
+    const move = document.createElement('select');
+    move.setAttribute('aria-label', `move ${nameOf(ch)}`);
+    move.append(new Option('Move to…', '-'), ...folderOptions(ch instanceof Luna.Bus ? inside(ch) : undefined));
+    move.onchange = () => {
+      const target = move.value;
+      move.value = '-';
+      if (target === '-') return;
+      void run(`Move ${nameOf(ch)}`, () => session.moveToFolder([ch], target || null));
+    };
+    cell().append(move);
+
+    const modeCell = cell();
+    if (ch instanceof Luna.Bus) {
+      const mode = document.createElement('select');
+      mode.setAttribute('aria-label', `folder mode of ${nameOf(ch)}`);
+      for (const m of ['none', 'summing', 'container']) mode.append(new Option(m === 'none' ? 'none (ordinary bus)' : m, m));
+      mode.value = ch.folderMode.value ?? 'none';
+      mode.onchange = () => void run(`${nameOf(ch)}: ${mode.value}`, () => ch.setFolderMode(mode.value));
+      modeCell.append(mode);
+    }
+    return tr;
+  }
+
+  // Redraw on anything that moves the tree: the lists, and each channel's name, folder, mode,
+  // order and main output. Changes arriving together cost one redraw.
+  let watching = [];
+  let pending = false;
+  const schedule = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(() => { pending = false; void render(); }, 0);
+  };
+
+  let renders = 0;
+  async function render() {
+    const mine = ++renders;
+    const channels = [...session.tracks.items, ...session.buses.items].filter(shown);
+    // loadStrip() reads each channel's main output, which "routes to" shows.
+    await Promise.all(channels.map((ch) => ch.loadStrip().catch(() => undefined)));
+    if (mine !== renders) return;   // a newer render started meanwhile; never draw over it
+    for (const off of watching) off();
+    watching = channels.flatMap((ch) => [ch.name, ch.folderUid, ch.order, ch.main.destinations, ...(ch instanceof Luna.Bus ? [ch.folderMode] : [])].map((p) => p.onChange(schedule)));
+
+    const rows = walk();
+    $('tree').replaceChildren(...(rows.length ? rows.map(row) : [Object.assign(document.createElement('tr'), { innerHTML: '<td colspan="6" class="empty">No tracks yet.</td>' })]));
+    for (const id of ['folderParent', 'trackParent']) {
+      const sel = $(id);
+      const was = sel.value;
+      sel.replaceChildren(...folderOptions());
+      if ([...sel.options].some((o) => o.value === was)) sel.value = was;
+    }
+    const folders = session.folders.length;
+    $('count').textContent = `${rows.length} tracks and buses, ${folders} folder${folders === 1 ? '' : 's'}`;
+  }
+
+  $('folderForm').onsubmit = (e) => {
+    e.preventDefault();
+    const parent = $('folderParent').value;
+    void run('Create folder', () => session.newFolder({
+      name: $('folderName').value || 'Folder',
+      mode: $('folderMode').value,
+      ...(parent ? { folderUid: parent } : {}),
+    }));
+  };
+
+  $('trackForm').onsubmit = (e) => {
+    e.preventDefault();
+    const parent = $('trackParent').value;
+    const trackType = $('trackType').value;
+    void run('New track', () => session.newTrack({
+      name: $('trackName').value || 'Audio',
+      trackType,
+      stemFormat: trackType === 'instrument' ? 'stereo' : 'mono',
+      makeNameUnique: true,
+      ...(parent ? { folderUid: parent } : {}),
+    }));
+  };
+
+  try { luna = await Luna.connect(); } catch (e) { say(e.message); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  await luna.sessions.ready();
+  session = luna.sessions.current();
+  if (!session) { say('No session open in LUNA.'); return; }
+  await session.ready();
+  session.tracks.onChange(schedule);
+  session.buses.onChange(schedule);
+  say('');
+  await render();
+  luna.status.onChange(() => { if (luna.status.value === 'disconnected') say('Disconnected; reconnecting…'); });
+})();
+</script>

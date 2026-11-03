@@ -16,7 +16,8 @@ import { derived, type Prop, type WritableProp } from '../store/prop';
 import { UAError, Unsupported } from '../wire/errors';
 import type { Unsubscribe } from '../wire/port';
 import { AudioSource } from './audio-source';
-import { Bus } from './bus';
+import { Bus, type FolderMode } from './bus';
+import type { Channel } from './channel';
 import { Collection } from './collection';
 import { Context } from './context';
 import { Markers } from './markers';
@@ -27,6 +28,7 @@ import { requireFadeShape, type Clip } from './clip';
 import type { FadeShape } from './compiled-clip';
 import { Playlist } from './playlist';
 import type { PresetRow } from './presets';
+import { plannedOrder } from './order';
 import { requireTick, settle } from './settle';
 import { Render } from './system';
 import { Track, type TrackType } from './track';
@@ -104,12 +106,60 @@ export interface ExportOptions {
 }
 
 export interface NewTrackOptions {
+  /** Default `'Untitled'`. */
   name?: string;
+  /** Default `'audio'`. */
   trackType?: Extract<TrackType, 'audio' | 'instrument' | 'midi_matrix' | 'video'>;
+  /** Default `'mono'`. */
   stemFormat?: 'mono' | 'stereo' | string;
+  /** How many tracks to make. Default 1. */
   count?: number;
+  /** Number the name when a track or bus already has it. */
   makeNameUnique?: boolean;
+  /** Place the new tracks in this folder track. */
   folderUid?: string;
+}
+
+/**
+ * What a clip's length follows when the tempo changes (LUNA's `length_follows`): `'ticks'`
+ * keeps its musical length, `'time'` its length in seconds. Left out, the clip follows its
+ * track.
+ */
+export type LengthFollows = 'ticks' | 'time';
+
+/** LUNA's time-stretch algorithm for an audio clip (`alg_type`), passed verbatim. */
+export type AlgType = 'polyphonic' | 'monophonic' | 'efficient' | 'soloist' | 'varispeed' | 'razor_blade' | 'ua_stretch' | 'clip_effect';
+
+export interface InsertClipOptions {
+  /** The track whose active playlist gets the clip. Give this or `playlistUid`. */
+  trackUid?: string;
+  /** The playlist (lane) that gets the clip. */
+  playlistUid?: string;
+  /** The source file. Required, except with `copyOf`, which defaults it to that clip's. */
+  sourceUid?: string;
+  /** Timeline start, in ticks. */
+  startTick: number;
+  /** Timeline stop, in ticks; after `startTick`. */
+  stopTick: number;
+  /** Offset into the source, in nanoseconds. With `copyOf`, defaults to that clip's. */
+  sourceStartNs?: number;
+  /** End in the source, in nanoseconds. With `copyOf`, defaults to that clip's. */
+  sourceStopNs?: number;
+  /** With `copyOf`, defaults to that clip's name. */
+  name?: string;
+  /** Default `'audio'`. */
+  clipType?: 'audio' | 'video' | 'midi';
+  /** Layer for overlapping clips; higher plays on top. Default: above every clip it overlaps. */
+  layer?: number;
+  /** What the clip's length follows on a tempo change. Default: its track's setting. */
+  lengthFollows?: LengthFollows;
+  /** Time-stretch algorithm for an audio clip. Default: its track's. */
+  algType?: AlgType;
+  /**
+   * Copy this clip (LUNA's `clip_uid`): the new clip takes its gain, fades, warps, MIDI and
+   * settings, placed at `startTick`-`stopTick`.
+   */
+  copyOf?: Clip;
 }
 
 export interface NewTrackFromPresetOptions {
@@ -130,6 +180,38 @@ export interface NewBusOptions {
   name?: string;
   /** Default `'stereo'`. */
   stemFormat?: 'mono' | 'stereo' | string;
+}
+
+export interface NewFolderOptions {
+  /** Default `'Folder'`. */
+  name?: string;
+  /**
+   * Default `'summing'`: the tracks inside play through the folder, as a bus. `'container'`
+   * only groups them; they keep routing to the nearest summing folder above, else the master.
+   */
+  mode?: Exclude<FolderMode, 'none'>;
+  /** Default `'stereo'`. */
+  stemFormat?: 'mono' | 'stereo' | string;
+  /** Place the new folder inside this folder. Default: the session root. */
+  folderUid?: string;
+}
+
+export interface MoveToFolderOptions {
+  /**
+   * Place the moved items just after this track or bus, as {@link Session.reorder} does: LUNA
+   * then keeps each folder's contents together, so it decides their place among the items
+   * already in the destination. Usually a track or bus in the destination, or the folder
+   * itself for first in it. Default (or `null`): first in the destination.
+   */
+  after?: Channel | string | null;
+}
+
+export interface ReorderOptions {
+  /**
+   * Place the items just after this track or bus. Default (or `null`): first. Nothing changes
+   * folder, so the place is among the item's siblings: see {@link Session.reorder}.
+   */
+  after?: Channel | string | null;
 }
 
 export interface TransactionOptions {
@@ -282,7 +364,22 @@ export class Session extends Node {
     return this.buses.items.find((b) => b.isMaster);
   }
 
-  /** Tracks sorted by their `order` key. */
+  /**
+   * Every track and bus in LUNA's order (fact 137): one `order` runs 1..N across both, each
+   * folder followed at once by everything inside it. This includes LUNA's system tracks
+   * (click, count-in) and buses (master, cues); filter on `trackType` and `busType` for what
+   * a page shows. {@link tracksInOrder} is the same order with the buses left out.
+   *
+   * @example
+   * // LUNA's track list as an indented outline.
+   * const depth = (ch) => (ch?.folderUid.value ? 1 + depth(session.buses.byId(ch.folderUid.value)) : 0);
+   * for (const ch of session.channelsInOrder) console.log('  '.repeat(depth(ch)) + ch.name.value);
+   */
+  get channelsInOrder(): Array<Track | Bus> {
+    return [...this.tracks.items, ...this.buses.items].sort((a, b) => (a.order.value ?? 0) - (b.order.value ?? 0));
+  }
+
+  /** Tracks sorted by their `order` key; buses and folders, which share it, are left out (fact 137). */
   get tracksInOrder(): Track[] {
     return [...this.tracks.items].sort((a, b) => (a.order.value ?? 0) - (b.order.value ?? 0));
   }
@@ -299,13 +396,48 @@ export class Session extends Node {
   // Commands
   // ---------------------------------------------------------------------------------------
 
-  /** Create a track. Resolves to the engine reply. */
-  newTrack(options: NewTrackOptions = {}): Promise<unknown> {
+  /**
+   * Create tracks in one undo step, and resolve to them once they are listed in
+   * {@link tracks} with their properties loaded: one {@link Track}, or `count` of them. LUNA
+   * answers the new uids (fact 135), so nothing has to be found by name.
+   *
+   * Inside a batch {@link transaction} LUNA holds the new tracks back until the commit (facts
+   * 74, 135), so this resolves at once to tracks whose `id` is set and whose props read
+   * `undefined` until then. They are the objects `session.tracks` lists after the commit.
+   *
+   * @example
+   * const [bass] = await session.newTrack({ name: 'Bass', stemFormat: 'mono' });
+   * bass.name.value; // 'Bass'
+   *
+   * @example
+   * // A track and its clip as one undo entry.
+   * await session.transaction('Add loop', async () => {
+   *   const [track] = await session.newTrack({ name: 'Loop', stemFormat: 'stereo' });
+   *   await session.insertClip({ trackUid: track.id, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+   * });
+   */
+  async newTrack(options: NewTrackOptions = {}): Promise<Track[]> {
     const payload: Record<string, unknown> = { uid: this.uid, name: options.name ?? 'Untitled', track_type: options.trackType ?? 'audio', stem_format: options.stemFormat ?? 'mono' };
     if (options.count !== undefined) payload['count'] = options.count;
     if (options.makeNameUnique !== undefined) payload['make_name_unique'] = options.makeNameUnique;
     if (options.folderUid !== undefined) payload['folder_uid'] = options.folderUid;
-    return this.post('new_track', payload);
+    const uids = replyUids(await this.post('new_track', payload));
+    if (uids.length === 0) throw new UAError('invalid_response', 'new_track answered without a track uid', { path: `${this.path}/new_track` });
+    return this.resolveTracks(uids);
+  }
+
+  /** The tracks `new_track` made: listed and loaded, or handles inside a batch. */
+  private async resolveTracks(uids: readonly string[]): Promise<Track[]> {
+    if (this.openTransaction === 'batch') return uids.map((uid) => this.tracks.member(uid));
+    await settle(() => uids.every((uid) => this.tracks.byId(uid) !== undefined || this.buses.byId(uid) !== undefined), 'new tracks', {
+      path: `${this.path}/tracks`,
+      refresh: () => Promise.all([this.tracks.reload(), this.buses.reload()]).then(() => undefined),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+    // Listed is not loaded: wait for the new members' properties and their change notices.
+    await this.tracks.membersReady();
+    await this.client.settled();
+    return uids.map((uid) => this.tracks.byId(uid)).filter((t): t is Track => t !== undefined);
   }
 
   /**
@@ -317,10 +449,15 @@ export class Session extends Node {
    * await track.outputs.byId('send_0').assign(reverb);
    */
   async newBus(options: NewBusOptions = {}): Promise<Bus> {
-    const reply = (await this.post('new_track', { uid: this.uid, name: options.name ?? 'Bus', track_type: 'bus', stem_format: options.stemFormat ?? 'stereo' })) as { uid?: string } | null;
+    return this.createBus({ uid: this.uid, name: options.name ?? 'Bus', track_type: 'bus', stem_format: options.stemFormat ?? 'stereo' }, 'new bus');
+  }
+
+  /** Post `new_track` for a bus and resolve to it, listed and loaded. */
+  private async createBus(payload: Record<string, unknown>, what: string): Promise<Bus> {
+    const reply = (await this.post('new_track', payload)) as { uid?: string } | null;
     const uid = reply?.uid;
     if (typeof uid !== 'string' || !uid) throw new UAError('invalid_response', 'new_track answered without a bus uid', { path: `${this.path}/new_track` });
-    await settle(() => this.buses.byId(uid) !== undefined, 'new bus', {
+    await settle(() => this.buses.byId(uid) !== undefined, what, {
       path: `${this.path}/buses`,
       refresh: () => this.buses.reload(),
       flush: () => this.client.store.scheduler.flush(),
@@ -329,6 +466,153 @@ export class Session extends Node {
     // fetches them, and until then name, busType and stemFormat read undefined.
     await this.buses.membersReady();
     return this.buses.byId(uid)!;
+  }
+
+  /**
+   * Create a folder track in one undo step, and resolve to it once it is listed in
+   * {@link buses} with its properties loaded (fact 136). A folder is an aux bus whose
+   * {@link Bus.folderMode} is not `'none'`, so it is a {@link Bus} with `isFolder` true. It goes
+   * last in the session, or first inside `folderUid` (fact 137). Put
+   * tracks in it with `newTrack({ folderUid })` or {@link moveToFolder}; list them with
+   * {@link folderContents}.
+   *
+   * @throws {UAError} `device.database_error` when `folderUid` is not a folder.
+   * @example
+   * const drums = await session.newFolder({ name: 'Drums' });
+   * const [kick, snare] = await session.newTrack({ name: 'Drum', count: 2, makeNameUnique: true, folderUid: drums.id });
+   *
+   * @example
+   * // A folder that only groups, inside another folder.
+   * const perc = await session.newFolder({ name: 'Perc', mode: 'container', folderUid: drums.id });
+   */
+  async newFolder(options: NewFolderOptions = {}): Promise<Bus> {
+    const mode = options.mode ?? 'summing';
+    if (mode !== 'summing' && mode !== 'container') throw new UAError('out_of_range', `newFolder(): unknown mode ${String(mode)}`, { path: `${this.path}/new_track` });
+    const payload: Record<string, unknown> = { uid: this.uid, name: options.name ?? 'Folder', track_type: 'bus', stem_format: options.stemFormat ?? 'stereo', folder_mode: mode };
+    if (options.folderUid !== undefined) payload['folder_uid'] = options.folderUid;
+    const bus = await this.createBus(payload, 'new folder');
+    // `folder_mode` is set after the bus row is made (fact 136), and its push can reach the
+    // new member before the member's own read does, so wait for both.
+    await settle(() => bus.name.value !== undefined && bus.folderMode.value === mode && (options.folderUid === undefined || bus.folderUid.value === options.folderUid), 'new folder', {
+      path: bus.path,
+      refresh: () => this.client.store.load(bus.path, { children: false, commands: false, flatvalue: true }),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+    return bus;
+  }
+
+  /**
+   * The folder tracks, in no particular order: the buses whose folder mode is not `'none'`.
+   * Use {@link folderContents} for the hierarchy.
+   *
+   * @example
+   * for (const folder of session.folders) console.log(folder.name.value, folder.folderMode.value);
+   */
+  get folders(): Bus[] {
+    return this.buses.items.filter((b) => b.isFolder);
+  }
+
+  /**
+   * The tracks and buses directly inside `folder`, or at the session root for `null`, sorted
+   * by their `order`. Their own `folderUid` names the folder. At the root this includes
+   * LUNA's system tracks and buses (click, count-in, master, cues).
+   *
+   * @example
+   * const walk = (folder, depth = 0) => {
+   *   for (const ch of session.folderContents(folder)) {
+   *     console.log('  '.repeat(depth) + ch.name.value);
+   *     if (ch instanceof Luna.Bus && ch.isFolder) walk(ch, depth + 1);
+   *   }
+   * };
+   * walk(null);
+   */
+  folderContents(folder: Bus | string | null): Array<Track | Bus> {
+    const id = folder === null ? null : typeof folder === 'string' ? folder : folder.id;
+    const inside = (c: Track | Bus) => (c.folderUid.value ?? null) === id;
+    return [...this.tracks.items.filter(inside), ...this.buses.items.filter(inside)].sort((a, b) => (a.order.value ?? 0) - (b.order.value ?? 0));
+  }
+
+  /**
+   * Move tracks and buses (folders too, with everything inside them) into `folder`, or to
+   * the session root with `null`, in one undo step (LUNA's `move_to_folder`, fact 136), and
+   * resolve once each one's {@link Channel.folderUid} shows it. They go first in the folder, or
+   * after `options.after` (fact 137); {@link reorder} moves them within it. LUNA reroutes the main output
+   * of everything moved to the nearest summing folder it is now in, else the master.
+   *
+   * @throws {UAError} `uasrv.invalid_value` when `folder` is not a folder, or would end up
+   * inside itself.
+   * @example
+   * const vocals = await session.newFolder({ name: 'Vocals' });
+   * await session.moveToFolder([lead, harmony], vocals);
+   * await session.moveToFolder([harmony], null); // back to the root
+   */
+  async moveToFolder(items: ReadonlyArray<Channel | string>, folder: Bus | string | null, options: MoveToFolderOptions = {}): Promise<void> {
+    const ids = items.map((i) => (typeof i === 'string' ? i : i.id));
+    if (ids.length === 0) return;
+    const folderUid = folder === null ? null : typeof folder === 'string' ? folder : folder.id;
+    const anchor = options.after === undefined || options.after === null ? null : typeof options.after === 'string' ? options.after : options.after.id;
+    const payload: Record<string, unknown> = { session_uid: this.uid, after_uids: ids };
+    if (folderUid) payload['folder_uid'] = folderUid;
+    if (anchor !== null) payload['before_uid'] = anchor;
+    // LUNA re-parents only the items with no moved folder above them; the rest ride along
+    // inside their folder (fact 136). Plan the order it will write from that (fact 137).
+    const parentOf = new Map(this.channelsInOrder.map((c) => [c.id, c.folderUid.value ?? null] as const));
+    const topLevel = ids.filter((id) => {
+      for (let f = parentOf.get(id) ?? null; f; f = parentOf.get(f) ?? null) if (ids.includes(f)) return false;
+      return true;
+    });
+    const known = topLevel.every((id) => parentOf.has(id)) && (anchor === null || parentOf.has(anchor));
+    const rows = this.channelsInOrder.map((c) => ({ id: c.id, folderUid: topLevel.includes(c.id) ? folderUid : (c.folderUid.value ?? null) }));
+    const expected = plannedOrder(rows, topLevel, anchor).join();
+    await this.post('tracks/move_to_folder', payload);
+    // A batch transaction holds the change back until its commit.
+    if (this.openTransaction === 'batch') return;
+    const channels = () => topLevel.map((id) => this.tracks.byId(id) ?? this.buses.byId(id));
+    const placed = () => channels().every((c) => c === undefined || (c.folderUid.value ?? null) === folderUid);
+    // An item this session does not list yet can only be checked by its folder.
+    await settle(() => placed() && (!known || this.channelsInOrder.map((c) => c.id).join() === expected), 'move to folder', {
+      path: `${this.path}/tracks`,
+      refresh: () => Promise.all([this.tracks.reload(), this.buses.reload()]).then(() => undefined),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
+  /**
+   * Move tracks and buses to just after `after`, or first, in one undo step (LUNA's
+   * `change_order`, fact 137), and resolve once {@link channelsInOrder} shows the new order.
+   * The items keep their order among themselves as given, and a folder moves with everything
+   * inside it.
+   *
+   * Nothing changes folder: LUNA keeps each folder's contents together right after it, so an
+   * anchor inside another folder only decides where the item lands among its own siblings.
+   * Use {@link moveToFolder} to change folder. LUNA answers the same whether or not anything
+   * moved, so an id this session does not list rejects here rather than doing nothing.
+   *
+   * @throws {UAError} `out_of_range` for a track or bus (or anchor) the session does not list.
+   * @example
+   * // Put the bass just after the drums, then the vocal first.
+   * await session.reorder([bass], { after: drums });
+   * await session.reorder([vocal]);
+   */
+  async reorder(items: ReadonlyArray<Channel | string>, options: ReorderOptions = {}): Promise<void> {
+    const ids = items.map((i) => (typeof i === 'string' ? i : i.id));
+    if (ids.length === 0) return;
+    const anchor = options.after === undefined || options.after === null ? null : typeof options.after === 'string' ? options.after : options.after.id;
+    const listed = (id: string) => this.tracks.byId(id) !== undefined || this.buses.byId(id) !== undefined;
+    for (const id of anchor === null ? ids : [...ids, anchor]) {
+      if (!listed(id)) throw new UAError('out_of_range', `reorder(): no track or bus ${id} in this session`, { path: `${this.path}/tracks/change_order` });
+    }
+    const current = () => this.channelsInOrder.map((c) => ({ id: c.id, folderUid: c.folderUid.value ?? null }));
+    const expected = plannedOrder(current(), ids, anchor).join();
+    const payload: Record<string, unknown> = { session_uid: this.uid, after_uids: ids };
+    if (anchor !== null) payload['before_uid'] = anchor; // LUNA's name for the item to follow
+    await this.post('tracks/change_order', payload);
+    if (this.openTransaction === 'batch') return;
+    await settle(() => current().map((r) => r.id).join() === expected, 'reorder', {
+      path: `${this.path}/tracks`,
+      refresh: () => Promise.all([this.tracks.reload(), this.buses.reload()]).then(() => undefined),
+      flush: () => this.client.store.scheduler.flush(),
+    });
   }
 
   /**
@@ -357,18 +641,9 @@ export class Session extends Node {
     if (options.folderUid !== undefined) payload['folder_uid'] = options.folderUid;
     if (options.stemFormat !== undefined) payload['stem_format'] = options.stemFormat;
     // One track answers `{ uid }`, several an array of them, none (a master bus preset) nothing.
-    const reply = (await this.post('new_track', payload)) as { uid?: unknown } | { uid?: unknown }[] | null;
-    const uids = (Array.isArray(reply) ? reply : reply ? [reply] : []).map((r) => r?.uid).filter((u): u is string => typeof u === 'string' && u !== '');
+    const uids = replyUids(await this.post('new_track', payload));
     if (uids.length === 0) return [];
-    await settle(() => uids.every((uid) => this.tracks.byId(uid) !== undefined || this.buses.byId(uid) !== undefined), 'new tracks', {
-      path: `${this.path}/tracks`,
-      refresh: () => Promise.all([this.tracks.reload(), this.buses.reload()]).then(() => undefined),
-      flush: () => this.client.store.scheduler.flush(),
-    });
-    // Listed is not loaded: wait for the new members' properties and their change notices.
-    await this.tracks.membersReady();
-    await this.client.settled();
-    return uids.map((uid) => this.tracks.byId(uid)).filter((t): t is Track => t !== undefined);
+    return this.resolveTracks(uids);
   }
 
   undo(count = 1): Promise<unknown> {
@@ -442,32 +717,68 @@ export class Session extends Node {
   }
 
   /**
-   * Insert a clip from a source file onto a track's active playlist. Timeline position is in
-   * ticks; source offsets are nanoseconds (fact 16).
+   * Insert a clip onto a track's active playlist, or onto a given playlist, in one undo step,
+   * and resolve to the new {@link Clip} once its playlist lists it with its properties
+   * loaded. LUNA answers the clip's uid. Timeline position is in ticks; source offsets are
+   * nanoseconds (fact 16).
    *
    * `sourceUid` is required for every clip type, MIDI included: LUNA answers
    * `uasrv.invalid_property` without one (fact 112). To start a MIDI clip of your own, write
-   * its notes with {@link Playlist.createNotes}, which makes the clip.
+   * its notes with {@link Playlist.createNotes}, which makes the clip. With `copyOf` the new
+   * clip is a copy of another (its gain, fades, warps and MIDI), and the source, its offsets
+   * and the name default to that clip's (fact 135).
+   *
+   * Inside a batch {@link transaction} this resolves at once to the clip with its `id` set
+   * and its props `undefined` until the commit, as {@link newTrack} does.
+   *
+   * @example
+   * const clip = await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+   * clip.start.value; // 0
+   *
+   * @example
+   * // Repeat a slice four bars later, in front of what is there.
+   * const again = await session.insertClip({ playlistUid: lane.id, copyOf: slice, startTick: slice.start.value! + 4 * Luna.WHOLE_NOTE, stopTick: slice.stop.value! + 4 * Luna.WHOLE_NOTE });
    */
-  insertClip(options: {
-    trackUid?: string;
-    playlistUid?: string;
-    sourceUid: string;
-    startTick: number;
-    stopTick: number;
-    sourceStartNs?: number;
-    sourceStopNs?: number;
-    name?: string;
-    clipType?: 'audio' | 'video' | 'midi';
-  }): Promise<unknown> {
-    const payload: Record<string, unknown> = { session_uid: this.uid, source_uid: options.sourceUid, start: options.startTick, stop: options.stopTick };
+  async insertClip(options: InsertClipOptions): Promise<Clip> {
+    const copy = options.copyOf;
+    const sourceUid = options.sourceUid ?? copy?.sourceUid.value;
+    const payload: Record<string, unknown> = { session_uid: this.uid, source_uid: sourceUid ?? '', start: options.startTick, stop: options.stopTick };
     if (options.trackUid !== undefined) payload['track_uid'] = options.trackUid;
     if (options.playlistUid !== undefined) payload['playlist_uid'] = options.playlistUid;
-    if (options.sourceStartNs !== undefined) payload['source_start'] = options.sourceStartNs;
-    if (options.sourceStopNs !== undefined) payload['source_stop'] = options.sourceStopNs;
-    if (options.name !== undefined) payload['name'] = options.name;
+    // LUNA's copy overwrites these with what the call sends, 0 or '' when left out (fact 135).
+    const sourceStart = options.sourceStartNs ?? copy?.sourceStart.value;
+    const sourceStop = options.sourceStopNs ?? copy?.sourceStop.value;
+    const name = options.name ?? copy?.name.value;
+    if (sourceStart !== undefined) payload['source_start'] = sourceStart;
+    if (sourceStop !== undefined) payload['source_stop'] = sourceStop;
+    if (name !== undefined) payload['name'] = name;
     if (options.clipType !== undefined) payload['clip_type'] = { audio: 0, video: 1, midi: 2 }[options.clipType];
-    return this.post('insert_clip', payload);
+    if (options.layer !== undefined) payload['layer'] = options.layer;
+    if (options.lengthFollows !== undefined) payload['length_follows'] = options.lengthFollows;
+    if (options.algType !== undefined) payload['alg_type'] = options.algType;
+    if (copy) payload['clip_uid'] = copy.id;
+    const [uid] = replyUids(await this.post('insert_clip', payload));
+    if (!uid) throw new UAError('invalid_response', 'insert_clip answered without a clip uid', { path: `${this.path}/insert_clip` });
+
+    // The playlist: given, the track's active one, or (a track made in this same batch) LUNA's
+    // record of the clip, which reads the session database the batch writes to (fact 135).
+    let playlistUid = options.playlistUid ?? (options.trackUid !== undefined ? this.tracks.byId(options.trackUid)?.playlistUid.value : undefined);
+    if (!playlistUid) {
+      const info = (await this.post('get_clip_info', { session_uid: this.uid, clip_uid: uid })) as { playlist_uid?: unknown } | null;
+      if (typeof info?.playlist_uid === 'string' && info.playlist_uid) playlistUid = info.playlist_uid;
+    }
+    if (!playlistUid) throw new UAError('invalid_response', `insert_clip made ${uid}, but its playlist is not known`, { path: `${this.path}/insert_clip` });
+    const clips = this.playlists.member(playlistUid).clips;
+    if (this.openTransaction === 'batch') return clips.member(uid);
+    await clips.load();
+    await settle(() => clips.byId(uid) !== undefined, 'insert clip', {
+      path: `${this.path}/playlists/${playlistUid}/clips`,
+      refresh: () => clips.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+    await clips.membersReady();
+    await this.client.settled();
+    return clips.byId(uid)!;
   }
 
   /** Create a new playlist version on the given tracks, empty or duplicating the current one. */
@@ -967,4 +1278,10 @@ function base64(bytes: Uint8Array): string {
 /** A fresh 32-hex uid, the shape LUNA uses for render and file objects. */
 function newUid(): string {
   return globalThis.crypto.randomUUID().replaceAll('-', '');
+}
+
+/** The uids in a reply of `{ uid }` or `[{ uid }, ...]` (`new_track`, `insert_clip`). */
+function replyUids(reply: unknown): string[] {
+  const rows = Array.isArray(reply) ? reply : reply ? [reply] : [];
+  return rows.map((r) => (r as { uid?: unknown } | null)?.uid).filter((u): u is string => typeof u === 'string' && u !== '');
 }

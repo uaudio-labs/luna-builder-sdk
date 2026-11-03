@@ -16,7 +16,7 @@
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="rowid"></a> `rowid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
-| <a id="seconds"></a> `seconds` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | [location](#location) in seconds from the session start, following the marker and the tempo map. Assumes 120 BPM until `session.musical` has loaded. **Example** `marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));` | - |
+| <a id="seconds"></a> `seconds` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | [location](#location) in seconds from the session start, following the marker and the tempo map. `undefined` until `session.musical` has loaded the tempo map; it never assumes a tempo. **Example** `marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));` | - |
 
 ## Accessors
 

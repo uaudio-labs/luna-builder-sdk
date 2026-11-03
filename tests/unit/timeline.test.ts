@@ -88,3 +88,96 @@ describe('Luna.formatMinSec', () => {
     expect(Luna.formatMinSec(Number.NaN, { fraction: 2 })).toBe('--:--.--');
   });
 });
+
+describe('Luna.Timeline before the tempo map loads', () => {
+  async function unloaded() {
+    const engine = new Luna.MockEngine();
+    engine.addSession('abc', { tracks: ['Vocal'], name: 'Demo' });
+    await engine.settled();
+    const luna = await Luna.connect({ port_: engine.port() });
+    await luna.sessions.ready();
+    const session = luna.sessions.current()!;   // listed, but not session.ready(): no tempo map yet
+    return { engine, luna, session };
+  }
+
+  it('reports unavailable instead of assuming 120 BPM', async () => {
+    const { session } = await unloaded();
+    const t = session.musical.timeline;
+    expect(session.musical.tempoMap.items).toHaveLength(0);
+    expect(t.tempoLoaded).toBe(false);
+    for (const read of [() => t.tempoAt(0), () => t.seconds(B), () => t.tickAtSeconds(1), () => session.musical.tempoAt(0)]) {
+      expect(read).toThrow(Luna.Error);
+      try { read(); } catch (e) { expect((e as InstanceType<typeof Luna.Error>).code).toBe('unavailable'); }
+    }
+    expect(() => session.transport.seconds).toThrow(/not loaded/);
+  });
+
+  it('ignores a tempo event whose BPM has not loaded yet rather than reading it as 120', async () => {
+    const { engine, luna, session } = await unloaded();
+    for (const row of engine.children('/sessions/abc/tempo_map')) engine.removeNode(`/sessions/abc/tempo_map/${row}`);
+    await engine.settled();
+    await session.ready();
+    const t = session.musical.timeline;
+    expect(session.musical.tempoMap.items).toHaveLength(0);
+
+    let calls = 0;
+    t.onChange(() => calls++);
+    // A row LUNA adds is pushed as membership first; its values arrive on a read.
+    await session.musical.setTempo(90, 0);
+    await engine.settled();
+    expect(session.musical.tempoMap.items.map((i) => i.tempo.value)).toEqual([undefined]);
+    expect(t.tempoLoaded).toBe(false);
+    expect(() => t.tempoAt(0)).toThrow(/not loaded/);
+
+    await Promise.all(session.musical.tempoMap.items.map((i) => i.load()));
+    await luna.settled();
+    expect(t.tempoLoaded).toBe(true);
+    expect(calls).toBeGreaterThan(0);   // the timeline says when it can answer
+    expect(t.tempoAt(0)).toBe(90);
+    expect(t.seconds(3 * B)).toBeCloseTo(2, 9);
+  });
+
+  it('leaves marker.seconds undefined until the tempo map loads, then fills it in', async () => {
+    const { engine, luna, session } = await unloaded();
+    engine.addNode('/sessions/abc/markers/9', { properties: { rowid: 9, location: 4 * B, name: 'Hook', comments: '', color: 0 } });
+    engine.setValue('/sessions/abc/tempo_map/1', 'tempo', 60);
+    await engine.settled();
+    await session.markers.load();
+    await Promise.all(session.markers.items.map((m) => m.load()));
+    const marker = session.markers.items.find((m) => m.name.value === 'Hook')!;
+    expect(marker.seconds.value).toBeUndefined();
+
+    let calls = 0;
+    marker.seconds.onChange(() => calls++);
+    await session.musical.ready();
+    await Promise.all(session.musical.tempoMap.items.map((i) => i.load()));
+    await luna.settled();
+    expect(marker.seconds.value).toBeCloseTo(4, 9);
+    expect(calls).toBeGreaterThan(0);
+  });
+});
+
+describe('Luna.Timeline.onChange on a tempo edit', () => {
+  it('fires when the tempo in effect is edited, which tempoMap.onChange does not see', async () => {
+    const engine = new Luna.MockEngine();
+    engine.addSession('abc', { tracks: ['Vocal'], name: 'Demo' });
+    await engine.settled();
+    const luna = await Luna.connect({ port_: engine.port() });
+    const session = await luna.session();
+    await session.ready();
+    const m = session.musical;
+    expect(m.tempoAt(0)).toBe(120);
+
+    let timelineCalls = 0;
+    let mapCalls = 0;
+    m.timeline.onChange(() => timelineCalls++);
+    m.tempoMap.onChange(() => mapCalls++);
+    await m.setTempoInEffectAt(90, 0);
+    await engine.settled();
+    await luna.settled();
+    expect(mapCalls).toBe(0);            // the row was edited, not added or removed
+    expect(timelineCalls).toBeGreaterThan(0);
+    expect(m.tempoAt(0)).toBe(90);
+    expect(m.timeline.seconds(3 * B)).toBeCloseTo(2, 9);
+  });
+});

@@ -5,7 +5,8 @@
  * `record_fx_*` on some channels). An empty slot has `pluginId === null`.
  *
  * Bypass is not the `enabled` property (the engine ignores writes to it). The IN/OUT state is
- * the plugin control named by `bypassControl`, with `bypassControlActiveLow` polarity, and is
+ * the plugin control named by `bypassControl`, with `bypassControlActiveLow` polarity: when it
+ * is true a nonzero value means IN, otherwise (false or unreported) zero means IN. It is
  * written through the context command `set_inserts_in_out` so undo, touch and mix groups are
  * handled by the engine. {@link Effect.in} and {@link Effect.setIn} wrap that.
  *
@@ -51,6 +52,7 @@ export class Effect extends Node {
   readonly pluginLicenseError: Prop<string | null>;
   /** Name of the control that carries the IN/OUT state, or `null` if the plugin has none. */
   readonly bypassControl: Prop<string | null>;
+  /** Polarity of {@link bypassControl}: true when a nonzero value means IN; false or `null` when zero means IN. */
   readonly bypassControlActiveLow: Prop<boolean | null>;
   /** IN (true) or bypassed (false); `undefined` until known or when the plugin has no bypass control. */
   readonly in: Prop<boolean | undefined>;
@@ -110,8 +112,10 @@ export class Effect extends Node {
       if (!name) return undefined;
       const v = this.controls.get(name).value.value;
       if (v === undefined) return undefined;
-      const on = v !== 0;
-      return this.bypassControlActiveLow.value === true ? !on : on;
+      // LUNA's mixer reads it this way round (fact 29): with `bypass_control_active_low`
+      // true a nonzero value is IN; with it false or unreported, zero is IN.
+      const nonzero = v !== 0;
+      return this.bypassControlActiveLow.value === true ? nonzero : !nonzero;
     });
   }
 

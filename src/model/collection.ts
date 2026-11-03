@@ -19,6 +19,8 @@ import type { Node } from './node';
 
 export class Collection<T extends Node> implements List<T> {
   private members = new Map<string, T>();
+  /** Members handed out by {@link member} before the engine listed them, by name. */
+  private early = new Map<string, T>();
   private ordered: readonly T[] = [];
   private loading: Promise<void> | undefined;
   private readonly listeners = new Set<() => void>();
@@ -64,6 +66,21 @@ export class Collection<T extends Node> implements List<T> {
   byId(id: string): T | undefined {
     this.ensureSynced();
     return this.members.get(id);
+  }
+
+  /**
+   * @internal The member named `id`, or a handle for one the engine has not listed yet (a
+   * track made inside a batch transaction, whose push LUNA holds until the commit). The
+   * collection adopts that same instance when the engine lists it, so `byId(id)` and `items`
+   * hand back the object the caller already holds. Its props read `undefined` until then.
+   */
+  member(id: string): T {
+    this.ensureSynced();
+    const existing = this.members.get(id) ?? this.early.get(id);
+    if (existing) return existing;
+    const made = this.create(`${this.path}/${id}`, id);
+    this.early.set(id, made);
+    return made;
   }
 
   /**
@@ -138,7 +155,9 @@ export class Collection<T extends Node> implements List<T> {
     this.namesUnsub = undefined;
     this.listeners.clear();
     for (const m of this.members.values()) m.dispose();
+    for (const m of this.early.values()) m.dispose();
     this.members.clear();
+    this.early.clear();
     this.ordered = [];
   }
 
@@ -154,7 +173,8 @@ export class Collection<T extends Node> implements List<T> {
     const names = cell.value ?? [];
     const next = new Map<string, T>();
     for (const name of names) {
-      const existing = this.members.get(name);
+      const existing = this.members.get(name) ?? this.early.get(name);
+      this.early.delete(name);
       next.set(name, existing ?? this.create(`${this.path}/${name}`, name));
     }
     for (const [name, member] of this.members) {

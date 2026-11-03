@@ -2,6 +2,105 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## 3.1.1 Beta 2
+
+Changed (breaking)
+- `session.newTrack()` resolves to the new tracks, a `Luna.Track[]` (one per `count`), listed in
+  `session.tracks` with their properties loaded, instead of LUNA's raw reply. There is no need
+  to diff `session.tracks` or find the track by name. Replace `reply.uid` with
+  `const [track] = await session.newTrack(...)` and `track.id`.
+- `session.insertClip()` resolves to the new `Luna.Clip`, listed in its playlist's `clips` with
+  its properties loaded, instead of LUNA's raw `{ uid }`. Replace `reply.uid` with `clip.id`.
+- Inside a batch `session.transaction()`, LUNA holds the new tracks and clips back until the
+  commit, so both resolve at once to objects whose `id` is set and whose props read
+  `undefined` until then. They are the same objects `session.tracks` and `playlist.clips` list
+  afterwards, so `newTrack` then `insertClip({ trackUid: track.id })` still makes one undo entry
+  (fact 135).
+- `timeline.tempoAt()`, `timeline.seconds()`, `timeline.tickAtSeconds()`,
+  `musical.tempoAt()` and `Luna.audioNsAtTick()` throw `Luna.Error` with code `unavailable`
+  while the tempo map is not loaded, instead of answering at 120 BPM. A tempo event whose BPM
+  has not been read yet no longer counts as 120 either. A page that read them before
+  `session.ready()` got a wrong tempo with no warning, and planned clip lengths from it; await
+  `session.ready()` (which `luna.session()` does) or check `timeline.tempoLoaded`.
+  `marker.seconds` reads `undefined` until then, and `Luna.compiledClipAudio()` gives
+  `undefined` (an outline) for a stretched clip on an older LUNA.
+
+Changed
+- `Luna.MockEngine` numbers `order` as LUNA does: one 1..N across tracks and buses together
+  (it counted each from 0), folders followed by their contents, renumbered after a delete, and
+  it answers `change_order` (fact 137). A test that compared `order` values may need new ones.
+- `Luna.MockEngine` maps faders through LUNA's real tapers instead of its own stand-in, and
+  honours a control's `taper`. Mock faders now rest at 0 dB = 0.7818… normalized (was 0.78),
+  and normalized 0 is -144 dB (was -96). A test that compared with those numbers should use
+  `Luna.Taper.named('+12').toNormalized(db)` instead (fact 134).
+
+Added
+- Folder tracks (fact 136). `session.newFolder({ name, mode, stemFormat, folderUid })` makes
+  a folder track in one undo step and resolves to it, a `Luna.Bus` whose `isFolder` is true:
+  `mode: 'summing'` (the default) makes it the bus for what is inside it, `'container'` only
+  groups. `session.moveToFolder(items, folder, { after })` moves tracks and buses (folders with
+  their contents) into a folder, or to the root with `null`, just after `after` or first, and
+  resolves once the folders and the order show it; a folder's contents stay inside it even when
+  they are listed too. `bus.setFolderMode(mode)` changes
+  a folder's mode, or turns an aux bus into a folder and back. `session.folders` lists the
+  folders and `session.folderContents(folder)` what is directly inside one (or at the root),
+  in LUNA's order. `session.newTrack({ folderUid })` already placed new tracks in a folder.
+  LUNA reroutes main outputs as things move: to the nearest summing folder, else the master.
+  New types `Luna.NewFolderOptions` and `Luna.MoveToFolderOptions`. `Luna.MockEngine` models
+  all of it, apart from the order.
+- `session.channelsInOrder`: every track and bus in LUNA's order. One `order` runs 1..N
+  across tracks and buses together, each folder followed by what is inside it (fact 137);
+  `tracksInOrder` is the same order without the buses.
+- `session.reorder(items, { after })` moves tracks and buses (a folder with its contents) to
+  just after `after`, or first, in one undo step, and resolves once the new order shows. It
+  never changes folder. LUNA ignores an unknown id without an error, so `reorder` rejects one
+  with `out_of_range` before posting. New type `Luna.ReorderOptions`.
+- `examples/order.html`: every track and bus in LUNA's order with its `order` number,
+  rearranged by drag and drop, in and out of folders. Click, Cmd/Ctrl-click (gaps allowed) and
+  Shift-click select; the selection drops above or below any row, or inside a folder, as one
+  block in one undo entry (`session.moveToFolder()`). Below a folder's last row the pointer's
+  left-right position picks in the folder or after it. ▲/▼ step one row, and rows flash when
+  LUNA renumbers them.
+- `examples/folders.html`: the session as a tree of folders, with forms to make a folder and
+  a track inside one, a "Move to…" and ▲/▼ on every row, a mode picker on every folder, and
+  where each main output goes.
+- `timeline.tempoLoaded`: whether the tempo map has an event with a loaded BPM, so the
+  conversions above can answer. `timeline.onChange` fires when it becomes true.
+- `session.insertClip()` options `layer`, `lengthFollows` (`'ticks'` or `'time'`), `algType`
+  (LUNA's time-stretch algorithm, such as `'varispeed'` or `'ua_stretch'`) and `copyOf` (a
+  `Luna.Clip` to copy, with its gain, fades, warps and MIDI). With `copyOf`, `sourceUid`,
+  `sourceStartNs`, `sourceStopNs` and `name` default to that clip's (fact 135). New types
+  `Luna.InsertClipOptions`, `Luna.LengthFollows` and `Luna.AlgType`.
+- `Luna.MockEngine` answers `new_track` with `{ uid }` (an array for `count`) as LUNA does,
+  instead of `{ track_uid }`; models `insert_clip`'s `layer` (default: above the clips it
+  overlaps), `length_follows`, `alg_type` and `clip_uid`; and answers `get_clip_info` with the
+  clip's `playlist_uid` and `track_uid`.
+- `Luna.Taper`: LUNA's fader tapers, the tables that map a fader's 0..1 position to dB.
+  `toNormalized(db)` and `toDb(normalized)` convert as LUNA does, and `marks()` (or
+  `marks({ compact: true })` for a short fader) gives the dB values LUNA's mixer draws hash marks
+  at, so a page can draw a fader scale that matches LUNA. `Luna.Taper.named(name)` gives one
+  by name (`+12`, `+18`, `+6`, `+0`, `API`, `+12Neve`, `preamp`, `volt_monitor_gain`); an
+  empty or unknown name gives `+12`, as in LUNA (fact 134).
+- `control.taper`: the taper a gain-type control (gain, gain trim, input trims) uses, `null` on
+  pans, switches and plugin parameters. It changes when LUNA swaps it, as it does when a
+  summing console goes on a bus input (API Summing makes that bus's faders `API`; on the master
+  bus, every fader's). LUNA keeps the dB and moves the fader, so redraw from `normalized`.
+- `docs/FILES.md`: "Add a file to the session without a clip". `session.uploadFile()` (a
+  `File`) and `session.importPath()` (a path) add an audio source listed in `session.sources`
+  without putting a clip on the timeline; place it later with `session.insertClip()`.
+  `session.importFile()` differs: it runs LUNA's File > Import, which always makes a clip.
+
+Fixed
+- `effect.in` read the bypass control's polarity the wrong way round, so a plugin that was IN
+  and processing read as bypassed, and a bypassed one as IN. It now reads it as LUNA's mixer
+  does: when `bypassControlActiveLow` is true a nonzero value is IN; when it is false or
+  `null`, zero is IN. `effect.setIn()` was not affected. `Luna.MockEngine` had the same
+  inversion and now loads a plugin IN with LUNA's raw value, and `set_inserts_in_out` applies
+  the polarity as LUNA does, so a test that wrote the bypass control's raw value directly
+  may need its value flipped (fact 29).
+- `examples/files.html` no longer leaves an unhandled rejection when a session it is switching
+  to fails to load (closed in LUNA, or the connection dropped); it shows the error instead.
+
 ## 3.1.1 Beta 1
 
 The SDK's version now follows LUNA's: this is the SDK for LUNA 3.1.1. Versions before it

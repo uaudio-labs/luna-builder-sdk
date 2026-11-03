@@ -22,6 +22,7 @@
 | <a id="real"></a> `real` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number` \| `boolean`\> | Value in units (dB, pan position) or boolean for switches. | - |
 | <a id="realvalues"></a> `realValues` | `readonly` | [`Prop`](../interfaces/Prop.md)\<(`number` \| `boolean`)[]\> | For discrete controls: the real value of each step. | - |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | Owning session uid; needed for automation commands. Derived from the path when omitted. | - |
+| <a id="taper"></a> `taper` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`Taper`](Taper.md) \| `null`\> | The fader taper LUNA maps this control's `normalized` to dB with (fact 134): a [Taper](Taper.md) for gain-type controls (gain, gain trim, input trims), `null` for the rest, `undefined` until the control type arrives. It changes, and notifies, when LUNA swaps the taper, as it does for a summing console on a bus input. **Example** `const taper = track.gain.taper.value!; taper.name; // '+12' taper.toNormalized(0); // 0.7818 track.gain.taper.onChange(() => redrawMarks(track.gain.taper.value));` | - |
 | <a id="touchcount"></a> `touchCount` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
 | <a id="uid"></a> `uid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="value"></a> `value` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | Engine-native value. Writing here is undoable. | - |

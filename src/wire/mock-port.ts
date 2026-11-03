@@ -24,6 +24,8 @@
  */
 import { ConnectionLost, UAError } from './errors';
 import { FloatLiteral } from './codec';
+// The one model import: taper.ts is LUNA's taper tables and imports nothing itself.
+import { Taper } from '../model/taper';
 import {
   eventMatches,
   getOptionsToParams,
@@ -156,24 +158,17 @@ function wireFloat(value: unknown): number {
 }
 
 /**
- * The mock's control-view mappings (fact 97). LUNA's real tapers and formats are per control
- * and not exposed (fact 85), so these are documented stand-ins chosen to agree with the
- * mock's seeds: a fader maps normalized 0 → −96 dB, 0.78 → 0 dB (the measured resting point)
- * and 1 → +12 dB, formatted with one decimal; a pan maps 0..1 linearly to −100..100,
- * formatted `L<n>`/`C`/`R<n>`.
+ * The mock's control-view mappings (fact 97). A gain-type control maps through LUNA's own
+ * fader taper, named by its `taper` property (fact 134; `+12` when empty), and formats with one
+ * decimal; another continuous control uses the `+12` taper too. A pan maps 0..1 linearly to
+ * −100..100, formatted `L<n>`/`C`/`R<n>`, which is the mock's own stand-in.
  */
-const FADER_ZERO = 0.78;
-const FADER_MIN = -96;
-const FADER_MAX = 12;
-
-function faderToReal(n: number): number {
-  return n <= FADER_ZERO ? FADER_MIN - (n / FADER_ZERO) * FADER_MIN : ((n - FADER_ZERO) / (1 - FADER_ZERO)) * FADER_MAX;
+function faderTaper(p: Map<string, unknown>): Taper {
+  return Taper.forControl(String(p.get('control_type') ?? ''), p.get('taper') as string | null | undefined) ?? Taper.named(Taper.DEFAULT_NAME)!;
 }
 
-function faderToNormalized(real: number): number {
-  const n = real <= 0 ? ((real - FADER_MIN) / -FADER_MIN) * FADER_ZERO : FADER_ZERO + (real / FADER_MAX) * (1 - FADER_ZERO);
-  return Math.min(1, Math.max(0, n));
-}
+/** Normalized position of 0 dB on the default taper: where the mock seeds its faders. */
+const FADER_ZERO = Taper.named(Taper.DEFAULT_NAME)!.toNormalized(0);
 
 function formatPan(real: number): string {
   const n = Math.round(Math.abs(real));
@@ -1310,6 +1305,10 @@ export class MockEngine {
     if (property === 'play_start' && /^\/sessions\/[^/]+$/.test(clean) && node.properties.get('playing') !== true) {
       this.setValue(clean, 'location', this.locationAt(clean, Number(value)));
     }
+    // A new taper keeps the control's dB and moves its fader (fact 134).
+    if (property === 'taper' && typeof node.properties.get('real_value') === 'number' && node.properties.get('discrete') !== true) {
+      this.setValue(clean, 'normalized_value', faderTaper(node.properties).toNormalized(Number(node.properties.get('real_value'))));
+    }
   }
 
   /**
@@ -1845,6 +1844,11 @@ export class MockEngine {
     return this.nodes.has(normalize(path));
   }
 
+  /** @internal Every property of a node, copied (no port involved). */
+  properties(nodePath: string): Record<string, unknown> {
+    return Object.fromEntries(this.nodes.get(normalize(nodePath))?.properties ?? []);
+  }
+
   children(nodePath: string): string[] {
     return [...(this.nodes.get(normalize(nodePath))?.children ?? [])];
   }
@@ -1889,19 +1893,34 @@ export class MockEngine {
     const pkg = options.packageUid ?? `pkg_${uid}`;
     const sessionCommands: Record<string, CommandHandler> = {
       new_track: (data, engine) => {
-        const body = (data ?? {}) as { name?: string; track_type?: string; stem_format?: string; preset_uid?: string };
+        const body = (data ?? {}) as { name?: string; track_type?: string; stem_format?: string; preset_uid?: string; folder_mode?: string; folder_uid?: string };
         // `preset_uid` makes the preset's tracks; an instrument plugin's preset a stereo
         // instrument track with the plugin on it (fact 132).
         if (body.preset_uid !== undefined) return engine.newTrackFromPreset(uid, body.preset_uid, body.name, body.stem_format);
         // `track_type: "bus"` makes an aux bus, ordered after everything (fact 83).
+        // `folder_uid` must name a folder (fact 136).
+        if (body.folder_uid && !engine.isFolder(uid, body.folder_uid)) throw new UAError('device.database_error', 'new_track: folder_uid is not a folder', { cmd: 'post', path: `${base}/new_track` });
         if (body.track_type === 'bus') {
           const id = `bus${engine.children(`${base}/buses`).length + 1}`;
           engine.addBus(uid, id, { name: body.name ?? 'Bus', busType: 'aux', stemFormat: body.stem_format ?? 'stereo' });
+          // A `folder_mode` other than none makes the bus a folder routed to the master (fact 136).
+          if (body.folder_mode && body.folder_mode !== 'none') {
+            engine.setValue(`${base}/buses/${id}`, 'folder_mode', body.folder_mode);
+            engine.rerouteFolderSubtree(uid, [id]);
+          }
+          if (body.folder_uid) engine.moveToFolder(uid, [id], body.folder_uid);
           return { uid: id };
         }
-        const id = `t${engine.children(`${base}/tracks`).length + 1}`;
-        engine.addTrack(uid, id, { name: body.name ?? 'Untitled', trackType: body.track_type ?? 'audio', stemFormat: body.stem_format ?? 'mono' });
-        return { track_uid: id };
+        // One track answers `{ uid }`, several (`count`) an array of them (fact 135).
+        const count = Math.max(1, Number((body as { count?: number }).count ?? 1));
+        const made: { uid: string }[] = [];
+        for (let i = 0; i < count; i++) {
+          const id = `t${engine.children(`${base}/tracks`).length + 1}`;
+          engine.addTrack(uid, id, { name: body.name ?? 'Untitled', trackType: body.track_type ?? 'audio', stemFormat: body.stem_format ?? 'mono' });
+          made.push({ uid: id });
+        }
+        if (body.folder_uid) engine.moveToFolder(uid, made.map((m) => m.uid), body.folder_uid);
+        return count === 1 ? made[0]! : made;
       },
       delete_tracks: (data, engine) => {
         const body = (data ?? {}) as { track_uid?: string | string[] };
@@ -1912,6 +1931,7 @@ export class MockEngine {
             engine.danglingAssignments(uid, id);
           } else engine.removeNode(`${base}/tracks/${id}`);
         }
+        engine.renumber(uid); // gapless again (fact 137)
         return { deleted_channels: ids };
       },
       duplicate_tracks: (data, engine) => {
@@ -1969,17 +1989,40 @@ export class MockEngine {
         return { render_uid: uid, file: `/exports/${name} - MAIN.wav` };
       },
       insert_clip: (data, engine) => {
-        const body = (data ?? {}) as { playlist_uid?: string; track_uid?: string; name?: string; start?: number; stop?: number; source_uid?: string; source_start?: number; source_stop?: number; clip_type?: number };
+        const body = (data ?? {}) as { playlist_uid?: string; track_uid?: string; name?: string; start?: number; stop?: number; source_uid?: string; source_start?: number; source_stop?: number; clip_type?: number; layer?: number; length_follows?: string; alg_type?: string; clip_uid?: string };
         const playlist = body.playlist_uid ?? (body.track_uid ? String(engine.value(`${base}/tracks/${body.track_uid}`, 'playlist_uid')) : undefined);
         if (!playlist) throw new UAError('uasrv.invalid_object', 'insert_clip: no playlist', { cmd: 'post', path: `${base}/insert_clip` });
         // Every clip type needs a source; a MIDI clip of its own comes from create_note (fact 112).
         if (!body.source_uid) throw new UAError('uasrv.invalid_property', 'insert_clip: source_uid is required', { cmd: 'post', path: `${base}/insert_clip` });
+        const start = body.start ?? 0;
+        const stop = body.stop ?? 0;
+        // `clip_uid` copies a clip; the call's name and source offsets replace the copy's (fact 135).
+        const copyPath = body.clip_uid ? engine.findClip(base, body.clip_uid) : undefined;
+        if (body.clip_uid && !copyPath) throw new UAError('device.database_error', 'insert_clip: no clip to copy', { cmd: 'post', path: `${base}/insert_clip` });
+        const copied: Record<string, unknown> = copyPath ? { ...engine.properties(copyPath) } : {};
+        // Left out, the layer is one above the highest clip the new one overlaps (fact 135).
+        let layer = body.layer;
+        if (layer === undefined) {
+          const clipsPath = `${base}/playlists/${playlist}/clips`;
+          const overlapping = engine.children(clipsPath).map((c) => `${clipsPath}/${c}`).filter((c) => Number(engine.value(c, 'start')) < stop && Number(engine.value(c, 'stop')) > start);
+          layer = overlapping.length ? Math.max(...overlapping.map((c) => Number(engine.value(c, 'layer') ?? 0))) + 1 : 0;
+        }
+        const clipType = copyPath ? Number(copied['clip_type'] ?? 0) : (body.clip_type ?? 0);
         const id = engine.nextClipId(base, playlist);
         engine.addNode(`${base}/playlists/${playlist}/clips/${id}`, {
-          properties: { uid: id, name: body.name ?? 'Clip', start: body.start ?? 0, stop: body.stop ?? 0, source_uid: body.source_uid ?? '', source_start: body.source_start ?? 0, source_stop: body.source_stop ?? 0, clip_type: body.clip_type ?? 0, gain: 0, bypass: false, midi_source_start: 0, layer: 0, mute: false },
+          properties: {
+            gain: 0, bypass: false, mute: false, ...copied,
+            uid: id, name: body.name ?? (copyPath ? '' : 'Clip'), start, stop, layer,
+            source_uid: copyPath ? copied['source_uid'] : body.source_uid, source_start: body.source_start ?? 0, source_stop: body.source_stop ?? 0, clip_type: clipType, midi_source_start: 0,
+            ...(body.length_follows === 'ticks' || body.length_follows === 'time' ? { length_follows: body.length_follows } : {}),
+            ...(body.alg_type !== undefined ? { alg_type: body.alg_type } : {}),
+          },
         });
-        // A MIDI clip carries its events in a table child (fact 39).
-        if (body.clip_type === 2) engine.addNode(`${base}/playlists/${playlist}/clips/${id}/midi/table`, { properties: { row_data: EMPTY_MIDI_TABLE() } });
+        // A MIDI clip carries its events in a table child (fact 39); a copy takes the original's.
+        if (clipType === 2) {
+          const rows = copyPath && engine.has(`${copyPath}/midi/table`) ? structuredClone(engine.value(`${copyPath}/midi/table`, 'row_data')) : EMPTY_MIDI_TABLE();
+          engine.addNode(`${base}/playlists/${playlist}/clips/${id}/midi/table`, { properties: { row_data: rows } });
+        }
         return { uid: id };
       },
       delete_clip: (data, engine) => {
@@ -2036,7 +2079,8 @@ export class MockEngine {
           } else {
             engine.setValue(path, 'bypass_control', 'bypass');
             engine.setValue(path, 'bypass_control_active_low', false);
-            engine.addControl(`${path}/controls/bypass`, 'parameter', { discrete: true, value: 1, real: true, str: 'in', automatable: true });
+            // Not active low, so 0 is IN (fact 29): a new plugin starts IN.
+            engine.addControl(`${path}/controls/bypass`, 'parameter', { discrete: true, value: 0, real: false, str: 'in', automatable: true });
             engine.addControl(`${path}/controls/input`, 'parameter', { discrete: false, value: 0.5, real: 0, str: '0.0', automatable: true, normalized: 0.5 });
           }
         }
@@ -2207,7 +2251,9 @@ export class MockEngine {
       get_clip_info: (data, engine) => {
         const uid = String((data as { clip_uid?: string } | null)?.clip_uid ?? '');
         if (!engine.findClip(base, uid)) throw new UAError('uasrv.invalid_object', 'get_clip_info: no such clip', { cmd: 'post', path: `${base}/get_clip_info` });
-        return { sample_rate: 48000, compiled_clips: [] };
+        const clipPath = engine.findClip(base, uid)!;
+        const playlistUid = clipPath.split('/')[4] ?? '';
+        return { sample_rate: 48000, compiled_clips: [], playlist_uid: playlistUid, track_uid: String(engine.value(`${base}/playlists/${playlistUid}`, 'track_uid') ?? '') };
       },
       set_bar_one: () => null,
       set_marker: (data, engine) => {
@@ -2306,7 +2352,15 @@ export class MockEngine {
           const channel = engine.has(`${base}/tracks/${body.channel_uid}`) ? `${base}/tracks/${body.channel_uid}` : `${base}/buses/${body.channel_uid}`;
           for (const slot of body.inserts ?? []) {
             const ctl = engine.value(`${channel}/effects/${slot}`, 'bypass_control');
-            if (typeof ctl === 'string' && ctl) engine.setValue(`${channel}/effects/${slot}/controls/${ctl}`, 'value', body.value ? 1 : 0);
+            if (typeof ctl !== 'string' || !ctl) continue;
+            // As Edit_SetInsertsInOut: IN writes 1 when the control is active low, else 0 (fact 29).
+            const on = body.value !== false;
+            const raw = (engine.value(`${channel}/effects/${slot}`, 'bypass_control_active_low') === true) === on ? 1 : 0;
+            const control = `${channel}/effects/${slot}/controls/${ctl}`;
+            engine.setValue(control, 'value', raw);
+            engine.setValue(control, 'normalized_value', raw);
+            engine.setValue(control, 'real_value', raw === 1);
+            engine.setValue(control, 'string_value', on ? 'in' : 'bypassed');
           }
           return null;
         },
@@ -2444,6 +2498,51 @@ export class MockEngine {
     this.addNode(`${base}/chords`);
     this.addNode(`${base}/storage`, { commands: storageCommands(`${base}/storage`) });
     this.addPackage(pkg, { name: options.name ?? uid, lastOpened: Date.now() });
+    // Folder tracks (fact 136): a folder is an aux bus whose folder_mode is not none.
+    const moveToFolderCommand: CommandHandler = (data, engine) => {
+      const body = (data ?? {}) as { folder_uid?: string; before_uid?: string; after_uids?: string[] };
+      const folder = body.folder_uid || null;
+      const fail = (why: string) => new UAError('uasrv.invalid_value', `move_to_folder: ${why}`, { cmd: 'post', path: `${base}/tracks/move_to_folder` });
+      if (!Array.isArray(body.after_uids)) throw new UAError('uasrv.invalid_property', 'move_to_folder: after_uids is required', { cmd: 'post', path: `${base}/tracks/move_to_folder` });
+      if (folder && !engine.isFolder(uid, folder)) throw fail('folder_uid is not a folder');
+      if (body.before_uid && !engine.channelIds(uid).includes(body.before_uid)) throw fail('no such before_uid');
+      for (const id of body.after_uids) {
+        if (!engine.has(`${base}/tracks/${id}`) && !engine.has(`${base}/buses/${id}`)) throw fail('no such track or bus');
+        // A folder cannot go inside itself or anything inside it.
+        for (let f: string | null = folder; f; f = engine.folderOf(uid, f)) if (f === id) throw fail('a folder cannot contain itself');
+      }
+      engine.moveToFolder(uid, body.after_uids, folder, body.before_uid || undefined);
+      return null;
+    };
+    // Fact 137: change_order answers null whatever it did; an unknown uid changes nothing.
+    const changeOrderCommand: CommandHandler = (data, engine) => {
+      const body = (data ?? {}) as { before_uid?: string; after_uids?: unknown; reset?: boolean };
+      if (body.reset) {
+        const ids = engine.channelIds(uid);
+        engine.renumber(uid, [...ids.filter((id) => engine.has(`${base}/tracks/${id}`)), ...ids.filter((id) => engine.has(`${base}/buses/${id}`))]);
+        return null;
+      }
+      if (!Array.isArray(body.after_uids) || body.after_uids.some((id) => typeof id !== 'string' || !id)) throw new UAError('uasrv.invalid_property', 'change_order: after_uids is required', { cmd: 'post', path: `${base}/tracks/change_order` });
+      const known = engine.channelIds(uid);
+      const ids = body.after_uids as string[];
+      if (ids.length && ids.every((id) => known.includes(id)) && (!body.before_uid || known.includes(body.before_uid))) engine.changeOrder(uid, ids, body.before_uid || null);
+      return null;
+    };
+    this.addNode(`${base}/tracks`, { commands: { move_to_folder: moveToFolderCommand, change_order: changeOrderCommand } });
+    this.addNode(`${base}/buses`, {
+      commands: {
+        move_to_folder: moveToFolderCommand,
+        change_order: changeOrderCommand,
+        set_folder_mode: (data, engine) => {
+          const body = (data ?? {}) as { bus_uid?: string; folder_mode?: string };
+          const bus = `${base}/buses/${body.bus_uid}`;
+          if (!body.bus_uid || !engine.has(bus) || engine.value(bus, 'bus_type') !== 'aux') throw new UAError('uasrv.invalid_value', 'set_folder_mode: not an aux bus', { cmd: 'post', path: `${base}/buses/set_folder_mode` });
+          if (!['none', 'summing', 'container'].includes(String(body.folder_mode))) throw new UAError('uasrv.invalid_value', 'set_folder_mode: bad folder_mode', { cmd: 'post', path: `${base}/buses/set_folder_mode` });
+          engine.setFolderMode(uid, body.bus_uid, body.folder_mode as string);
+          return null;
+        },
+      },
+    });
     // LUNA gives every session four cue buses before anything else (fact 83).
     for (let i = 0; i < 4; i++) this.addBus(uid, `cue${i + 1}_${uid}`, { name: `CUE ${i + 1}`, busType: `cue_${i}`, stemFormat: 'stereo' });
     this.addBus(uid, `master_${uid}`, { name: 'Main Output', busType: 'master', stemFormat: 'stereo', color: 4294948970 });
@@ -2484,7 +2583,7 @@ export class MockEngine {
 
   addTrack(sessionUid: string, id: string, options: { name?: string; trackType?: string; stemFormat?: string } = {}): void {
     const base = `/sessions/${sessionUid}`;
-    const order = this.children(`${base}/tracks`).length;
+    const order = this.channelIds(sessionUid).length + 1; // appended to the one shared order (fact 137)
     const playlist = `pl_${id}_1`;
     this.addChannel(
       `${base}/tracks/${id}`,
@@ -2761,7 +2860,7 @@ export class MockEngine {
     const base = `/sessions/${sessionUid}`;
     const busType = options.busType ?? 'aux';
     const stereo = (options.stemFormat ?? 'stereo') === 'stereo';
-    const order = this.children(`${base}/buses`).length;
+    const order = this.channelIds(sessionUid).length + 1; // appended to the one shared order (fact 137)
     this.addChannel(
       `${base}/buses/${id}`,
       { uid: id, name: options.name ?? id, bus_type: busType, order, stem_format: options.stemFormat ?? 'stereo', color: options.color ?? 4282400832, folder_mode: 'none', folder_uid: null, automation_mode: 'read', frozen: false, enabled: true, comments: '' },
@@ -2769,6 +2868,150 @@ export class MockEngine {
       !busType.startsWith('cue_'),
     );
     if (!busType.startsWith('cue_')) this.routeCues(sessionUid, `${base}/buses/${id}`);
+  }
+
+  /** @internal True when `id` is a bus of the session whose folder_mode is not none (fact 136). */
+  isFolder(sessionUid: string, id: string): boolean {
+    const mode = this.value(`/sessions/${sessionUid}/buses/${id}`, 'folder_mode');
+    return typeof mode === 'string' && mode !== 'none';
+  }
+
+  /** @internal The folder a track or bus is in, or null at the session root. */
+  folderOf(sessionUid: string, id: string): string | null {
+    const base = `/sessions/${sessionUid}`;
+    const path = this.has(`${base}/tracks/${id}`) ? `${base}/tracks/${id}` : `${base}/buses/${id}`;
+    return (this.value(path, 'folder_uid') as string | null | undefined) ?? null;
+  }
+
+  /**
+   * @internal Put tracks and buses in `folder` (null: the session root), as LUNA's
+   * `move_to_folder` does (fact 136): set each one's `folder_uid` and reroute the main outputs
+   * of it and everything inside it. The order is not modelled.
+   */
+  moveToFolder(sessionUid: string, ids: readonly string[], folder: string | null, before?: string): void {
+    const base = `/sessions/${sessionUid}`;
+    // Only the items with no moved folder above them change folder; the rest ride along inside
+    // theirs (fact 136). Placed just after `before`, else first in the destination: just after
+    // the folder, or at the very front for the root (fact 137).
+    const topLevel = ids.filter((id) => {
+      for (let f = this.folderOf(sessionUid, id); f; f = this.folderOf(sessionUid, f)) if (ids.includes(f)) return false;
+      return true;
+    });
+    const moved = this.withSubtrees(sessionUid, topLevel);
+    for (const id of topLevel) {
+      const path = this.has(`${base}/tracks/${id}`) ? `${base}/tracks/${id}` : `${base}/buses/${id}`;
+      this.setValue(path, 'folder_uid', folder);
+    }
+    this.renumber(sessionUid, this.spliceAfter(sessionUid, moved, before ?? folder));
+    this.rerouteFolderSubtree(sessionUid, topLevel);
+  }
+
+  /** @internal Every track and bus of the session, sorted by `order` (fact 137). */
+  channelIds(sessionUid: string): string[] {
+    const base = `/sessions/${sessionUid}`;
+    const rows = [...this.children(`${base}/tracks`).map((id) => [id, `${base}/tracks/${id}`]), ...this.children(`${base}/buses`).map((id) => [id, `${base}/buses/${id}`])] as [string, string][];
+    return rows.map(([id, path]) => [id, Number(this.value(path, 'order') ?? 0)] as const).sort((a, b) => a[1] - b[1]).map(([id]) => id);
+  }
+
+  /** `ids` in the order given, each folder followed by everything inside it in current order. */
+  private withSubtrees(sessionUid: string, ids: readonly string[]): string[] {
+    const flat = this.channelIds(sessionUid);
+    const out: string[] = [];
+    const add = (id: string): void => {
+      if (out.includes(id)) return;
+      out.push(id);
+      if (this.isFolder(sessionUid, id)) for (const child of flat) if (this.folderOf(sessionUid, child) === id) add(child);
+    };
+    for (const id of ids) add(id);
+    return out;
+  }
+
+  /** The current order without `moved`, with `moved` put back after `anchor` (null: the front). */
+  private spliceAfter(sessionUid: string, moved: readonly string[], anchor: string | null): string[] {
+    const rest = this.channelIds(sessionUid).filter((id) => !moved.includes(id));
+    const at = anchor === null ? 0 : rest.indexOf(anchor) + 1;
+    // An anchor that moved, or is gone, appends (as LUNA's change_order does).
+    if (anchor !== null && at === 0) return [...rest, ...moved];
+    return [...rest.slice(0, at), ...moved, ...rest.slice(at)];
+  }
+
+  /**
+   * @internal Write `order` as 1..N from `flat`, re-serialized depth-first so each folder is
+   * followed at once by everything inside it, siblings keeping their order in `flat` (fact 137).
+   */
+  renumber(sessionUid: string, flat: readonly string[] = this.channelIds(sessionUid)): void {
+    const base = `/sessions/${sessionUid}`;
+    const byParent = new Map<string | null, string[]>();
+    for (const id of flat) {
+      const parent = this.folderOf(sessionUid, id);
+      byParent.set(parent, [...(byParent.get(parent) ?? []), id]);
+    }
+    const out: string[] = [];
+    const walk = (parent: string | null): void => {
+      for (const id of byParent.get(parent) ?? []) {
+        if (out.includes(id)) continue;
+        out.push(id);
+        walk(id);
+      }
+    };
+    walk(null);
+    for (const id of flat) if (!out.includes(id)) out.push(id); // a parent that is gone
+    out.forEach((id, i) => {
+      const path = this.has(`${base}/tracks/${id}`) ? `${base}/tracks/${id}` : `${base}/buses/${id}`;
+      if (this.value(path, 'order') !== i + 1) this.setValue(path, 'order', i + 1);
+    });
+  }
+
+  /**
+   * @internal LUNA's `change_order` (fact 137): move `ids` (folders with everything inside
+   * them) to just after `anchor`, or the front for null, then renumber. Which folder each one
+   * is in never changes, so the anchor only picks a place among its siblings.
+   */
+  changeOrder(sessionUid: string, ids: readonly string[], anchor: string | null): void {
+    this.renumber(sessionUid, this.spliceAfter(sessionUid, this.withSubtrees(sessionUid, ids), anchor));
+  }
+
+  /**
+   * @internal `set_folder_mode` (fact 136): `none` moves the bus's direct children to the
+   * session root; any change reroutes everything inside it.
+   */
+  setFolderMode(sessionUid: string, busUid: string, mode: string): void {
+    const base = `/sessions/${sessionUid}`;
+    const children = this.folderChildren(sessionUid, busUid);
+    this.setValue(`${base}/buses/${busUid}`, 'folder_mode', mode);
+    // Released children keep their place in the order, now at the root.
+    if (mode === 'none') {
+      for (const id of children) this.setValue(this.has(`${base}/tracks/${id}`) ? `${base}/tracks/${id}` : `${base}/buses/${id}`, 'folder_uid', null);
+      this.renumber(sessionUid);
+    }
+    this.rerouteFolderSubtree(sessionUid, children);
+  }
+
+  private folderChildren(sessionUid: string, folder: string): string[] {
+    const base = `/sessions/${sessionUid}`;
+    return [...this.children(`${base}/tracks`), ...this.children(`${base}/buses`)].filter((id) => this.folderOf(sessionUid, id) === folder);
+  }
+
+  /**
+   * Route the main output of each of `ids`, and of everything inside them, to the nearest
+   * summing folder it is in (a container folder passes through), else the master (fact 136).
+   */
+  /** @internal */
+  rerouteFolderSubtree(sessionUid: string, ids: readonly string[]): void {
+    const base = `/sessions/${sessionUid}`;
+    const master = this.children(`${base}/buses`).find((b) => this.value(`${base}/buses/${b}`, 'bus_type') === 'master');
+    for (const id of ids) {
+      let target: string | null | undefined = this.folderOf(sessionUid, id);
+      while (target && this.value(`${base}/buses/${target}`, 'folder_mode') !== 'summing') target = this.folderOf(sessionUid, target);
+      target ??= master;
+      const main = `${this.has(`${base}/tracks/${id}`) ? `${base}/tracks/${id}` : `${base}/buses/${id}`}/outputs/main`;
+      if (target && this.has(main)) {
+        for (const object of this.children(`${main}/assignment_objects`)) this.removeNode(`${main}/assignment_objects/${object}`);
+        this.setValue(main, 'assignments', []);
+        this.addAssignment(main, target, `${base}/buses/${target}`);
+      }
+      this.rerouteFolderSubtree(sessionUid, this.folderChildren(sessionUid, id));
+    }
   }
 
   /** LUNA routes a new channel's cue outputs to CUE 1-4 (fact 83). */
@@ -2801,7 +3044,7 @@ export class MockEngine {
       for (const name of names) {
         const isSwitch = name === 'mute' || name === 'pre_fader' || name === 'enabled';
         const isPan = name.startsWith('pan');
-        this.addControl(`${path}/outputs/${out}/controls/${name}`, name, isSwitch ? { discrete: true, value: 0, real: false, str: 'false', automatable: true } : { discrete: false, value: 0, real: 0, str: isPan ? 'C' : '0.0', automatable: true, normalized: isPan ? 0.5 : 0.78 });
+        this.addControl(`${path}/outputs/${out}/controls/${name}`, name, isSwitch ? { discrete: true, value: 0, real: false, str: 'false', automatable: true } : { discrete: false, value: 0, real: 0, str: isPan ? 'C' : '0.0', automatable: true, normalized: isPan ? 0.5 : FADER_ZERO });
       }
       this.addNode(`${path}/outputs/${out}/meters/level`, { properties: { type: 'meter', name: 'Level', enabled: true, num_streams: stereo ? 2 : 1, level: stereo ? [0, 0] : [0], peak: stereo ? [0, 0] : [0], clip: stereo ? [0, 0] : [0] } });
     }
@@ -2835,6 +3078,7 @@ export class MockEngine {
         touch_count: 0,
         real_values: o.discrete ? [false, true] : [],
         string_values: o.discrete ? ['false', 'true'] : [],
+        taper: null,
       },
       readOnly: ['uid', 'control_type', 'automatable', 'discrete', 'num_steps'],
       commands: {
@@ -3033,7 +3277,7 @@ export class MockEngine {
    * them to every port — the writer too, since they are derived (fact 6); only the written
    * view itself is withheld from the writer. A switch snaps to a step of its
    * `real_values`/`string_values`; a continuous control goes through the mock's stand-in
-   * taper and format (see {@link faderToReal}); a plugin `parameter`'s `value` tracks its
+   * fader taper (see {@link faderTaper}); a plugin `parameter`'s `value` tracks its
    * normalized view, since plugin units are plugin-specific (fact 85).
    */
   private writeControl(nodePath: string, node: MockNode, written: string, data: unknown, from: MockPort): void {
@@ -3077,14 +3321,14 @@ export class MockEngine {
             : written === 'normalized_value' || parameter
               ? pan
                 ? Number(data) * 200 - 100
-                : faderToReal(Number(data))
+                : faderTaper(p).toDb(Number(data))
               : Number(data);
       const normalized =
         written === 'normalized_value' || (parameter && written === 'value')
           ? Number(data)
           : pan
             ? Math.min(1, Math.max(0, (real + 100) / 200))
-            : faderToNormalized(real);
+            : faderTaper(p).toNormalized(real);
       views['real_value'] = real;
       views['normalized_value'] = normalized;
       views['string_value'] = pan ? formatPan(real) : real.toFixed(1);

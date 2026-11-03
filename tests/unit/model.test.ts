@@ -95,8 +95,8 @@ describe('Luna.Session', () => {
     const seen: string[][] = [];
     session.tracks.onChange(() => seen.push(session.tracks.items.map((t) => t.id)));
 
-    const reply = (await session.newTrack({ name: 'B' })) as { track_uid: string };
-    expect(reply.track_uid).toBe('t2');
+    const [made] = await session.newTrack({ name: 'B' });
+    expect(made!.id).toBe('t2');
     await engine.settled();
     expect(session.tracks.items.map((t) => t.id)).toEqual(['A', 't2']);
     // properties of the new track arrive by push (structural add carries no data)
@@ -333,7 +333,7 @@ describe('Luna.Track and Luna.Control', () => {
     expect(track.gain.path).toBe('/sessions/abc/tracks/Vocal/outputs/main/controls/gain');
     expect(track.solo.path).toBe('/sessions/abc/tracks/Vocal/controls/solo');
     expect(track.gain.display.value).toBe('0.0');
-    expect(track.gain.normalized.value).toBe(0.78);
+    expect(track.gain.normalized.value).toBe(Luna.Taper.named('+12')!.toNormalized(0));
     expect(track.pan.display.value).toBe('C');
     expect(track.mute.isSwitch).toBe(true);
     expect(track.mute.on).toBe(false);
@@ -373,7 +373,7 @@ describe('Luna.Track and Luna.Control', () => {
     await engine.settled();
     await luna.settled();
     expect(gain.display.value).toBe('-6.0');
-    expect(gain.normalized.value).toBeCloseTo(0.73125, 10);
+    expect(gain.normalized.value).toBeCloseTo(0.6727272727, 10);
     expect(engine.value(gain.path, 'value')).toBe(-6);
 
     // A normalized write keeps the written view verbatim and derives units and display.
@@ -381,8 +381,8 @@ describe('Luna.Track and Luna.Control', () => {
     await engine.settled();
     await luna.settled();
     expect(gain.normalized.value).toBe(0.5);
-    expect(gain.real.value).toBeCloseTo(-34.46, 2);
-    expect(gain.display.value).toBe('-34.5');
+    expect(gain.real.value).toBeCloseTo(-16.136, 3);
+    expect(gain.display.value).toBe('-16.1');
 
     // Pans format L/C/R around centre.
     await pan.normalized.set(0.25);
@@ -483,7 +483,7 @@ describe('Luna.Track and Luna.Control', () => {
     await engine.settled();
     expect(engine.touches).toEqual([`${gain.path}:on`, `${gain.path}:off`, `${pan.path}:on`, `${pan.path}:off`]);
     expect(engine.requests.filter((r) => r.path.endsWith('/set_control_default_value')).map((r) => r.data)).toEqual([{}, {}]);
-    expect([gain.real.value, gain.normalized.value, gain.display.value]).toEqual([0, 0.78, '0.0']);
+    expect([gain.real.value, gain.normalized.value, gain.display.value]).toEqual([0, Luna.Taper.named('+12')!.toNormalized(0), '0.0']);
     expect([pan.normalized.value, pan.display.value]).toEqual([0.5, 'C']);
   });
 
@@ -498,7 +498,7 @@ describe('Luna.Track and Luna.Control', () => {
     gain.end();
     await tick();
     expect(engine.touches).toEqual([`${gain.path}:on`, `${gain.path}:off`]);
-    expect(engine.value(gain.path, 'normalized_value')).toBe(0.78);
+    expect(engine.value(gain.path, 'normalized_value')).toBe(Luna.Taper.named('+12')!.toNormalized(0));
   });
 
   it('writes track properties optimistically and rolls back read-only ones', async () => {
@@ -509,7 +509,7 @@ describe('Luna.Track and Luna.Control', () => {
     const p = track.name.set('X');
     expect(track.name.value).toBe('X');
     await p;
-    await expect(track.order.value).toBe(0);
+    expect(track.order.value).toBe(engine.value(track.path, 'order'));
   });
 
   it('subscribes to the meter only while observed', async () => {
@@ -540,10 +540,10 @@ describe('Luna.Playlist, Luna.Clip and Luna.AudioSource', () => {
     await playlist.clips.load();
     expect(playlist.clips.items).toEqual([]);
 
-    const reply = (await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, sourceStopNs: 2_000_000_000, name: 'Take 1', clipType: 'audio' })) as { uid: string };
-    await engine.settled();
-    const clip = playlist.clips.byId(reply.uid)!;
-    await clip.load();
+    // insertClip resolves to the clip itself, listed and loaded (fact 135).
+    const clip = await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, sourceStopNs: 2_000_000_000, name: 'Take 1', clipType: 'audio' });
+    const reply = { uid: clip.id };
+    expect(playlist.clips.byId(clip.id)).toBe(clip);
     expect(clip.name.value).toBe('Take 1');
     expect(clip.length).toBe(Luna.WHOLE_NOTE);
     expect(clip.sourceStop.value).toBe(2_000_000_000);

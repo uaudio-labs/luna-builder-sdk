@@ -47,7 +47,7 @@ describe.skipIf(!live)('live: compiled clips', () => {
 
   const insert = async (startTick: number, stopTick: number, sourceStartNs: number, name: string): Promise<string> => {
     const sourceStopNs = sourceStartNs + (t.seconds(stopTick) - t.seconds(startTick)) * 1e9;
-    const reply = (await session.insertClip({ playlistUid: lane.id, sourceUid, startTick, stopTick, sourceStartNs, sourceStopNs: Math.round(sourceStopNs), name })) as { uid: string };
+    const reply = { uid: (await session.insertClip({ playlistUid: lane.id, sourceUid, startTick, stopTick, sourceStartNs, sourceStopNs: Math.round(sourceStopNs), name })).id };
     clips.push(reply.uid);
     await until(`clip ${name}`, () => lane.clips.byId(reply.uid)?.stop.value !== undefined);
     return reply.uid;

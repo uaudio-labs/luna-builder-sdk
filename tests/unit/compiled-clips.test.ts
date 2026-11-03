@@ -21,7 +21,7 @@ async function lane(options: { compiledClipFades?: boolean } = {}) {
   const playlist = session.playlistFor(session.tracks.byId('Gtr')!)!;
   await playlist.clips.load();
   const insert = async (startBeat: number, stopBeat: number, sourceStartNs = 0) => {
-    const reply = (await session.insertClip({ trackUid: 'Gtr', sourceUid: 'src1', startTick: startBeat * BEAT, stopTick: stopBeat * BEAT, sourceStartNs, sourceStopNs: sourceStartNs + ((stopBeat - startBeat) / 2) * SECOND_NS })) as { uid: string };
+    const reply = { uid: (await session.insertClip({ trackUid: 'Gtr', sourceUid: 'src1', startTick: startBeat * BEAT, stopTick: stopBeat * BEAT, sourceStartNs, sourceStopNs: sourceStartNs + ((stopBeat - startBeat) / 2) * SECOND_NS })).id };
     await engine.settled();
     await playlist.clips.membersReady();
     return reply.uid;

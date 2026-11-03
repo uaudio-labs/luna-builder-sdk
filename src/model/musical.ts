@@ -8,7 +8,7 @@
  *
  * @example
  * await session.musical.ready();
- * session.musical.tempoAt(0);                 // 120
+ * session.musical.tempoAt(0);                 // the session tempo, e.g. 120
  * session.musical.timeline.barBeat(Luna.TICKS_PER_BEAT * 5);  // { bar: 2, beat: 2, tick: 0 }
  * await session.musical.setTempoInEffectAt(96, session.transport.tick);   // what LUNA's tempo field does
  */
@@ -97,21 +97,50 @@ export class Timeline {
   ) {}
 
   /**
-   * Called when a tempo event or time signature is added, removed or edited, so anything
-   * computed from this timeline (bar|beat, seconds) should be recomputed. `marker.barBeat`
-   * and `marker.seconds` already follow it.
+   * Called when a tempo event or time signature is added, removed or edited (a tempo edit
+   * rewrites an existing event's `tempo`, so `tempoMap.onChange` alone does not see it), and
+   * when the maps finish loading, so anything computed from this timeline (bar|beat, seconds,
+   * clip lengths planned from the tempo) should be recomputed. `marker.barBeat` and
+   * `marker.seconds` already follow it.
    *
    * @example
    * session.musical.timeline.onChange(() => redrawRuler());
+   * session.musical.timeline.onChange(() => (bpm.textContent = `${session.musical.tempoAt(session.transport.tick)} BPM`));
    */
   onChange(listener: () => void): Unsubscribe {
     return this.subscribe(listener);
   }
 
-  private sortedTempos(): { tick: number; tempo: number }[] {
-    return this.tempos()
-      .map((t) => ({ tick: t.tick.value ?? 0, tempo: t.tempo.value ?? 120 }))
-      .sort((a, b) => a.tick - b.tick);
+  /**
+   * Whether the tempo map has at least one event whose tick and BPM have loaded, so
+   * {@link tempoAt}, {@link seconds} and {@link tickAtSeconds} can answer. Until then they throw
+   * `unavailable` rather than assume a tempo. {@link onChange} fires when it becomes true.
+   *
+   * @example
+   * const bpm = timeline.tempoLoaded ? timeline.tempoAt(tick) : undefined;
+   */
+  get tempoLoaded(): boolean {
+    return this.readableTempos().length > 0;
+  }
+
+  /** Tempo events whose tick and BPM have both loaded, in tick order. */
+  private readableTempos(): { tick: number; tempo: number }[] {
+    const rows: { tick: number; tempo: number }[] = [];
+    for (const t of this.tempos()) {
+      const tick = t.tick.value;
+      const tempo = t.tempo.value;
+      if (typeof tick === 'number' && typeof tempo === 'number' && Number.isFinite(tempo) && tempo > 0) rows.push({ tick, tempo });
+    }
+    return rows.sort((a, b) => a.tick - b.tick);
+  }
+
+  /** {@link readableTempos}, or `unavailable` when there are none: never a guessed tempo. */
+  private sortedTempos(what: string): { tick: number; tempo: number }[] {
+    const rows = this.readableTempos();
+    if (rows.length === 0) {
+      throw new UAError('unavailable', `timeline.${what}(): the tempo map is not loaded; await session.ready() (or session.musical.ready()) first`);
+    }
+    return rows;
   }
 
   private sortedSignatures(): { tick: number; bar: number; n: number; d: number }[] {
@@ -120,19 +149,34 @@ export class Timeline {
       .sort((a, b) => a.tick - b.tick);
   }
 
+  /**
+   * BPM in effect at `tick`: the last tempo event at or before it, or the first event's when
+   * `tick` is before them all. Throws `unavailable` while the tempo map is not loaded
+   * ({@link tempoLoaded}); it never assumes 120.
+   *
+   * @example
+   * await session.musical.ready();
+   * session.musical.timeline.tempoAt(session.transport.tick);   // 90
+   */
   tempoAt(tick: number): number {
-    let tempo = 120;
-    for (const t of this.sortedTempos()) {
+    const tempos = this.sortedTempos('tempoAt');
+    let tempo = tempos[0]!.tempo;
+    for (const t of tempos) {
       if (t.tick <= tick) tempo = t.tempo;
       else break;
     }
     return tempo;
   }
 
-  /** Ticks to seconds, integrating the tempo map (constant tempo between events). */
+  /**
+   * Ticks to seconds, integrating the tempo map (constant tempo between events). Throws
+   * `unavailable` while the tempo map is not loaded ({@link tempoLoaded}).
+   *
+   * @example
+   * timeline.seconds(Luna.TICKS_PER_BEAT * 8);   // 4 at 120 BPM, 5.333… at 90
+   */
   seconds(tick: number): number {
-    const tempos = this.sortedTempos();
-    if (tempos.length === 0) return (tick / TICKS_PER_BEAT) * 0.5;
+    const tempos = this.sortedTempos('seconds');
     let seconds = 0;
     let at = 0;
     let tempo = tempos[0]!.tempo;
@@ -168,16 +212,16 @@ export class Timeline {
   /**
    * The inverse of {@link seconds}: the tick a wall-clock offset lands on, walking the same
    * tempo map. Use it to place a clip that must play unstretched — its span in ticks
-   * depends on the tempo where it sits.
+   * depends on the tempo where it sits. Throws `unavailable` while the tempo map is not
+   * loaded ({@link tempoLoaded}).
    *
    * @example
    * const start = 4 * Luna.TICKS_PER_BEAT;
    * const stop = timeline.tickAtSeconds(timeline.seconds(start) + source.length.value / 1e9);
    */
   tickAtSeconds(seconds: number): number {
+    const tempos = this.sortedTempos('tickAtSeconds');
     if (!(seconds > 0)) return 0;
-    const tempos = this.sortedTempos();
-    if (tempos.length === 0) return (seconds / 0.5) * TICKS_PER_BEAT;
     let elapsed = 0;
     let at = 0;
     let tempo = tempos[0]!.tempo;
@@ -300,6 +344,14 @@ export class Musical {
     return this.readyPromise;
   }
 
+  /**
+   * BPM in effect at `tick`; see {@link Timeline.tempoAt}. Throws `unavailable` until
+   * {@link ready} has loaded the tempo map, rather than assume 120.
+   *
+   * @example
+   * await session.musical.ready();
+   * session.musical.tempoAt(0);   // the session tempo
+   */
   tempoAt(tick: number): number {
     return this.timeline.tempoAt(tick);
   }

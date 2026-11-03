@@ -9,7 +9,7 @@
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="bypasscontrol"></a> `bypassControl` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | Name of the control that carries the IN/OUT state, or `null` if the plugin has none. | - |
-| <a id="bypasscontrolactivelow"></a> `bypassControlActiveLow` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `null`\> | - | - |
+| <a id="bypasscontrolactivelow"></a> `bypassControlActiveLow` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `null`\> | Polarity of [bypassControl](#bypasscontrol): true when a nonzero value means IN; false or `null` when zero means IN. | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="controls"></a> `controls` | `readonly` | [`Controls`](Controls.md) | Every child of the slot's `controls` folder, including parameters a cleared plugin left behind (fact 86). Prefer [params](#params). | - |
 | <a id="editoropen"></a> `editorOpen` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `undefined`\> | True while LUNA has this plugin's editor window open, whoever opened it (fact 126). `undefined` until known and on a LUNA that does not report editor windows. Follows LUNA after `session.ready()`. | - |

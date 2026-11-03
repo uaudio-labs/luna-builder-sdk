@@ -71,6 +71,7 @@
 | [Shortcuts](classes/Shortcuts.md) | The standard shortcuts as an object: which command a key means, and running it. Most Add Ons only need [bindShortcuts](functions/bindShortcuts.md); use this directly to route keys from a listener the page already has, or to run a command from a menu. |
 | [StorageContext](classes/StorageContext.md) | `/sessions/<uid>/storage/<context>`: one context's records. Get one with `session.storage.context(name)`. |
 | [Store](classes/Store.md) | - |
+| [Taper](classes/Taper.md) | Fader tapers: how LUNA maps a fader's 0..1 position to dB (fact 134). |
 | [TempoEvent](classes/TempoEvent.md) | - |
 | [Timeline](classes/Timeline.md) | Pure tick arithmetic over the current tempo map and time signatures. Every method reads the maps as they are now; [onChange](classes/Timeline.md#onchange) says when an answer may have moved. |
 | [TimeSignature](classes/TimeSignature.md) | - |
@@ -113,6 +114,7 @@
 | [GestureOptions](interfaces/GestureOptions.md) | - |
 | [GetOptions](interfaces/GetOptions.md) | Query parameters accepted by `get`, in camelCase. Booleans become `1`/`0` on the wire. See `hbsystem/networking/docs/operations.md`. |
 | [ImportPathOptions](interfaces/ImportPathOptions.md) | - |
+| [InsertClipOptions](interfaces/InsertClipOptions.md) | - |
 | [List](interfaces/List.md) | An observable ordered collection with id lookup. |
 | [Location](interfaces/Location.md) | The `location` property of a session. |
 | [LocationOptions](interfaces/LocationOptions.md) | - |
@@ -126,8 +128,10 @@
 | [MockMidiRow](interfaces/MockMidiRow.md) | A row for [MockEngine.midiEdit](classes/MockEngine.md#midiedit). |
 | [MockMidiSent](interfaces/MockMidiSent.md) | One live MIDI message the mock delivered, in [MockEngine.midiSent](classes/MockEngine.md#midisent). |
 | [MockNodeSpec](interfaces/MockNodeSpec.md) | - |
+| [MoveToFolderOptions](interfaces/MoveToFolderOptions.md) | - |
 | [NestedFileEntry](interfaces/NestedFileEntry.md) | One entry of [Gui.listAllFiles](classes/Gui.md#listallfiles): a [FileEntry](interfaces/FileEntry.md) anywhere below the listed folder. |
 | [NewBusOptions](interfaces/NewBusOptions.md) | - |
+| [NewFolderOptions](interfaces/NewFolderOptions.md) | - |
 | [NewNote](interfaces/NewNote.md) | One note for [Playlist.createNotes](classes/Playlist.md#createnotes). Ticks are absolute (session ticks), as LUNA's verb takes them, unlike the clip-relative ticks of the [Note](interfaces/Note.md)s it returns. There is no channel: LUNA's `create_note` writes every note on channel 0 (fact 111). For another channel, add the notes to a clip with [Clip.addNotes](classes/Clip.md#addnotes), which takes one. |
 | [NewTrackFromPresetOptions](interfaces/NewTrackFromPresetOptions.md) | - |
 | [NewTrackOptions](interfaces/NewTrackOptions.md) | - |
@@ -155,6 +159,7 @@
 | [QueryOptions](interfaces/QueryOptions.md) | - |
 | [RangeOptions](interfaces/RangeOptions.md) | - |
 | [RecordOptions](interfaces/RecordOptions.md) | - |
+| [ReorderOptions](interfaces/ReorderOptions.md) | - |
 | [SeekOptions](interfaces/SeekOptions.md) | - |
 | [SelectedNotes](interfaces/SelectedNotes.md) | One playlist's selected notes as LUNA stores them: `[pitch, start, stop, rowid]` in absolute ticks. |
 | [SelectionSnapshot](interfaces/SelectionSnapshot.md) | The six selection properties as LUNA holds them, for [Context.restore](classes/Context.md#restore). |
@@ -166,6 +171,7 @@
 | [SocketLike](interfaces/SocketLike.md) | The subset of the WebSocket API this port uses; lets tests inject a fake. |
 | [StorageEditOptions](interfaces/StorageEditOptions.md) | Options for an edit of session storage. |
 | [SubscribeOptions](interfaces/SubscribeOptions.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
+| [TaperMarksOptions](interfaces/TaperMarksOptions.md) | Options for [Taper.marks](classes/Taper.md#marks). |
 | [TraceWaveformOptions](interfaces/TraceWaveformOptions.md) | - |
 | [TrackPresetSelectionOptions](interfaces/TrackPresetSelectionOptions.md) | - |
 | [TransactionOptions](interfaces/TransactionOptions.md) | - |
@@ -187,6 +193,7 @@
 | ------ | ------ |
 | [AddOnInstalledFrom](type-aliases/AddOnInstalledFrom.md) | Where an installed Add On lives: see [AddOn.installedFrom](classes/AddOn.md#installedfrom). |
 | [AddOnTarget](type-aliases/AddOnTarget.md) | - |
+| [AlgType](type-aliases/AlgType.md) | LUNA's time-stretch algorithm for an audio clip (`alg_type`), passed verbatim. |
 | [AutomationMode](type-aliases/AutomationMode.md) | - |
 | [AutomationModeName](type-aliases/AutomationModeName.md) | - |
 | [BusType](type-aliases/BusType.md) | - |
@@ -197,10 +204,11 @@
 | [CrossfadeAlign](type-aliases/CrossfadeAlign.md) | Where a crossfade sits on the edit between two clips, for [Clip.crossfade](classes/Clip.md#crossfade). |
 | [EventHandler](type-aliases/EventHandler.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [FadeShape](type-aliases/FadeShape.md) | LUNA's fade shapes. Another string is passed through as LUNA sent it. |
-| [FolderMode](type-aliases/FolderMode.md) | - |
+| [FolderMode](type-aliases/FolderMode.md) | A bus's folder mode (fact 136). `'summing'`: a folder track whose children's main outputs go to it, so it is their bus. `'container'`: a folder that only groups; its children route past it to the nearest summing folder above, else the master. `'none'`: an ordinary bus. |
 | [GuiPage](type-aliases/GuiPage.md) | - |
 | [InsertSlot](type-aliases/InsertSlot.md) | - |
 | [KeyCombo](type-aliases/KeyCombo.md) | A key combination as `Modifier+...+Key`. Modifiers are `Mod` (Cmd on a Mac, Ctrl elsewhere), `Cmd`, `Ctrl`, `Alt` and `Shift`, and the ones named must be exactly the ones held. The key is a `KeyboardEvent.key` (`z`, case-insensitive) or `KeyboardEvent.code` (`Space`, `Numpad0`, `KeyZ`). |
+| [LengthFollows](type-aliases/LengthFollows.md) | What a clip's length follows when the tempo changes (LUNA's `length_follows`): `'ticks'` keeps its musical length, `'time'` its length in seconds. Left out, the clip follows its track. |
 | [LogFn](type-aliases/LogFn.md) | Where a port reports what it does: status changes, reconnect attempts, timeouts, and listeners that threw. The default sends `warn` and `error` to the console. |
 | [LogLevel](type-aliases/LogLevel.md) | Severity of a [LogFn](type-aliases/LogFn.md) message. |
 | [MidiInputTarget](type-aliases/MidiInputTarget.md) | Where [MidiInput.listen](classes/MidiInput.md#listen) listens: a device (its input port), an input port, or every device. |
@@ -223,6 +231,7 @@
 | [SourceLookup](type-aliases/SourceLookup.md) | Anything that can resolve a source uid: `session.sources`, or a plain array. |
 | [StatusListener](type-aliases/StatusListener.md) | The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'` or, from a script tag, `globalThis.Luna`. |
 | [StemFormat](type-aliases/StemFormat.md) | - |
+| [TaperName](type-aliases/TaperName.md) | A fader taper name as LUNA writes it in a control's `taper` property. |
 | [TrackPresetCategory](type-aliases/TrackPresetCategory.md) | - |
 | [TrackType](type-aliases/TrackType.md) | - |
 | [TransactionMode](type-aliases/TransactionMode.md) | Which kind of [Session.transaction](classes/Session.md#transaction) is open: `'batch'` holds every command for one undo step and holds pushes until the commit; `'continuous'` keeps only the last command. |

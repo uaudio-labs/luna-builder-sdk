@@ -36,7 +36,7 @@ export class Marker extends Node {
   readonly barBeat: Prop<BarBeat>;
   /**
    * {@link location} in seconds from the session start, following the marker and the tempo
-   * map. Assumes 120 BPM until `session.musical` has loaded.
+   * map. `undefined` until `session.musical` has loaded the tempo map; it never assumes a tempo.
    *
    * @example
    * marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));
@@ -62,7 +62,7 @@ export class Marker extends Node {
       return tick === undefined ? undefined : f(timeline(), tick);
     };
     this.barBeat = derived([this.location, maps], at((t, tick) => t.barBeat(tick)), { distinct: true });
-    this.seconds = derived([this.location, maps], at((t, tick) => t.seconds(tick)), { distinct: true });
+    this.seconds = derived([this.location, maps], at((t, tick) => (t.tempoLoaded ? t.seconds(tick) : undefined)), { distinct: true });
   }
 
   private get row(): number {

@@ -199,7 +199,8 @@ export function compiledClipAudio(
   if (whole.stretched) {
     // An older LUNA: the clip's render is its first piece's, starting at the clip start.
     const clipStart = 'startTicks' in clip ? clip.startTicks : clip.start.value;
-    if (clipStart === undefined || start !== clipStart) return undefined;
+    // Without a loaded tempo map the stretched range is unknown: an outline, not a guess.
+    if (clipStart === undefined || start !== clipStart || !timeline.tempoLoaded) return undefined;
     const at = (tick: number) => Math.max(0, (timeline.seconds(tick) - timeline.seconds(clipStart)) * 1e9);
     return Object.freeze({ source: whole.source, startNs: at(start), stopNs: Math.min(whole.stopNs, at(stop)), stretched: true });
   }
@@ -216,7 +217,7 @@ export function compiledClipAudio(
  * ticks, so a tempo change inside the clip bends the mapping exactly as the engine does.
  *
  * The result can lie outside `[audio.startNs, audio.stopNs)` for ticks outside the clip;
- * clamp before drawing there.
+ * clamp before drawing there. Throws `unavailable` while the tempo map is not loaded.
  *
  * @example
  * const ns = Luna.audioNsAtTick(session.musical.timeline, clip, audio, playheadTick);

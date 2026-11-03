@@ -287,8 +287,11 @@ async function start() {
     void startFolders().catch((e) => message(`${e.code ?? ''} ${e.message}`, true));
     await luna.sessions.ready();
     // Follow the session: one opened, closed or focused after the page loaded is picked up.
-    luna.sessions.focused.onChange(bindSession);
-    luna.sessions.items.onChange(bindSession);
+    // bindSession is async: catch here, or a session that fails to load (LUNA closed it,
+    // or the connection dropped) is an unhandled rejection.
+    const rebind = () => void bindSession().catch((e) => { $('status').textContent = `${e.code ?? ''} ${e.message}`; });
+    luna.sessions.focused.onChange(rebind);
+    luna.sessions.items.onChange(rebind);
     await bindSession();
   } catch (e) { $('status').textContent = `${e.code ?? ''} ${e.message}`; }
 }
@@ -760,10 +763,8 @@ async function importAudio(entry, button) {
     // The exact span for an unstretched source, walked through the tempo map.
     const stop = Math.round(timeline.tickAtSeconds(timeline.seconds(start) + ns / 1e9));
     await session.transaction(`Import ${name}`, async () => {
-      const reply = await session.newTrack({ name, trackType: 'audio', stemFormat: source.stemFormat.value === 'stereo' ? 'stereo' : 'mono', makeNameUnique: true });
-      const trackUid = reply?.track_uid ?? reply?.uid;
-      if (!trackUid) throw new Error('new_track answered without a track uid');
-      await session.insertClip({ trackUid, sourceUid: source.id, startTick: start, stopTick: stop, sourceStartNs: 0, sourceStopNs: ns, name });
+      const [track] = await session.newTrack({ name, trackType: 'audio', stemFormat: source.stemFormat.value === 'stereo' ? 'stereo' : 'mono', makeNameUnique: true });
+      await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: start, stopTick: stop, sourceStartNs: 0, sourceStopNs: ns, name });
     });
     message(`Imported “${name}” onto a new track at ${timeline.formatBarBeat(start)}.`);
   } catch (e) {

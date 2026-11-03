@@ -1,0 +1,344 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA track order</title>
+<!--
+  Track and bus order (fact 137): every track and bus of the session in LUNA's order
+  (session.channelsInOrder), with the `order` number LUNA keeps for each, rearranged by drag
+  and drop with session.moveToFolder(), in and out of folders. Each drop is one undo entry.
+
+  - Click a row to select it, Cmd/Ctrl-click to add or remove rows (any rows, with gaps),
+    Shift-click to select a range. Esc clears the selection, or cancels a drag.
+  - Drag any selected row to move the whole selection. A line shows where it lands, indented
+    to the level it lands at, and the label says which folder:
+      top half of a row      just above it, in the same folder;
+      bottom half of a row   just below it, in the same folder;
+      bottom half of a folder  inside it, first;
+      below a folder's last row  the pointer's left-right position picks the level, so move
+                             left to drop after the folder instead of in it.
+    The rows keep their order among themselves and land together, however far apart they
+    were. One session.moveToFolder() call does it all: the folder each row ends up in, its
+    place there, and the rerouting of its main output (fact 136).
+  - One `order` runs 1..N across tracks and buses together, LUNA's own click, count-in, master
+    and cue channels included. Untick "LUNA's own" to hide those and see the gaps they leave.
+  - A folder is always followed at once by everything inside it, indented here, and moves with
+    it; it cannot be dropped inside itself.
+  - ▲/▼ move one row among the rows in its folder, with session.reorder(), which never
+    changes folder.
+  - Rows LUNA renumbers flash, so a drag in LUNA's own track list shows up here too.
+
+  Drag uses pointer events rather than HTML drag and drop, so it behaves the same inside
+  LUNA's web view and in a browser.
+-->
+<script src="../dist/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #16181b; color: #e6e9ee; font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  body.dragging, body.dragging * { cursor: grabbing !important; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #262b31; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; }
+  button { font: inherit; padding: 2px 7px; border-radius: 6px; border: 1px solid #39404a; background: #23272c; color: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #count, #selection { opacity: .7; }
+  #status { margin-left: auto; opacity: .7; }
+  table { border-collapse: collapse; width: calc(100% - 28px); margin: 10px 14px 14px; user-select: none; -webkit-user-select: none; }
+  th, td { padding: 4px 6px; border-bottom: 1px solid #232830; text-align: left; font-weight: 400; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .5; }
+  tbody tr { cursor: grab; }
+  td.order { font-variant-numeric: tabular-nums; text-align: right; width: 3em; opacity: .8; }
+  .name { white-space: nowrap; }
+  .folder .name { font-weight: 600; }
+  .system { opacity: .5; }
+  .kind { opacity: .65; }
+  tr.selected td { background: #24406a; }
+  body.dragging tr.selected td { opacity: .45; }
+  #dropLine { position: fixed; height: 2px; background: #5aa0ff; pointer-events: none; display: none; z-index: 1; }
+  tr.drop-into td { background: #1d3354; }
+  tr.changed td { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { background: #3a4a2a; } to { background: transparent; } }
+  #ghost { position: fixed; pointer-events: none; padding: 3px 9px; border-radius: 6px; background: #2f6fd0; color: #fff; font-size: 12px; display: none; z-index: 1; }
+</style>
+<header>
+  <h1>LUNA track order</h1>
+  <span id="count"></span>
+  <span id="selection"></span>
+  <label><input type="checkbox" id="system" checked> LUNA's own tracks and buses</label>
+  <span id="status">connecting…</span>
+</header>
+<table>
+  <thead><tr><th>order</th><th>name</th><th>kind</th><th>move</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div id="ghost"></div>
+<div id="dropLine"></div>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const say = (t) => { $('status').textContent = t; };
+  let luna, session;
+  let selected = new Set();              // selected ids
+  let rangeFrom = null;                  // where a Shift-click range starts
+  let drag = null;                       // the drag in progress, see pointerdown
+  let lastOrder = new Map();             // id -> order at the previous render, to flash changes
+
+  /** Run an action, report it, and keep the buttons from firing twice. */
+  const run = async (label, fn) => {
+    say(`${label}…`);
+    const live = [...document.querySelectorAll('button')].filter((el) => !el.disabled);
+    for (const el of live) el.disabled = true;
+    try { await fn(); say(`${label}: done`); }
+    catch (e) { say(`${label} failed: ${e.code ?? ''} ${e.message}`); }
+    finally { for (const el of live) el.disabled = false; }
+  };
+
+  const nameOf = (ch) => ch.name.value ?? ch.id;
+  const byId = (id) => session.tracks.byId(id) ?? session.buses.byId(id);
+  const isFolder = (ch) => ch instanceof Luna.Bus && ch.isFolder;
+  // LUNA's own channels: the click and count-in tracks, the master and the cue buses.
+  const isSystem = (ch) => ch instanceof Luna.Bus ? ch.busType.value !== 'aux' : ['click', 'count_in'].includes(ch.trackType.value ?? '');
+  const depth = (ch) => (ch?.folderUid.value ? 1 + depth(session.buses.byId(ch.folderUid.value)) : 0);
+  const kindOf = (ch) => {
+    if (isFolder(ch)) return `folder (${ch.folderMode.value})`;
+    if (ch instanceof Luna.Bus) return ch.busType.value === 'aux' ? 'aux bus' : `${ch.busType.value} bus`;
+    return `${ch.trackType.value ?? ''} track`;
+  };
+  const shownChannels = () => session.channelsInOrder.filter((ch) => $('system').checked || !isSystem(ch));
+
+  /** The selection in LUNA's order, top to bottom: the order the rows keep when they move. */
+  const selectedInOrder = () => session.channelsInOrder.filter((ch) => selected.has(ch.id));
+
+  /** What a drag moves: the selection, and everything inside a selected folder. */
+  function movedIds() {
+    const moved = new Set(selected);
+    for (const ch of session.channelsInOrder) {
+      for (let f = ch.folderUid.value; f; f = byId(f)?.folderUid.value) if (selected.has(f)) moved.add(ch.id);
+    }
+    return moved;
+  }
+
+  // ---- selection -------------------------------------------------------------------------
+
+  function paintSelection() {
+    for (const id of [...selected]) if (!byId(id)) selected.delete(id);
+    for (const tr of $('rows').children) tr.classList.toggle('selected', selected.has(tr.dataset.id));
+    $('selection').textContent = selected.size ? `${selected.size} selected` : '';
+  }
+
+  function select(id, e) {
+    if (e.shiftKey && rangeFrom) {
+      // A range over the rows shown, from where the last click was.
+      const ids = shownChannels().map((ch) => ch.id);
+      const [a, b] = [ids.indexOf(rangeFrom), ids.indexOf(id)].sort((x, y) => x - y);
+      if (a >= 0) selected = new Set([...(e.metaKey || e.ctrlKey ? selected : []), ...ids.slice(a, b + 1)]);
+    } else if (e.metaKey || e.ctrlKey) {
+      selected.has(id) ? selected.delete(id) : selected.add(id);
+      rangeFrom = id;
+    } else if (!selected.has(id)) {
+      selected = new Set([id]);
+      rangeFrom = id;
+    }
+    paintSelection();
+  }
+
+  // ---- drag and drop ---------------------------------------------------------------------
+
+  const INDENT = 18;   // px per folder level, as the name cells are indented
+
+  /**
+   * Show where the drop lands. `target`: { row, where: 'before' | 'after', level, dest, anchor },
+   * or null for nowhere.
+   */
+  function setTarget(target) {
+    for (const tr of $('rows').querySelectorAll('.drop-before, .drop-after, .drop-into')) tr.classList.remove('drop-before', 'drop-after', 'drop-into');
+    drag.target = target;
+    const line = $('dropLine');
+    line.style.display = 'none';
+    $('ghost').textContent = drag.label;
+    if (!target) return;
+    const tr = $('rows').querySelector(`tr[data-id="${target.row}"]`);
+    if (!tr) return;
+    tr.classList.add(`drop-${target.where}`);
+    if (target.dest) $('rows').querySelector(`tr[data-id="${target.dest}"]`)?.classList.add('drop-into');
+    $('ghost').textContent = `${drag.label} → ${target.dest ? `in ${nameOf(byId(target.dest))}` : 'top level'}`;
+    const box = tr.getBoundingClientRect();
+    const name = tr.querySelector('.name').getBoundingClientRect();
+    line.style.top = `${(target.where === 'before' ? box.top : box.bottom) - 1}px`;
+    line.style.left = `${name.left + 6 + target.level * INDENT}px`;
+    line.style.width = `${Math.max(40, box.right - (name.left + 6 + target.level * INDENT))}px`;
+    line.style.display = 'block';
+  }
+
+  function endDrag() {
+    if (drag?.target) setTarget(null);
+    drag = null;
+    document.body.classList.remove('dragging');
+    $('ghost').style.display = 'none';
+    $('dropLine').style.display = 'none';
+  }
+
+  /** The folder a row at `level` would be in, just below `ch`: `ch` itself, or one of its folders. */
+  function folderAtLevel(ch, level) {
+    if (level > depth(ch)) return ch.id;                       // inside ch, a folder
+    let folder = ch.folderUid.value ?? null;
+    for (let d = depth(ch); d > level; d--) folder = byId(folder)?.folderUid.value ?? null;
+    return folder;
+  }
+
+  /**
+   * Where a drop over row `ch` lands, from the pointer: `dest` is the folder (null: the top
+   * level) and `anchor` the row to land just after (null: first), as moveToFolder() takes them.
+   */
+  function dropTarget(e, ch, tr) {
+    const moved = movedIds();
+    if (moved.has(ch.id)) return null;                           // not onto itself, or into itself
+    const box = tr.getBoundingClientRect();
+    if (e.clientY < box.top + box.height / 2) {
+      // Just above ch, in its folder: after whatever is above ch once the moved rows are out.
+      const rest = session.channelsInOrder.filter((c) => !moved.has(c.id));
+      const at = rest.findIndex((c) => c.id === ch.id);
+      return { row: ch.id, where: 'before', level: depth(ch), dest: ch.folderUid.value ?? null, anchor: at > 0 ? rest[at - 1].id : null };
+    }
+    // Just below ch. Below a folder: inside it. Below the last row of a folder: the pointer's
+    // x picks the level, between ch's own and the next row's.
+    const shown = shownChannels().filter((c) => !moved.has(c.id));
+    const next = shown[shown.findIndex((c) => c.id === ch.id) + 1];
+    const deepest = isFolder(ch) ? depth(ch) + 1 : depth(ch);
+    const shallowest = Math.min(deepest, next ? depth(next) : 0);
+    const name = tr.querySelector('.name').getBoundingClientRect();
+    const wanted = Math.floor((e.clientX - name.left) / INDENT);
+    const level = Math.max(shallowest, Math.min(deepest, wanted));
+    return { row: ch.id, where: 'after', level, dest: folderAtLevel(ch, level), anchor: ch.id };
+  }
+
+  function drop() {
+    const { target } = drag;
+    const items = selectedInOrder();
+    endDrag();
+    if (!target || !items.length) return;
+    const label = items.length === 1 ? `Move ${nameOf(items[0])}` : `Move ${items.length} rows`;
+    // One command: the folder, the place in it and the rerouting, one undo entry.
+    void run(label, () => session.moveToFolder(items, target.dest, { after: target.anchor }));
+  }
+
+  function onRowPointerDown(e, ch) {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    const modified = e.shiftKey || e.metaKey || e.ctrlKey;
+    const wasSelected = selected.has(ch.id);
+    select(ch.id, e);
+    // Cmd-clicking a row out of the selection drags nothing.
+    if (!selected.has(ch.id)) return;
+    // A plain click on a row already selected keeps the selection for a drag, and narrows
+    // it to that row if no drag follows.
+    drag = { from: ch.id, x: e.clientX, y: e.clientY, active: false, target: null, narrow: wasSelected && !modified };
+  }
+
+  function onRowPointerMove(e, ch) {
+    if (drag?.active) setTarget(dropTarget(e, ch, e.currentTarget));
+  }
+
+  document.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;   // a click, so far
+      drag.active = true;
+      document.body.classList.add('dragging');
+      const n = selected.size;
+      drag.label = n === 1 ? nameOf(byId([...selected][0])) : `${n} rows`;
+      $('ghost').textContent = drag.label;
+      $('ghost').style.display = 'block';
+    }
+    $('ghost').style.left = `${e.clientX + 12}px`;
+    $('ghost').style.top = `${e.clientY + 8}px`;
+  });
+
+  document.addEventListener('pointerup', () => {
+    if (!drag) return;
+    if (drag.active) { drop(); return; }
+    if (drag.narrow) { selected = new Set([drag.from]); rangeFrom = drag.from; paintSelection(); }
+    endDrag();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || (!drag && !selected.size)) return;   // otherwise LUNA's
+    e.preventDefault();
+    if (drag) endDrag();
+    else { selected.clear(); paintSelection(); }
+  });
+
+  // ---- rows ------------------------------------------------------------------------------
+
+  /**
+   * `siblings`: the shown rows in the same folder; `all`: every row in it, LUNA's own
+   * included. ▲ goes just before the shown row above, so hidden rows stay where they are.
+   */
+  function row(ch, siblings, all) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = ch.id;
+    if (isFolder(ch)) tr.classList.add('folder');
+    if (isSystem(ch)) tr.classList.add('system');
+    if (selected.has(ch.id)) tr.classList.add('selected');
+    if (lastOrder.size && lastOrder.get(ch.id) !== ch.order.value) tr.classList.add('changed');
+    tr.addEventListener('pointerdown', (e) => onRowPointerDown(e, ch));
+    tr.addEventListener('pointermove', (e) => onRowPointerMove(e, ch));
+    const cell = (cls) => Object.assign(tr.appendChild(document.createElement('td')), cls ? { className: cls } : {});
+
+    cell('order').textContent = String(ch.order.value ?? '');
+    const name = cell('name');
+    name.style.paddingLeft = `${6 + depth(ch) * 18}px`;
+    name.textContent = `${isFolder(ch) ? '▾ ' : ''}${nameOf(ch)}`;
+    cell('kind').textContent = kindOf(ch);
+
+    const at = siblings.indexOf(ch);
+    const before = (other) => { const i = all.indexOf(other); return i > 0 ? all[i - 1] : null; };
+    const step = (label, title, anchor) => {
+      const b = Object.assign(document.createElement('button'), { textContent: label, title });
+      b.setAttribute('aria-label', `${title} ${nameOf(ch)}`);
+      if (anchor === undefined) b.disabled = true;
+      else b.onclick = () => void run(`${title} ${nameOf(ch)}`, () => session.reorder([ch], { after: anchor }));
+      return b;
+    };
+    cell().append(
+      step('▲', 'Move up', at > 0 ? before(siblings[at - 1]) : undefined), ' ',
+      step('▼', 'Move down', at >= 0 && at < siblings.length - 1 ? siblings[at + 1] : undefined),
+    );
+    return tr;
+  }
+
+  // Redraw on anything that moves a row: the lists, and each channel's order, folder and name.
+  // Changes arriving together cost one redraw.
+  let watching = [];
+  let pending = false;
+  const schedule = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(() => { pending = false; render(); }, 0);
+  };
+
+  function render() {
+    const all = session.channelsInOrder;
+    for (const off of watching) off();
+    watching = all.flatMap((ch) => [ch.order, ch.folderUid, ch.name, ...(ch instanceof Luna.Bus ? [ch.folderMode] : [])].map((p) => p.onChange(schedule)));
+    const shown = shownChannels();
+    const inFolder = (list, ch) => list.filter((s) => (s.folderUid.value ?? null) === (ch.folderUid.value ?? null));
+    $('rows').replaceChildren(...shown.map((ch) => row(ch, inFolder(shown, ch), inFolder(all, ch))));
+    if (drag?.target) setTarget(drag.target);   // keep the drop line through a redraw
+    lastOrder = new Map(all.map((ch) => [ch.id, ch.order.value]));
+    $('count').textContent = `${all.length} tracks and buses, ${shown.length} shown`;
+    paintSelection();
+  }
+  $('system').onchange = render;
+
+  try { luna = await Luna.connect(); } catch (e) { say(e.message); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  await luna.sessions.ready();
+  session = luna.sessions.current();
+  if (!session) { say('No session open in LUNA.'); return; }
+  await session.ready();
+  session.tracks.onChange(schedule);
+  session.buses.onChange(schedule);
+  say('');
+  render();
+  luna.status.onChange(() => { if (luna.status.value === 'disconnected') say('Disconnected; reconnecting…'); });
+})();
+</script>

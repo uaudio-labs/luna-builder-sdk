@@ -496,6 +496,280 @@ describe('examples/sends.html', () => {
   });
 });
 
+describe('examples/folders.html', () => {
+  const rowName = (tr: Element) => (tr.querySelector('.name')?.textContent ?? '').replace('▾ ', '');
+  const rowOf = (page: Awaited<ReturnType<typeof loadExamplePage>>, name: string) => page.all('#tree tr').find((tr) => rowName(tr) === name);
+  const choose = (page: Awaited<ReturnType<typeof loadExamplePage>>, select: Element | null | undefined, value: string) => {
+    const sel = select as HTMLSelectElement;
+    sel.value = value;
+    sel.dispatchEvent(new page.window.Event('change'));
+  };
+
+  it('creates a folder, a track inside it, moves a track in, and changes the mode (fact 136)', async () => {
+    const engine = engineWithSession(['Vocal', 'Bass']);
+    const page = await loadExamplePage('folders.html', engine);
+    await page.waitFor(() => page.text('#count') === '2 tracks and buses, 0 folders', 'the tree');
+
+    (page.document.getElementById('folderName') as HTMLInputElement).value = 'Rhythm';
+    (page.document.getElementById('createFolder') as HTMLButtonElement).click();
+    await page.waitFor(() => rowOf(page, 'Rhythm') !== undefined && page.text('#count').endsWith('1 folder'), 'the folder row');
+    const folderId = rowOf(page, 'Rhythm')!.getAttribute('data-id')!;
+    expect(rowOf(page, 'Rhythm')!.querySelector('.kind')?.textContent).toBe('folder (summing)');
+    expect(rowOf(page, 'Rhythm')!.querySelector('.routes')?.textContent).toBe('Main Output');
+
+    // A new track inside the folder routes through it, and is drawn under it.
+    await page.waitFor(() => page.text('#status') === 'Create folder: done', 'the folder to finish');
+    await page.waitFor(() => [...(page.document.getElementById('trackParent') as HTMLSelectElement).options].some((o) => o.value === folderId), 'the folder in the picker');
+    (page.document.getElementById('trackParent') as HTMLSelectElement).value = folderId;
+    (page.document.getElementById('trackName') as HTMLInputElement).value = 'Kick';
+    (page.document.getElementById('createTrack') as HTMLButtonElement).click();
+    await page.waitFor(() => rowOf(page, 'Kick')?.querySelector('.routes')?.textContent === 'Rhythm', 'the track to route through the folder');
+    const names = () => page.all('#tree tr').map(rowName);
+    expect(names().indexOf('Kick')).toBe(names().indexOf('Rhythm') + 1);
+
+    // Move Bass in from its row.
+    choose(page, rowOf(page, 'Bass')?.querySelector('select'), folderId);
+    await page.waitFor(() => rowOf(page, 'Bass')?.querySelector('.routes')?.textContent === 'Rhythm', 'Bass to move into the folder');
+    expect(engine.value('/sessions/abc/tracks/Bass', 'folder_uid')).toBe(folderId);
+
+    // A container folder only groups: its tracks route past it to the master.
+    const mode = rowOf(page, 'Rhythm')!.querySelectorAll('select')[1];
+    choose(page, mode, 'container');
+    await page.waitFor(() => rowOf(page, 'Bass')?.querySelector('.routes')?.textContent === 'Main Output', 'Bass to route past the container');
+    expect(rowOf(page, 'Rhythm')!.querySelector('.kind')?.textContent).toBe('folder (container)');
+    page.close();
+  });
+
+  it('moves rows up and down among their siblings, a folder with its contents (fact 137)', async () => {
+    const engine = engineWithSession(['Vocal', 'Bass']);
+    const page = await loadExamplePage('folders.html', engine);
+    await page.waitFor(() => page.text('#count') === '2 tracks and buses, 0 folders', 'the tree');
+    const names = () => page.all('#tree tr').map(rowName);
+    const button = (name: string, label: string) => rowOf(page, name)?.querySelector(`button[aria-label="${label} ${name}"]`) as HTMLButtonElement | null;
+    // The first frames can come before every row's order has loaded; wait for the settled one.
+    await page.waitFor(() => names().join() === 'Vocal,Bass' && button('Vocal', 'Move up')?.disabled === true && button('Bass', 'Move down')?.disabled === true && button('Vocal', 'Move down')?.disabled === false, 'the first and last rows to stop at the ends');
+
+    button('Vocal', 'Move down')!.click();
+    await page.waitFor(() => names().join() === 'Bass,Vocal' && page.text('#status') === 'Move down Vocal: done', 'Vocal to move down');
+
+    (page.document.getElementById('folderName') as HTMLInputElement).value = 'Kit';
+    (page.document.getElementById('createFolder') as HTMLButtonElement).click();
+    await page.waitFor(() => page.text('#status') === 'Create folder: done' && rowOf(page, 'Kit') !== undefined, 'the folder');
+    const kit = rowOf(page, 'Kit')!.getAttribute('data-id')!;
+    (page.document.getElementById('trackParent') as HTMLSelectElement).value = kit;
+    (page.document.getElementById('trackName') as HTMLInputElement).value = 'Kick';
+    (page.document.getElementById('createTrack') as HTMLButtonElement).click();
+    await page.waitFor(() => names().join() === 'Bass,Vocal,Kit,Kick', 'Kick inside Kit');
+
+    // Kit moves up past Vocal and takes Kick with it; Kick alone in Kit cannot move.
+    await page.waitFor(() => button('Kit', 'Move up')?.disabled === false, 'the buttons back');
+    button('Kit', 'Move up')!.click();
+    await page.waitFor(() => names().join() === 'Bass,Kit,Kick,Vocal', 'Kit to move up with Kick');
+    await page.waitFor(() => button('Kick', 'Move up')?.disabled === true && button('Kick', 'Move down')?.disabled === true, 'Kick to stop at both ends of Kit');
+    page.close();
+  });
+
+  it('does not offer a folder as a destination inside itself', async () => {
+    const engine = engineWithSession(['Vocal']);
+    const page = await loadExamplePage('folders.html', engine);
+    await page.waitFor(() => page.text('#count').startsWith('1 tracks and buses'), 'the tree');
+    (page.document.getElementById('createFolder') as HTMLButtonElement).click();
+    await page.waitFor(() => rowOf(page, 'Folder') !== undefined, 'the folder row');
+    const options = [...(rowOf(page, 'Folder')!.querySelector('select') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toEqual(['-', '']);
+    page.close();
+  });
+});
+
+describe('examples/order.html', () => {
+  const rowName = (tr: Element) => (tr.querySelector('.name')?.textContent ?? '').replace('▾ ', '');
+  const rows = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.all('#rows tr').map((tr) => `${tr.querySelector('.order')?.textContent}.${rowName(tr)}`);
+  const rowOf = (page: Awaited<ReturnType<typeof loadExamplePage>>, name: string) => page.all('#rows tr').find((tr) => rowName(tr) === name);
+  const choose = (page: Awaited<ReturnType<typeof loadExamplePage>>, select: Element | null | undefined, value: string) => {
+    const sel = select as HTMLSelectElement;
+    sel.value = value;
+    sel.dispatchEvent(new page.window.Event('change'));
+  };
+  const done = (page: Awaited<ReturnType<typeof loadExamplePage>>, label: string) => page.waitFor(() => page.text('#status') === `${label}: done`, label);
+
+  it("lists every track and bus with LUNA's one order, and hides LUNA's own on request (fact 137)", async () => {
+    const engine = engineWithSession(['Vocal', 'Bass']);
+    const page = await loadExamplePage('order.html', engine);
+    await page.waitFor(() => rows(page).join() === '1.CUE 1,2.CUE 2,3.CUE 3,4.CUE 4,5.Main Output,6.Vocal,7.Bass', 'every channel with its order');
+    expect(page.text('#count')).toBe('7 tracks and buses, 7 shown');
+    const system = page.document.getElementById('system') as HTMLInputElement;
+    system.checked = false;
+    system.dispatchEvent(new page.window.Event('change'));
+    await page.waitFor(() => rows(page).join() === '6.Vocal,7.Bass', "LUNA's own hidden, gaps showing");
+    page.close();
+  });
+
+  /**
+   * Drag `from` onto `onto`, with `y` deciding the half: jsdom lays nothing out, so every row's
+   * box is 0 high at 0 and y < 0 means "above", y >= 0 "below".
+   */
+  function dragRows(page: Awaited<ReturnType<typeof loadExamplePage>>, from: string, onto: string, where: 'before' | 'after', x = 10) {
+    // x picks the level below a folder's last row: 18 px a level from the name's left (0 here).
+    const y = where === 'before' ? -1 : 1;
+    const fire = (el: EventTarget, type: string, init: MouseEventInit) => el.dispatchEvent(new page.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }));
+    fire(rowOf(page, from)!, 'pointerdown', { clientX: 10, clientY: 0 });
+    fire(page.document, 'pointermove', { clientX: 10, clientY: 30 });          // past the click slop
+    fire(rowOf(page, onto)!, 'pointermove', { clientX: x, clientY: y });
+    const ghost = page.text('#ghost');
+    fire(page.document, 'pointerup', { clientX: x, clientY: y });
+    return ghost;
+  }
+  const click = (page: Awaited<ReturnType<typeof loadExamplePage>>, name: string, keys: MouseEventInit = {}) => {
+    const tr = rowOf(page, name)!;
+    tr.dispatchEvent(new page.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 10, clientY: 0, ...keys }));
+    page.document.dispatchEvent(new page.window.MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 10, clientY: 0 }));
+  };
+  const selectedNames = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.all('#rows tr.selected').map(rowName);
+
+  async function userTracks(names: string[]) {
+    const engine = engineWithSession(names);
+    const page = await loadExamplePage('order.html', engine);
+    await page.waitFor(() => page.all('#rows tr').length === 5 + names.length, 'the rows');
+    const system = page.document.getElementById('system') as HTMLInputElement;
+    system.checked = false;
+    system.dispatchEvent(new page.window.Event('change'));
+    await page.waitFor(() => page.all('#rows tr').length === names.length, 'the user tracks');
+    return { engine, page };
+  }
+
+  it('selects with click, Cmd/Ctrl-click (with gaps) and Shift-click, and clears with Esc', async () => {
+    const { page } = await userTracks(['A', 'B', 'C', 'D', 'E']);
+    click(page, 'B');
+    expect(selectedNames(page)).toEqual(['B']);
+    click(page, 'D', { metaKey: true });
+    click(page, 'E', { ctrlKey: true });
+    expect(selectedNames(page)).toEqual(['B', 'D', 'E']);
+    click(page, 'D', { metaKey: true });
+    expect(selectedNames(page)).toEqual(['B', 'E']);
+    click(page, 'A');
+    click(page, 'C', { shiftKey: true });
+    expect(selectedNames(page)).toEqual(['A', 'B', 'C']);
+    expect(page.text('#selection')).toBe('3 selected');
+    click(page, 'B');                                    // a plain click narrows to that row
+    expect(selectedNames(page)).toEqual(['B']);
+    page.document.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(selectedNames(page)).toEqual([]);
+    page.close();
+  });
+
+  it('drags one row above or below another, one undo entry each (fact 137)', async () => {
+    const { engine, page } = await userTracks(['A', 'B', 'C']);
+    dragRows(page, 'C', 'A', 'before');
+    await done(page, 'Move C');
+    await page.waitFor(() => rows(page).join() === '6.C,7.A,8.B', 'C dropped just above A, the hidden rows left where they are');
+    dragRows(page, 'C', 'A', 'after');
+    await done(page, 'Move C');
+    await page.waitFor(() => rows(page).join() === '6.A,7.C,8.B', 'C dropped below A');
+    expect(engine.requests.filter((r) => r.path.endsWith('/move_to_folder'))).toHaveLength(2);
+    page.close();
+  });
+
+  it('drags a selection with gaps as one block, in list order, wherever the drag starts', async () => {
+    const { engine, page } = await userTracks(['A', 'B', 'C', 'D', 'E']);
+    click(page, 'A');
+    click(page, 'C', { metaKey: true });
+    click(page, 'E', { metaKey: true });
+    dragRows(page, 'C', 'D', 'after');                   // drag starts on the middle one
+    await done(page, 'Move 3 rows');
+    await page.waitFor(() => rows(page).join() === '6.B,7.D,8.A,9.C,10.E', 'A, C and E together after D');
+    const post = engine.requests.filter((r) => r.path.endsWith('/move_to_folder')).at(-1)!;
+    expect(post.data).toEqual({ session_uid: 'abc', after_uids: ['A', 'C', 'E'], before_uid: 'D' });
+    expect(selectedNames(page)).toEqual(['A', 'C', 'E']);  // the selection stays on the moved rows
+    page.close();
+  });
+
+  it('a click without a drag moves nothing; a selected row is not a drop target', async () => {
+    const { engine, page } = await userTracks(['A', 'B']);
+    click(page, 'A');
+    dragRows(page, 'A', 'A', 'after');
+    expect(page.all('#rows tr.drop-before, #rows tr.drop-after')).toEqual([]);
+    expect(engine.requests.some((r) => r.path.endsWith('/change_order'))).toBe(false);
+    expect(page.document.body.classList.contains('dragging')).toBe(false);
+    page.close();
+  });
+
+  async function withKit(names: string[]) {
+    const { engine, page } = await userTracks(names);
+    const luna = await Luna.connect({ port_: engine.port() });
+    const session = await luna.session();
+    await session.ready();
+    const kit = await session.newFolder({ name: 'Kit' });
+    await session.newTrack({ name: 'Kick', folderUid: kit.id });
+    return { engine, page, session, kit };
+  }
+  const folderOf = (engine: Luna.MockEngine, track: string) => engine.value(`/sessions/abc/tracks/${track}`, 'folder_uid');
+
+  it('drops into a folder: below the folder row (first), or above a row inside it (fact 136)', async () => {
+    const { engine, page, kit } = await withKit(['A', 'B']);
+    await page.waitFor(() => rows(page).join() === '6.A,7.B,8.Kit,9.Kick', 'the folder in the list');
+
+    expect(dragRows(page, 'A', 'Kit', 'after')).toBe('A → in Kit');
+    await done(page, 'Move A');
+    await page.waitFor(() => rows(page).join() === '6.B,7.Kit,8.A,9.Kick', 'A first in Kit');
+    expect(folderOf(engine, 'A')).toBe(kit.id);
+    expect(engine.requests.filter((r) => r.path.endsWith('/move_to_folder')).at(-1)!.data).toEqual({ session_uid: 'abc', after_uids: ['A'], folder_uid: kit.id, before_uid: kit.id });
+
+    expect(dragRows(page, 'B', 'Kick', 'before')).toBe('B → in Kit');
+    await done(page, 'Move B');
+    await page.waitFor(() => rows(page).join() === '6.Kit,7.A,8.B,9.Kick', 'B just above Kick, in Kit');
+    expect(folderOf(engine, 'B')).toBe(kit.id);
+    // The routing follows: a summing folder is its tracks' bus.
+    await page.waitFor(() => engine.value('/sessions/abc/tracks/B/outputs/main', 'assignments') !== undefined, 'routing');
+    expect((engine.value('/sessions/abc/tracks/B/outputs/main', 'assignments') as Array<{ value: string }>)[0]!.value).toBe(kit.id);
+    page.close();
+  });
+
+  it("below a folder's last row, the pointer's x picks in the folder or after it", async () => {
+    const { engine, page, kit } = await withKit(['A', 'B']);
+    await page.waitFor(() => rows(page).join() === '6.A,7.B,8.Kit,9.Kick', 'the folder in the list');
+    expect(dragRows(page, 'A', 'Kick', 'after', 40)).toBe('A → in Kit');       // one level in
+    await done(page, 'Move A');
+    await page.waitFor(() => rows(page).join() === '6.B,7.Kit,8.Kick,9.A', 'A last in Kit');
+    expect(folderOf(engine, 'A')).toBe(kit.id);
+
+    expect(dragRows(page, 'B', 'A', 'after', 10)).toBe('B → top level');       // left: out of Kit
+    await done(page, 'Move B');
+    await page.waitFor(() => rows(page).join() === '6.Kit,7.Kick,8.A,9.B', 'B after the whole folder');
+    expect(folderOf(engine, 'B')).toBeNull();
+
+    // And out again: A from inside Kit to the top level, by dropping it above B.
+    dragRows(page, 'A', 'B', 'before');
+    await done(page, 'Move A');
+    await page.waitFor(() => rows(page).join() === '6.Kit,7.Kick,8.A,9.B' && folderOf(engine, 'A') === null, 'A out of Kit');
+    page.close();
+  });
+
+  it('moves a folder with its contents into another folder, never into itself, with a selection with gaps', async () => {
+    const { engine, page, session, kit } = await withKit(['A', 'B']);
+    const band = await session.newFolder({ name: 'Band' });
+    await page.waitFor(() => rows(page).join() === '6.A,7.B,8.Kit,9.Kick,10.Band', 'two folders');
+
+    click(page, 'Kit');
+    click(page, 'A', { metaKey: true });
+    // Band is empty and last, so below it x picks the level: one level in is inside Band.
+    expect(dragRows(page, 'Kit', 'Band', 'after', 40)).toBe('2 rows → in Band');
+    await done(page, 'Move 2 rows');
+    await page.waitFor(() => rows(page).join() === '6.B,7.Band,8.A,9.Kit,10.Kick', 'A then Kit (with Kick) first in Band');
+    const kick = session.tracks.items.find((t) => t.name.value === 'Kick')!;
+    expect([folderOf(engine, 'A'), engine.value(`/sessions/abc/buses/${kit.id}`, 'folder_uid'), folderOf(engine, kick.id)]).toEqual([band.id, band.id, kit.id]);
+
+    // Band onto its own contents is no target.
+    click(page, 'Band');
+    dragRows(page, 'Band', 'Kick', 'after');
+    expect(page.text('#status')).toBe('Move 2 rows: done');
+
+    (rowOf(page, 'B')!.querySelector('button[aria-label="Move down B"]') as HTMLButtonElement).click();
+    await done(page, 'Move down B');
+    await page.waitFor(() => rows(page).join() === '6.Band,7.A,8.Kit,9.Kick,10.B', 'B below Band with ▼');
+    page.close();
+  });
+});
+
 describe('examples/addon', () => {
   it('runs in a real DOM too, not just the hand-rolled shim', async () => {
     const engine = engineWithSession(['Vocal']);

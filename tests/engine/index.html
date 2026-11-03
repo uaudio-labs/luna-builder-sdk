@@ -57,11 +57,10 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
     return `${session.tracks.items.length} tracks, ${session.buses.items.length} buses, ${session.playlists.items.length} playlists`;
   });
   await step('new track via push', async () => {
-    const reply = await session.newTrack({ name: 'Lane Vocal' });
-    await sleep(600);
+    const [made] = await session.newTrack({ name: 'Lane Vocal' });
     track = session.visibleTracks[0];
-    assert(track, 'track appeared; reply ' + JSON.stringify(reply));
-    assert(track.id === reply.uid, 'uid ' + track.id + ' vs ' + reply.uid);
+    assert(track, 'track appeared');
+    assert(track === made, 'uid ' + track.id + ' vs ' + made.id);
     assert(track.name.value === 'Lane Vocal', 'name ' + track.name.value);
     return track.id;
   });

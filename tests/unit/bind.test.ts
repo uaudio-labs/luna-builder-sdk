@@ -7,6 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import { Luna } from '../../src/index';
 
+/** Where LUNA's +12 taper puts 0 dB: the mock's resting fader (fact 134). */
+const ZERO_DB = Luna.Taper.named('+12')!.toNormalized(0);
+
 async function strip() {
   const engine = new Luna.MockEngine();
   engine.addSession('abc', { tracks: ['Vocal', 'Bass'], name: 'Demo' });
@@ -113,7 +116,7 @@ describe('Luna.bindRange', () => {
     a.dispatchEvent(new MouseEvent('dblclick'));
     b.dispatchEvent(new MouseEvent('dblclick'));
     await settle();
-    expect(engine.value(gain.path, 'normalized_value')).toBe(0.78);
+    expect(engine.value(gain.path, 'normalized_value')).toBe(ZERO_DB);
     expect(engine.value(pan.path, 'normalized_value')).toBe(0.1);
   });
 
@@ -211,7 +214,7 @@ describe('Luna.bindDrag', () => {
 
     knob.dispatchEvent(new MouseEvent('dblclick'));
     await settle();
-    expect([engine.value(pan.path, 'normalized_value'), engine.value(gain.path, 'normalized_value')]).toEqual([0.5, 0.78]);
+    expect([engine.value(pan.path, 'normalized_value'), engine.value(gain.path, 'normalized_value')]).toEqual([0.5, ZERO_DB]);
   });
 });
 
@@ -230,7 +233,7 @@ describe('Luna.Bindings', () => {
     engine.setValue(gain.path, 'normalized_value', 0.4);
     engine.setValue(gain.path, 'string_value', '-9.0');
     await settle();
-    expect([names, extra, fader.value]).toEqual([0, 1, '780']);
+    expect([names, extra, fader.value]).toEqual([0, 1, String(ZERO_DB * 1000)]);
 
     group.on(pan.display, () => names++);
     engine.setValue(pan.path, 'string_value', 'L10');
@@ -259,11 +262,11 @@ describe('Luna.Bindings', () => {
     expect(runs).toEqual([]);
     window.dispatchEvent(new Event('blur'));
     await Promise.all([first, second]);
-    expect(runs).toEqual(['second:780:false:false']);
+    expect(runs).toEqual([`second:${ZERO_DB * 1000}:false:false`]);
     expect(group.busy).toBe(false);
 
     await group.whenIdle(() => void runs.push('now'));
-    expect(runs).toEqual(['second:780:false:false', 'now']);
+    expect(runs).toEqual([`second:${ZERO_DB * 1000}:false:false`, 'now']);
     await settle();
     expect(engine.touches.filter((t) => t.endsWith(':on')).length).toBe(2);
   });

@@ -73,7 +73,7 @@ await t.seek({ bar: 1 });               // downbeat of bar 1; also { bar, beat, 
 await t.returnToZero();                 // LUNA's Return To Zero: the arrangement start
 await t.setLoop(0, Luna.WHOLE_NOTE * 8); await t.looping.set(true);
 t.tick; t.seconds;                      // playhead: ticks, and wall-clock seconds via the tempo map
-t.tempo.value; t.timeSignature.value;   // at the playhead, from location pushes; notify only on change
+t.tempo.value; t.timeSignature.value;   // at the playhead only (location pushes); for tempo edits use session.musical.timeline.onChange
 Luna.formatMinSec(t.seconds, { fraction: 1 });    // "01:30.5": zero-padded, floored, negatives clamp to 0
 Luna.formatTimeSignature(t.timeSignature.value);  // "4/4"; "-/-" until loaded
 const release = Luna.bindClock(clockEl, t);       // smooth MM:SS.s clock while playing
@@ -93,11 +93,11 @@ Ticks: `Luna.TICKS_PER_BEAT` (96e9), `Luna.WHOLE_NOTE`, `Luna.QUARTER_NOTE`, ...
 
 ```js
 session.visibleTracks;                  // user tracks in order (hides LUNA's click/count_in)
-session.master;                         // the master bus
+session.master; session.folders;       // the master bus; folder tracks: newFolder(), moveToFolder()
 const track = session.tracks.byId(uid);
 await track.loadStrip();                // track props + main output controls in two requests
 track.trackType.value; track.color.value; track.recordEnabled.value;
-await session.newTrack({ name: 'Bass', trackType: 'audio', stemFormat: 'mono' });
+const [bass] = await session.newTrack({ name: 'Bass', trackType: 'audio', stemFormat: 'mono' });   // the new Track(s)
 await track.delete();
 ```
 
@@ -106,7 +106,7 @@ Controls have three views of one value plus a display string:
 ```js
 track.gain.display.value;               // "0.0"
 track.gain.normalized.value;            // 0..1
-track.gain.real.value;                  // dB
+track.gain.real.value;                  // dB; track.gain.taper.value maps dB ↔ normalized, .marks() for hash marks
 await track.gain.real.set(-6);          // one-shot: touch-bracketed for undo/automation
 await track.mute.toggle(); track.mute.on;   // switches
 await track.pan.resetToDefault();       // LUNA's default (centre); for double-click-to-reset
@@ -149,7 +149,7 @@ const pl = session.playlistFor(track);  // the active take lane
 await pl.clips.load();
 for (const c of pl.clips.items) c.start.value, c.stop.value;     // ticks
 c.sourceStart.value, c.sourceStop.value;                         // nanoseconds into the file
-await session.insertClip({ trackUid, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });
+const clip = await session.insertClip({ trackUid, sourceUid, startTick: 0, stopTick: Luna.WHOLE_NOTE });   // the new Clip; copyOf: c copies one
 await c.trim(a, b); await c.move(b); await c.split(a); await c.slip(10e6); await c.setMuted(true); await c.delete();   // one undo step each (fact 117)
 await c.setFadeIn(Luna.QUARTER_NOTE, { shape: 'equal_power' }); await c.crossfade(next, Luna.EIGHTH_NOTE); await c.addNote(60, 0, Luna.QUARTER_NOTE);
 await c.addNotes([60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })));  // one undo step

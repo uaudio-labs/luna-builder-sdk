@@ -95,7 +95,7 @@ describe('MockEngine / MockPort', () => {
     const seen: Event[] = [];
     port.subscribe('/sessions/abc/tracks', (e) => seen.push(e));
     const reply = await port.post('/sessions/abc/new_track', { name: 'Vocal' });
-    expect(reply).toEqual({ track_uid: 't1' });
+    expect(reply).toEqual({ uid: 't1' });
     await engine.settled();
     const direct = () => seen.filter((e) => e.path === '/sessions/abc/tracks/t1');
     expect(direct()).toEqual([{ path: '/sessions/abc/tracks/t1', data: undefined, operation: 'added' }]);

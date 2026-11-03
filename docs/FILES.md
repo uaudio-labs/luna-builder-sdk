@@ -22,6 +22,24 @@ reference-track player. Use it too when in doubt; it is the one that works every
 there are many: the engine reads the disk itself, so nothing is base64-copied through the
 page (fact 42). It is an optimization, not a way to read files.
 
+## Add a file to the session without a clip
+
+Both routes add a file to the session's package as an audio source **without putting a clip
+on the timeline**. The source is listed in `session.sources`, as files imported in LUNA
+are. Place it later, or never:
+
+```js
+const source = file
+  ? await session.uploadFile({ bytes: file })   // File route: <input type="file"> or an HTML drop, in LUNA or a browser
+  : await session.importPath(path);             // Path route: luna.gui.chooseFiles() or Luna.onPathDrop(), in LUNA
+
+// Only if and when you want it on a track:
+await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
+```
+
+Each resolves once the session lists the new source. `session.importFile(path)` is
+different: it runs LUNA's File > Import, which always makes a clip.
+
 ## What each one takes
 
 | Method | Takes | Makes | Needs |

@@ -58,6 +58,49 @@ describe('Luna.Effect and Luna.Plugins', () => {
     expect(engine.requests.at(-1)?.path).toBe(`${slot!.path}/commands/preset_browser_increment`);
   });
 
+  it('reads and writes IN/OUT with LUNA\'s polarity: zero is IN unless the control is active low (fact 29)', async () => {
+    const { engine, session } = await connected();
+    const track = session.tracks.byId('Vocal')!;
+    await track.effects.load();
+    const slot = (await track.insert('com.uaudio.uadx.1176'))!;
+    await slot.controls.load();
+    const raw = () => engine.value(`${slot.path}/controls/bypass`, 'value');
+    const reads = async (activeLow: boolean | null, value: number) => {
+      engine.setValue(slot.path, 'bypass_control_active_low', activeLow);
+      engine.setValue(`${slot.path}/controls/bypass`, 'value', value);
+      await engine.settled();
+      return slot.in.value;
+    };
+
+    // The truth table of MxClnt_EffectData::GetEffectInOut.
+    expect(await reads(false, 0)).toBe(true);
+    expect(await reads(false, 1)).toBe(false);
+    expect(await reads(true, 1)).toBe(true);
+    expect(await reads(true, 0)).toBe(false);
+    expect(await reads(null, 0)).toBe(true); // unreported polarity defaults to false, as in LUNA
+    expect(await reads(null, 1)).toBe(false);
+
+    // A plugin starts IN, and set_inserts_in_out writes the raw value the polarity calls for.
+    for (const activeLow of [false, true]) {
+      engine.setValue(slot.path, 'bypass_control_active_low', activeLow);
+      await slot.setIn(true);
+      await engine.settled();
+      expect([raw(), slot.in.value]).toEqual([activeLow ? 1 : 0, true]);
+      await slot.setIn(false);
+      await engine.settled();
+      expect([raw(), slot.in.value]).toEqual([activeLow ? 0 : 1, false]);
+    }
+  });
+
+  it('starts a newly loaded plugin IN', async () => {
+    const { session } = await connected();
+    const track = session.tracks.byId('Vocal')!;
+    await track.effects.load();
+    const slot = (await track.insert('com.uaudio.uadx.1176'))!;
+    await slot.controls.load();
+    expect(slot.in.value).toBe(true);
+  });
+
   it('lists live parameters only: a cleared slot keeps its old ones as ghosts (fact 86)', async () => {
     const { engine, session } = await connected();
     const track = session.tracks.byId('Vocal')!;
@@ -930,7 +973,7 @@ describe('Clip snapshot, layer and mute; Meter streams and max', () => {
     engine.addSource('pkg_abc', 'src1', { lengthNs: 1_000_000_000 });
     const playlist = session.playlistFor(session.tracks.byId('Vocal')!)!;
     await playlist.clips.load();
-    const { uid } = (await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, name: 'Take', clipType: 'audio' })) as { uid: string };
+    const { id: uid } = await session.insertClip({ trackUid: 'Vocal', sourceUid: 'src1', startTick: 0, stopTick: Luna.WHOLE_NOTE, name: 'Take', clipType: 'audio' });
     await Luna.settle(() => playlist.clips.byId(uid)?.start.value !== undefined, 'insert');
     const clip = playlist.clips.byId(uid)!;
     await clip.load();

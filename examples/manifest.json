@@ -76,6 +76,18 @@
             "height": 900
         },
         {
+            "id": "com.uaudio.builder.folders",
+            "title": "Folder tracks (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "folders.html",
+            "local_content_offset": "..",
+            "width": 1000,
+            "height": 720
+        },
+        {
             "id": "com.uaudio.builder.secrets",
             "title": "Secrets (Builder)",
             "version": "0.1.0",
@@ -158,6 +170,18 @@
             "local_content_offset": "..",
             "width": 1200,
             "height": 420
+        },
+        {
+            "id": "com.uaudio.builder.order",
+            "title": "Track order (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "order.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
         },
         {
             "id": "com.uaudio.builder.pianoroll",

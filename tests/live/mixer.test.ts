@@ -184,6 +184,25 @@ describe.skipIf(!live)('live: mixer', () => {
     }
   });
 
+  it('reads a newly loaded plugin as IN, and follows a bypass and back (fact 29)', async () => {
+    await mono.effects.load();
+    const slot = mono.effectSlots.filter((e) => e.isEmpty).at(-1);
+    if (!slot) return console.log('fact 29 skipped: no empty insert slot on the mono track');
+    try {
+      await slot.setPlugin(PLUGIN);
+      await slot.controls.load();
+      if (!slot.bypassControl.value) return console.log(`fact 29 skipped: ${PLUGIN} has no bypass control`);
+      await Luna.settle(() => slot.in.value !== undefined, 'read IN');
+      expect(slot.in.value).toBe(true); // a plugin loads IN, and is processing
+      await slot.setIn(false);
+      await Luna.settle(() => slot.in.value === false, 'bypass');
+      await slot.setIn(true);
+      await Luna.settle(() => slot.in.value === true, 'back IN');
+    } finally {
+      await slot.clear().catch(() => undefined);
+    }
+  });
+
   it('meters a stereo channel with two streams, subscribed only while listened to', async () => {
     const meter = session.master!.meter;
     const stop = meter.onChange(() => undefined);

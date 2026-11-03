@@ -3,6 +3,36 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 3.1.1 Beta 2 — 2026-11-03
+
+- **Breaking:** `session.newTrack()` now resolves to the new `Luna.Track[]` and
+  `session.insertClip()` to the new `Luna.Clip`, loaded, instead of LUNA's raw reply. Use
+  `const [track] = await session.newTrack(...)` and `track.id` / `clip.id`. Inside a batch
+  transaction both resolve at once, with props filled in at the commit.
+- **Breaking:** tempo reads (`tempoAt`, `timeline.seconds`, `tickAtSeconds`) throw
+  `unavailable` until the tempo map has loaded, instead of silently assuming 120 BPM. New
+  `timeline.tempoLoaded` says when they can answer. To follow tempo edits, use
+  `timeline.onChange`; `transport.tempo` follows only the playhead.
+- `session.insertClip()` can set a clip's `layer`, what its length follows on a tempo change
+  (`lengthFollows`) and its time-stretch algorithm (`algType`), or copy another clip
+  (`copyOf`).
+- **Fader tapers:** new `Luna.Taper` and `control.taper` give LUNA's own dB ↔ fader-position
+  tables and the dB values its mixer draws hash marks at, following LUNA when a summing console
+  changes a fader's taper. `Luna.MockEngine` uses the same tables, so mock faders rest at
+  0.7818 (was 0.78).
+- **Folder tracks:** `session.newFolder()` makes a summing or container folder track,
+  `session.moveToFolder()` moves tracks and folders in and out, `bus.setFolderMode()` changes
+  a folder's mode, and `session.folders` / `session.folderContents()` read the hierarchy. New
+  example `examples/folders.html`.
+- **Track order:** `session.channelsInOrder` lists tracks and buses in LUNA's order, and
+  `session.reorder()` moves them; new example `examples/order.html`. `Luna.MockEngine` now
+  numbers `order` as LUNA does, across tracks and buses together.
+- `docs/FILES.md` shows how to add a file to the session as a source without putting a clip on
+  the timeline (`session.uploadFile` or `session.importPath`), and place it later.
+- **Fixed:** `effect.in` read plugins as bypassed while they were IN and processing (and
+  bypassed ones as IN). It now follows LUNA's bypass polarity; `effect.setIn()` was already
+  right.
+
 ## 3.1.1 Beta 1 — 2026-10-30
 
 - **Breaking:** `session.preferences` is now `session.storage`, with records and fields in place of
