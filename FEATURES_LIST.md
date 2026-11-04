@@ -89,6 +89,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Set velocities, mute notes and delete notes, each one undo step, with LUNA's selection put
   back.
 - Create notes on a lane, making the clip when none is under them.
+- Read a clip's SysEx rows with their whole message (`MidiRow.sysex`).
+- Move SysEx and controller rows by row id, one undo step (`midi.moveEvents`).
 
 ## Live MIDI
 
@@ -100,6 +102,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Send MIDI out of a device's MIDI out to hardware.
 - Receive live MIDI from hardware (`Luna.MidiInput`): every message, or only notes or
   controllers, from one device or all of them.
+- MIDI SysEx: receive whole SysEx messages from hardware (`MidiInput.onSysEx`) and send them
+  out of a device's MIDI out (`SendMidi.sendSysExToOutput`).
 
 ## Recording
 
@@ -174,8 +178,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Window, editor (docked under the Timeline), browser and app Add Ons.
 - Floating windows and windows that open with the session.
 - A manifest with name, description, size and the minimum LUNA version the Add On needs.
-- Windows of a fixed size (`fixed_size`), and pages that keep running while hidden
-  (`run_hidden`).
+- Windows of a fixed size (`fixed_size`), pages that keep running while hidden
+  (`run_hidden`), and pages unloaded when closed (`unload_on_close`).
 
 ## Escape hatch
 
@@ -214,4 +218,4 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
   and recipes.
 - Example pages for an arrangement view, clip editor, mixer, inserts, presets, track presets,
   sends, automation, ruler, bounce and export, files, folder browsing, import, MIDI input,
-  piano roll and secrets.
+  piano roll, SysEx and secrets.

@@ -143,4 +143,38 @@ describe('Luna.MidiInput', () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.type).toBe('noteOn');
   });
+
+  it('delivers whole SysEx messages to onSysEx, in order with channel messages (fact 138)', async () => {
+    const { engine, device, input } = await connected();
+    const all: Luna.MidiInputMessage[] = [];
+    const dumps: number[][] = [];
+    input.listen(device('Volt 876'), (m) => all.push(m), { sysex: true });
+    input.onSysEx(device('Volt 876'), (bytes) => dumps.push([...bytes]));
+    await engine.settled();
+    engine.receiveMidi('volt', [[0x90, 60, 100], [0xf0, 0x43, 0x10, 0x4c, 0xf7], [0x80, 60, 0]], { timeMs: 5, stepMs: 5 });
+    await engine.settled();
+    expect(all.map((m) => m.type)).toEqual(['noteOn', 'sysex', 'noteOff']);
+    expect(all[1]).toMatchObject({ status: 0xf0, channel: -1, data1: 0, data2: 0, time: 10, sysex: [0xf0, 0x43, 0x10, 0x4c, 0xf7] });
+    expect(all[0]!.sysex).toBeUndefined();
+    expect(dumps).toEqual([[0xf0, 0x43, 0x10, 0x4c, 0xf7]]);
+  });
+
+  it('keeps SysEx from handlers that did not ask for it', async () => {
+    const { engine, device, input } = await connected();
+    const got: Luna.MidiInputType[] = [];
+    input.listen(device('Volt 876'), (m) => got.push(m.type));
+    await engine.settled();
+    engine.receiveMidi('volt', [[0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7], [0xb0, 7, 100]]);
+    await engine.settled();
+    expect(got).toEqual(['controlChange']);
+  });
+
+  it('decodeMidiEvents reads SysEx only when asked, and skips malformed SysEx', () => {
+    const port = {} as Luna.MidiPort;
+    const events = [[0, 0xf0, [0xf0, 0x01, 0xf7]], [1, 0xf0, [0xf0, 0x80, 0xf7]], [2, 0xf0, [0x01, 0xf7]], [3, 0xf0, 'x'], [4, 0xf0, [0xf0, 0xf7]]];
+    expect(Luna.decodeMidiEvents(events, port)).toEqual([]);
+    const out = Luna.decodeMidiEvents(events, port, true);
+    expect(out.map((m) => m.sysex)).toEqual([[0xf0, 0x01, 0xf7], [0xf0, 0xf7]]);
+    expect(Object.isFrozen(out[0]!.sysex)).toBe(true);
+  });
 });

@@ -35,11 +35,11 @@ describe.skipIf(!live)('live: install Add On', () => {
   });
 
   it('refuses to remove an unknown id or a marketplace repo\'s package', async () => {
-    await expect(luna.gui.removeImportedAddOn('com.example.not-in-the-marketplace')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.removeAddOn('com.example.not-in-the-marketplace')).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
     const packages = await luna.raw.get('/gui/marketplace/packages', { children: true, flatvalue: true });
     const own = Object.values((packages as { children?: Record<string, { properties?: { id?: string; import_url?: string } }> }).children ?? {})
       .map((c) => c.properties)
       .find((p) => p?.id && !p.import_url);
-    if (own?.id) await expect(luna.gui.removeImportedAddOn(own.id)).rejects.toMatchObject({ code: 'uasrv.not_permitted' });
+    if (own?.id) await expect(luna.gui.removeAddOn(own.id)).rejects.toMatchObject({ code: 'uasrv.not_permitted' });
   });
 });

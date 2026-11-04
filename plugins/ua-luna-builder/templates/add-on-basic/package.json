@@ -1,0 +1,19 @@
+{
+  "name": "__SLUG__",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "__TITLE__, a LUNA Add On built with @uaudio/luna-builder-sdk",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "serve": "ua-builder serve",
+    "install-addon": "ua-builder install",
+    "pack": "ua-builder pack"
+  },
+  "devDependencies": {
+    "@uaudio/luna-builder-sdk": "file:__BUILDER_PATH__",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  }
+}

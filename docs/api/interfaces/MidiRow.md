@@ -15,4 +15,5 @@ accepted when writing.
 | <a id="enabled"></a> `enabled` | `readonly` | `boolean` | `false` is LUNA's per-note mute on a note-on row. |
 | <a id="rowid"></a> `rowid` | `readonly` | `number` | The engine's row id: this row's identity, stable across moves and trims. |
 | <a id="status"></a> `status` | `readonly` | `number` | Status byte with the channel in it: `0x90`-`0x9f` note on, `0xb0`-`0xbf` CC, and so on. |
+| <a id="sysex"></a> `sysex?` | `readonly` | readonly `number`[] | A SysEx row's whole message, `0xf0` through `0xf7` (`status` is `0xf0`, `data1` and `data2` are 0); `undefined` on every other row, and on LUNA builds without SysEx (fact 139). |
 | <a id="tick"></a> `tick` | `readonly` | `number` | Ticks from the clip's start (fact 41), `TICKS_PER_BEAT` per quarter note. |

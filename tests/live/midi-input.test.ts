@@ -1,5 +1,6 @@
 /**
- * Live lane: live MIDI input from a device's input port `midi_events` (fact 125). Needs native
+ * Live lane: live MIDI input from a device's input port `midi_events` (facts 125 and 138), and
+ * SysEx sent out of a device (fact 140). Needs native
  * LUNA on ws://localhost:4718 and a MIDI loopback: set `UA_MIDI_LOOPBACK` to the name of a
  * device whose MIDI out comes back on its MIDI in (on macOS, an IAC Driver bus). The test
  * sends notes out of that device and expects them back on its input port; it plays nothing
@@ -80,6 +81,46 @@ describe.skipIf(!live || !loopback)('live: MIDI input', () => {
     await midi.sendNoteToOutput(device, 70, 0, false, 3);
     await pause(300);
     expect(mine.length).toBe(before);
+  });
+
+  it('facts 138 and 140: a SysEx sent out of the loopback comes back whole, in order with notes', async () => {
+    const input = new Luna.MidiInput(luna);
+    const midi = new Luna.SendMidi(luna);
+    const got: Luna.MidiInputMessage[] = [];
+    const plain: Luna.MidiInputType[] = [];
+    const stop = input.listen(device, (m) => got.push(m), { sysex: true });
+    const stopPlain = input.listen(device, (m) => plain.push(m.type));
+    await pause(200);
+
+    const identity = [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7];
+    const short = [0xf0, 0x41, 0xf7];
+    // 2000 bytes: many 3-byte pieces inside LUNA, and more than one CoreMIDI packet.
+    const dump = [0xf0, 0x43, ...Array.from({ length: 1997 }, (_, i) => i % 128), 0xf7];
+    await midi.sendNoteToOutput(device, 60, 100, true);
+    await midi.sendSysExToOutput(device, identity);
+    await midi.sendSysExToOutput(device, short);
+    await midi.sendSysExToOutput(device, dump);
+    await midi.sendNoteToOutput(device, 60, 0, false);
+    await waitFor(() => got.length >= 5, 5000);
+    await pause(200);
+    stop();
+    stopPlain();
+    console.log('received', got.map((m) => (m.type === 'sysex' ? `sysex:${m.sysex!.length}` : `${m.type}:${m.data1}`)).join(' '));
+
+    expect(got.map((m) => m.type)).toEqual(['noteOn', 'sysex', 'sysex', 'sysex', 'noteOff']);
+    expect(got[1]!.sysex).toEqual(identity);
+    expect(got[2]!.sysex).toEqual(short);
+    expect(got[3]!.sysex).toEqual(dump);
+    expect(got[1]).toMatchObject({ status: 0xf0, channel: -1 });
+    expect(got.every((m, i) => i === 0 || m.time >= got[i - 1]!.time)).toBe(true);
+    // A listener that did not ask for SysEx saw only the notes.
+    expect(plain).toEqual(['noteOn', 'noteOff']);
+  });
+
+  it('fact 140: LUNA refuses a SysEx sent to a track', async () => {
+    await expect(luna.raw.post('/sessions/send_midi', { session_uid: '00000000000000000000000000000000', track_uid: 'x', sysex: [0xf0, 0xf7] })).rejects.toMatchObject({
+      code: 'uasrv.invalid_property',
+    });
   });
 
   it('fact 125: MIDI fed in with send_midi by device name is not echoed', async () => {

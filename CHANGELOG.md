@@ -2,6 +2,37 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## Unreleased
+
+Changed (breaking)
+- `luna.gui.removeImportedAddOn(id)` is now `luna.gui.removeAddOn(id)`, and posts LUNA's
+  renamed `/gui` `remove_add_on` command. It takes the same argument and behaves the same;
+  rename your calls.
+
+Added
+- Manifest `unload_on_close` (boolean, default `false`) for `"window"`, `"browser"` and
+  `"editor"` Add Ons: with `true` closing the Add On unloads its page, releasing a microphone,
+  audio or timers it held, and opening it again loads the page fresh. Closing is the window's
+  close button or menu toggle, a `show_with_session` window's session closing, and the
+  secondary browser or editor panel closing or moving on; Hide Floating Windows and
+  minimizing only hide the page. `ua-builder` rejects a non-boolean, and
+  `Luna.AddOn.unloadOnClose` reads it. Needs a LUNA that reads the field; an older one ignores
+  it and keeps the page loaded.
+- MIDI SysEx, on LUNA builds that have it. `Luna.MidiInput` delivers whole SysEx messages from
+  hardware: `input.onSysEx(device, (bytes) => ...)`, or `sysex: true` in `listen`'s options
+  for `type: 'sysex'` messages in order with the rest. Handlers that do not ask never see one
+  (fact 138). A clip's `MidiRow` has `sysex`, the message of a SysEx row (fact 139).
+  `SendMidi.sendSysExToOutput(device, bytes)` sends one out of a MIDI output port, and checks it
+  first: `0xf0`, data bytes 0-127, `0xf7`, at most `Luna.MAX_SYSEX_BYTES` (fact 140).
+  `Luna.MockEngine.receiveMidi` takes a SysEx message, and `midiEdit` a `sysex` row.
+  `examples/sysex.html` is a small SysEx librarian: log, hex dump, send hex, a `.syx` file or an
+  Identity Request, with the reply decoded.
+- `clip.midi.moveEvents(rows, byTicks)` moves MIDI rows other than notes (SysEx, CC, program
+  change, pitch bend, aftertouch) by row id, in one post and one undo entry, keeping each row's
+  id and bytes (fact 141). It refuses a note row, a row not in the clip, a fractional offset and
+  a move before the clip's MIDI origin before sending anything. Needs a LUNA with the
+  `move_midi_events` command; an older one answers with an error. `Luna.MockEngine` models it.
+
 ## 3.1.1 Beta 2
 
 Changed (breaking)

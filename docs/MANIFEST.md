@@ -6,7 +6,7 @@ folder, their identity, their page and how they open. `ua-builder new` writes on
 
 This page describes what LUNA does with the manifest. `ua-builder` is stricter: it refuses
 to install or pack a manifest that LUNA would partly drop or silently correct (a missing
-required field, an unknown `target`, a `floating`, `show_with_session`, `fixed_size` or `run_hidden` that is not a boolean, a
+required field, an unknown `target`, a `floating`, `show_with_session`, `fixed_size`, `run_hidden` or `unload_on_close` that is not a boolean, a
 `manufacturer` that is not a string, a `description` that is not a string or array of strings, an `html` file that does not exist), so you see the problem before LUNA does.
 
 ## Where it lives
@@ -92,6 +92,7 @@ size; see `width`, `height` below.
 | `show_with_session` | boolean | `false` | `"window"` only: show the window, and enable its menu item, only while a session is open. See below. |
 | `fixed_size` | boolean | `false` | `"window"` only: the window always opens at `width` x `height` and the user cannot resize, maximize or zoom it, or make it full screen. See below. |
 | `run_hidden` | boolean | `false` | The page keeps running at full speed while it is hidden: timers are not slowed and the page is not suspended. For Add Ons that keep time, such as a sequencer. See below. |
+| `unload_on_close` | boolean | `false` | `"window"`, `"browser"` and `"editor"`: closing the Add On unloads its page, and opening it again loads it fresh, instead of keeping it running hidden. For Add Ons that hold the microphone, play audio or should reopen on their first screen. See below. |
 | `version` | string | none | The Add On's own semver. LUNA reads it; a non-string value is ignored and never drops the entry. |
 | `manufacturer` | string | none | Who makes the Add On: your company or your own name. LUNA shows it in the **MANUFACTURER** column of **Settings > Add Ons**, where it also sorts and is matched by the search field; the column is blank without it. LUNA reports it as the `manufacturer` property under `/gui/add_ons/<id>` (`manufacturer` on `luna.gui.addOns` items in the SDK), `""` when there is none. A non-string value is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value that is not a string is ignored. |
 | `description` | string or string[] | none | What the Add On does. An array of strings is concatenated with no separator, so a long description can be split across lines of JSON; the text carries its own line breaks: write `\n` where a new line should start (`["First sentence. ", "Second sentence.\n", "A new line."]`). LUNA reports the concatenated text as the `description` property under `/gui/add_ons/<id>` (`description` on `luna.gui.addOns` items in the SDK), `""` when there is none. It is not yet shown in LUNA's UI. Any other value, including an array holding something that is not a string, is ignored and never drops the entry. `ua-builder` rejects it. In the `add_ons` shape it can also go at the top level, describing the Add Ons together, where it is the default for every entry without one of its own; an entry's own value wins. A top-level value LUNA cannot read is ignored. |
@@ -115,7 +116,7 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
   is showing closes the panel. The item is check-marked while it is showing. The panel's width
   is LUNA's and the user's to set; `width` and `height` are not needed and not used. Only one browser Add On
   shows at a time. When the panel moves on to something else, your page stays loaded (it keeps
-  running, hidden); it reloads only when another browser Add On takes the panel. Which browser
+  running, hidden), unless it sets `unload_on_close`; it reloads only when another browser Add On takes the panel. Which browser
   Add On is showing is saved with the session: reopening the session shows it again (if it is
   still installed), and a session that was not showing one opens without it.
 - **`"editor"`**: the editor panel docked at the bottom of the Timeline, in place of LUNA's
@@ -137,7 +138,7 @@ LUNA lists every Add On in its **Add Ons** menu, in one submenu per target: **Ap
     the selection through the SDK.
   - Your page loads the first time the panel shows it. It stays loaded (it keeps running,
     hidden) while the panel is closed or shows the Clip Editor, and reloads only when another
-    editor Add On takes the panel.
+    editor Add On takes the panel. With `unload_on_close` it is unloaded instead.
   - Which editor Add On the panel holds is saved with the session: reopening the session
     shows it again (if it is still installed, and open if the panel was open), and a new
     session opens on the Clip Editor.
@@ -176,7 +177,8 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 - Whether the user had it open is remembered across sessions and across LUNA launches. A
   window open when LUNA quit reopens when the next session opens, not at launch.
 - Hiding the window because the session closed does not close it: its page stays loaded,
-  so its scripts keep running and should cope with there being no session.
+  so its scripts keep running and should cope with there being no session. With
+  `unload_on_close` the page is unloaded here too, and loads fresh when the session opens.
 - `false` (the default): the window and its menu item do not depend on a session.
 - A value that is not a boolean is ignored, so the default applies. `ua-builder` rejects it.
 - It has no effect on `"app"`, `"browser"` or `"editor"` entries.
@@ -219,12 +221,41 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
   `luna.gui.addOns` items in the SDK). A LUNA that predates `run_hidden` ignores it, and the
   page sleeps when hidden.
 
+`unload_on_close`:
+
+- By default LUNA keeps an Add On's page loaded when the user closes it, so it reopens at
+  once, where the user left it. Until then the page keeps running hidden: a microphone it
+  opened stays open, audio it plays keeps playing, its timers keep firing (slowed, unless
+  `run_hidden`).
+- `true`: closing the Add On unloads its page, as if the tab were closed, which releases
+  everything the page held. Opening it again loads the page fresh, from its first screen.
+  LUNA removes the page's web view as it hides it, so do not count on `pagehide`,
+  `beforeunload` or `visibilitychange` running first: save what must survive as it changes
+  (session storage, or LUNA itself).
+- What counts as closing it:
+  - `"window"`: its close button, Close Window, choosing its menu item while the window is in
+    front, and, for a `show_with_session` window, the session closing.
+  - `"browser"`: the secondary browser closing, or moving on to another browser Add On or to
+    something else (Media, Markers, Lyrics).
+  - `"editor"`: the editor panel closing, or going back to the Clip Editor or to another
+    editor Add On.
+- What does not: **Hide Floating Windows** (or LUNA hiding floating windows as its page
+  changes), minimizing the window, another LUNA page in front, and LUNA's window being
+  covered. The page stays loaded and is only hidden; `document.visibilityState` tells it so.
+- It has no effect on `"app"` entries: closing one already unloads its page.
+- It works with `run_hidden`: a page that sets both runs at full speed while hidden but open,
+  and is unloaded when closed.
+- A value that is not a boolean is ignored, so the page stays loaded. `ua-builder` rejects it.
+- LUNA reports it as the `unload_on_close` property under `/gui/add_ons/<id>`
+  (`unloadOnClose` on `luna.gui.addOns` items in the SDK). A LUNA that predates
+  `unload_on_close` ignores it, and the page stays loaded when closed.
+
 `icon`:
 
 - LUNA does not check that the file exists or read it when the manifest loads; a bad path is
   not an error, and an empty string is the same as leaving it out.
 - LUNA reports the resolved absolute path as the `icon` property under `/gui/add_ons/<id>`
-  (next to `id`, `name`, `target`, `floating`, `show_with_session`, `fixed_size`, `run_hidden`, `manufacturer` and `description`), or an empty string when there is none. It is not yet
+  (next to `id`, `name`, `target`, `floating`, `show_with_session`, `fixed_size`, `run_hidden`, `unload_on_close`, `manufacturer` and `description`), or an empty string when there is none. It is not yet
   drawn in LUNA's menus.
 
 `local_content_offset`:

@@ -83,6 +83,24 @@ describe('Luna.MidiClip', () => {
     expect(midi.notes.items[0]).toMatchObject({ pitch: 60, startTick: 0, stopTick: BEAT, velocity: 100 });
   });
 
+  it('reads a SysEx row with its whole message, and keeps it out of notes (fact 139)', async () => {
+    const dump = [0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7];
+    const { engine, clip, midi } = await midiClip([
+      { rowid: 1, tick: 0, status: NOTE_ON, data1: 60, data2: 100 },
+      { rowid: 2, tick: BEAT / 2, sysex: dump },
+      { rowid: 3, tick: BEAT, status: NOTE_OFF, data1: 60, data2: 0 },
+    ]);
+    const sysexRow = midi.events.items.find((e) => e.rowid === 2)!;
+    expect(sysexRow).toMatchObject({ status: 0xf0, data1: 0, data2: 0, tick: BEAT / 2, sysex: dump });
+    expect(Object.isFrozen(sysexRow.sysex)).toBe(true);
+    expect(midi.events.items.find((e) => e.rowid === 1)!.sysex).toBeUndefined();
+    expect(midi.notes.items.map((n) => n.pitch)).toEqual([60]);
+    // A delta from another client carries the column too.
+    engine.midiEdit(clip.path, 'added', [{ rowid: 4, tick: 2 * BEAT, sysex: [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7] }]);
+    await engine.settled();
+    expect(midi.events.items.find((e) => e.rowid === 4)!.sysex).toEqual([0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7]);
+  });
+
   it('follows an added delta from another client', async () => {
     const { engine, clip, midi } = await midiClip();
     expect(midi.notes.items).toHaveLength(0);

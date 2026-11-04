@@ -398,3 +398,35 @@ Send a Program Change out of a MIDI device's output port, after Bank Select MSB 
 ```ts
 await midi.sendProgramChangeToOutput(synth, 5, 0, 12);  // bank 0/12, program 5
 ```
+
+***
+
+### sendSysExToOutput()
+
+```ts
+sendSysExToOutput(output, sysex): Promise<void>;
+```
+
+Send a whole SysEx message out of a MIDI device's output port, to the hardware (fact 140):
+`0xf0`, data bytes 0-127, `0xf7`, at most 64 KB. A message that breaks those rules rejects
+with `out_of_range` before reaching LUNA. As with [sendMidiToOutput](#sendmiditooutput), a port that has
+gone fails silently, and a LUNA build without SysEx answers `uasrv.invalid_property`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `output` | [`MidiOutputTarget`](../type-aliases/MidiOutputTarget.md) |
+| `sysex` | readonly `number`[] \| `Uint8Array`\<`ArrayBufferLike`\> |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.midiDevices.load();
+const synth = luna.midiDevices.items.find((d) => d.name.value === 'DX7');
+if (synth?.outputPort) await midi.sendSysExToOutput(synth, [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7]);  // identity request
+```

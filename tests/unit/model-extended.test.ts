@@ -559,6 +559,7 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     expect(luna.gui.addOns.items[0]!.showWithSession.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.fixedSize.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.runHidden.value).toBe(false);
+    expect(luna.gui.addOns.items[0]!.unloadOnClose.value).toBe(false);
     expect(luna.gui.addOns.items[0]!.manufacturer.value).toBe('Example Co');
     expect(luna.gui.addOns.items[0]!.description.value).toBe('A demo Add On.');
     expect(luna.gui.addOns.items[0]!.version.value).toBe('1.0.0');
@@ -823,15 +824,15 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     engine.marketplace['com.example.pair'] = ['com.example.pair', 'com.example.pair-viewer'];
     engine.importedPackages = ['com.uaudio.qwerty_midi', 'com.example.pair'];
     const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
-    expect(await code(luna.gui.removeImportedAddOn('uaudio-labs.video-window'))).toBe('uasrv.not_permitted');
-    expect(await code(luna.gui.removeImportedAddOn('com.example.nothing'))).toBe('uasrv.invalid_value');
-    expect(await code(luna.gui.removeImportedAddOn(undefined as unknown as string))).toBe('uasrv.missing_field');
-    await luna.gui.removeImportedAddOn('COM.UAUDIO.QWERTY_MIDI');
-    await luna.gui.removeImportedAddOn('com.example.pair-viewer');
+    expect(await code(luna.gui.removeAddOn('uaudio-labs.video-window'))).toBe('uasrv.not_permitted');
+    expect(await code(luna.gui.removeAddOn('com.example.nothing'))).toBe('uasrv.invalid_value');
+    expect(await code(luna.gui.removeAddOn(undefined as unknown as string))).toBe('uasrv.missing_field');
+    await luna.gui.removeAddOn('COM.UAUDIO.QWERTY_MIDI');
+    await luna.gui.removeAddOn('com.example.pair-viewer');
     expect(engine.importedPackages).toEqual([]);
     expect(Object.keys(engine.marketplace)).toEqual(['uaudio-labs.video-window']);
-    engine.fail('/gui/remove_imported_add_on', 'uasrv.invalid_object');
-    await expect(luna.gui.removeImportedAddOn('x')).rejects.toBeInstanceOf(Luna.Unsupported);
+    engine.fail('/gui/remove_add_on', 'uasrv.invalid_object');
+    await expect(luna.gui.removeAddOn('x')).rejects.toBeInstanceOf(Luna.Unsupported);
   });
 
   it('asks to uninstall an Add On by id, refusing one built into LUNA (fact 130)', async () => {

@@ -1,0 +1,203 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA sends</title>
+<!--
+  Every send and cue output of a track: level, pan, mute, pre-fader, enable, meter, where
+  it goes, and a picker that reroutes it. Each change is one undo entry, and the undo queue
+  is shown so you can see that.
+
+  Routing appends rather than replaces (fact 43), so "Route to…" calls retarget(), which
+  batches the delete and the add into one entry. Cue outputs are routed by LUNA and refuse
+  the routing commands, so their rows are read-only here.
+-->
+<script src="../sdk/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #16181b; color: #e6e9ee; font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #262b31; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; }
+  select, button { font: inherit; padding: 4px 9px; border-radius: 6px; border: 1px solid #39404a; background: #23272c; color: inherit; }
+  button { cursor: pointer; }
+  #status { margin-left: auto; opacity: .7; }
+  #undoList { padding: 6px 14px; font-size: 12px; opacity: .6; border-bottom: 1px solid #262b31; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; opacity: .55; margin: 14px 14px 6px; }
+  table { border-collapse: collapse; width: calc(100% - 28px); margin: 0 14px; }
+  th, td { padding: 4px 6px; border-bottom: 1px solid #232830; text-align: left; font-weight: 400; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .5; }
+  .dest.none { opacity: .4; }
+  .dest.error { color: #ff8080; }
+  .db { font-variant-numeric: tabular-nums; opacity: .75; min-width: 52px; display: inline-block; }
+  input[type=range] { width: 90px; vertical-align: middle; }
+  .meter { display: inline-block; width: 60px; height: 8px; background: #23272c; border-radius: 2px; overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: #3fae5a; }
+</style>
+<header>
+  <h1>LUNA sends</h1>
+  <select id="track"></select>
+  <span id="status">connecting…</span>
+</header>
+<div id="undoList"></div>
+<h2>Sends</h2>
+<table>
+  <thead><tr><th>slot</th><th>destination</th><th>level</th><th>pan</th><th>mute</th><th>pre</th><th>on</th><th>meter</th><th>actions</th></tr></thead>
+  <tbody id="sends"></tbody>
+</table>
+<h2>Cue outputs (routed by LUNA)</h2>
+<table>
+  <thead><tr><th>slot</th><th>destination</th><th>level</th><th>pan</th><th>mute</th><th>pre</th><th>on</th></tr></thead>
+  <tbody id="cues"></tbody>
+</table>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  let luna, session, track, offs = [];
+
+  const say = (t) => { $('status').textContent = t; };
+
+  /** The undo queue, read raw: the SDK does not model it. */
+  async function undoText() {
+    try {
+      const q = await luna.raw.get(`${session.path}/undo_queues`, { children: true, levels: 2, commands: false, propfilter: 'name', flatvalue: true });
+      const names = (q?.children ?? []).map((c) => c.properties?.name).filter(Boolean);
+      $('undoList').textContent = `Undo queue (${names.length}): ${names.slice(-6).join(' · ')}`;
+    } catch { $('undoList').textContent = ''; }
+  }
+
+  const run = (label, fn) => async () => {
+    say(`${label}…`);
+    try { await fn(); say(`${label}: done`); await undoText(); }
+    catch (e) { say(`${label} failed: ${e.message}`); }
+  };
+
+  /**
+   * A level or pan slider: touched on press, released on pointer up, one undo entry. It follows
+   * LUNA except mid-drag, and double-click resets it to LUNA's default.
+   */
+  function bindSlider(slider, control) {
+    const binding = Luna.bindRange(slider, control, { onEnd: () => void undoText(), onError: (e) => say(e.message) });
+    return () => binding.dispose();
+  }
+
+  function busMenu() {
+    const sel = document.createElement('select');
+    sel.append(new Option('Route to…', ''));
+    for (const b of session.buses.items) sel.append(new Option(`${b.name.value ?? b.id} (${b.busType.value ?? 'bus'})`, b.id));
+    return sel;
+  }
+
+  function row(send, editable) {
+    const tr = document.createElement('tr');
+    const cell = () => tr.appendChild(document.createElement('td'));
+    const slot = cell(); slot.textContent = send.id;
+    const dest = cell(); dest.className = 'dest';
+
+    const level = cell();
+    const range = Object.assign(document.createElement('input'), { type: 'range', min: 0, max: 1, step: 0.001 });
+    range.setAttribute('aria-label', `${send.id} level`);
+    const db = Object.assign(document.createElement('span'), { className: 'db' });
+    level.append(range, ' ', db);
+
+    // Pan: one control on a mono channel, left and right on a stereo one (fact 84).
+    const panCell = cell();
+    const pans = send.pans.map((c) => {
+      const r = Object.assign(document.createElement('input'), { type: 'range', min: 0, max: 1, step: 0.001 });
+      r.setAttribute('aria-label', `${send.id} ${c.id}`);
+      const txt = Object.assign(document.createElement('span'), { className: 'db' });
+      panCell.append(r, ' ', txt, ' ');
+      offs.push(bindSlider(r, c));
+      return { c, r, txt };
+    });
+
+    const box = (label) => {
+      const td = cell();
+      const input = Object.assign(document.createElement('input'), { type: 'checkbox' });
+      input.setAttribute('aria-label', `${send.id} ${label}`);
+      td.append(input);
+      return input;
+    };
+    const muteBox = box('mute');
+    const preBox = box('pre-fader');
+    const onBox = box('enabled');
+
+    const paint = () => {
+      // Each destination carries the uid unassign() takes; a deleted bus shows as an error (fact 83).
+      const destinations = send.destinations.value ?? [];
+      dest.textContent = destinations.length ? destinations.map((d) => (d.error ? `${d.name} (${d.error})` : d.name)).join(' + ') : '—';
+      dest.classList.toggle('none', destinations.length === 0);
+      db.textContent = send.gain.display.value ?? '';
+      for (const { c, txt } of pans) txt.textContent = c.display.value ?? '';
+      muteBox.checked = send.mute.on;
+      preBox.checked = send.preFader.on;
+      onBox.checked = send.enabled.on;
+    };
+    offs.push(
+      send.destinations.onChange(paint),
+      send.gain.display.onChange(paint),
+      send.mute.real.onChange(paint), send.preFader.real.onChange(paint), send.enabled.real.onChange(paint),
+    );
+    for (const { c } of pans) offs.push(c.display.onChange(paint));
+
+    muteBox.addEventListener('change', run(`${send.id} mute`, () => send.mute.real.set(muteBox.checked)));
+    preBox.addEventListener('change', run(`${send.id} pre-fader`, () => send.preFader.real.set(preBox.checked)));
+    onBox.addEventListener('change', run(`${send.id} enabled`, () => send.enabled.real.set(onBox.checked)));
+    offs.push(bindSlider(range, send.gain));
+
+    if (editable) {
+      const meterCell = cell();
+      const meter = Object.assign(document.createElement('span'), { className: 'meter' });
+      const bar = document.createElement('i');
+      meter.append(bar);
+      meterCell.append(meter);
+      offs.push(send.meter.onChange(() => { bar.style.width = `${send.meter.max * 100}%`; }));
+
+      const actions = cell();
+      const menu = busMenu();
+      // retarget(): assign appends, so replacing means delete-then-add (fact 43).
+      menu.addEventListener('change', run(`${send.id} route`, async () => { if (menu.value) await send.retarget(menu.value); menu.value = ''; }));
+      const clear = Object.assign(document.createElement('button'), { textContent: 'Clear' });
+      clear.addEventListener('click', run(`${send.id} clear`, () => send.unassign()));
+      const moveTo = document.createElement('select');
+      moveTo.append(new Option('Move to…', ''));
+      for (const t of session.visibleTracks) if (t !== track) moveTo.append(new Option(t.name.value ?? t.id, t.id));
+      moveTo.addEventListener('change', run(`${send.id} move`, async () => { if (moveTo.value) await send.moveTo(moveTo.value); moveTo.value = ''; }));
+      actions.append(menu, ' ', clear, ' ', moveTo);
+    }
+    paint();
+    return tr;
+  }
+
+  async function show() {
+    for (const off of offs) off();
+    offs = [];
+    track = session.tracks.byId($('track').value) ?? session.visibleTracks[0];
+    if (!track) { say('No track in this session.'); return; }
+    say(`Loading ${track.name.value ?? track.id}…`);
+    await track.outputs.load();
+    // Each output's controls are a folder of their own.
+    const sends = track.outputs.items.filter((o) => o.isSend).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const cues = track.outputs.items.filter((o) => o.isCue).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    await Promise.all([...sends, ...cues].map((o) => o.controls.load().catch(() => undefined)));
+    $('sends').replaceChildren(...sends.map((s) => row(s, true)));
+    $('cues').replaceChildren(...cues.map((s) => row(s, false)));
+    const count = () => {
+      const routed = sends.filter((s) => (s.assignments.value ?? []).length > 0).length;
+      say(`${track.name.value ?? track.id}: ${routed} of ${sends.length} sends routed.`);
+      void undoText();
+    };
+    for (const s of sends) offs.push(s.assignments.onChange(count));
+    count();
+  }
+
+  try { luna = await Luna.connect(); } catch (e) { say(e.message); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  await luna.sessions.ready();
+  session = luna.sessions.current();
+  if (!session) { say('No session open in LUNA.'); return; }
+  await session.ready();
+  const sel = $('track');
+  sel.replaceChildren(...session.visibleTracks.map((t) => new Option(t.name.value ?? t.id, t.id)));
+  sel.onchange = () => { void show(); };
+  await show();
+  luna.status.onChange(() => { if (luna.status.value === 'disconnected') say('Disconnected; reconnecting…'); });
+})();
+</script>

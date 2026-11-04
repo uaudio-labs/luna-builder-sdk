@@ -6,8 +6,10 @@
  * `All` device's port receives every device's messages. Nothing flows, and LUNA does no extra
  * work, while no one listens. MIDI sent with {@link SendMidi} is not echoed back.
  *
- * Only channel messages arrive: notes, poly and channel pressure, controllers, program changes
- * and pitch bend. Clock, timecode and SysEx do not.
+ * Channel messages arrive: notes, poly and channel pressure, controllers, program changes and
+ * pitch bend. SysEx arrives too, whole, when asked for ({@link MidiInput.onSysEx}, or `sysex:
+ * true` in {@link MidiInputListenOptions}); LUNA builds without it send none (fact 138). Clock
+ * and timecode do not arrive.
  *
  * Use this, not Web MIDI (`navigator.requestMIDIAccess()`), for MIDI input in an Add On: LUNA's
  * macOS web view has no Web MIDI, and this hears the devices LUNA's MIDI settings list, the
@@ -31,19 +33,28 @@ import { MidiDevice, MidiPort } from './system';
 /** The name LUNA gives the device whose input port receives every device's MIDI. */
 const ALL_DEVICE_NAME = 'All';
 
-/** What a channel message is, from its status byte. A note-on with velocity 0 is a `noteOff`. */
-export type MidiInputType = 'noteOff' | 'noteOn' | 'polyPressure' | 'controlChange' | 'programChange' | 'channelPressure' | 'pitchBend';
+/**
+ * What a message is, from its status byte. A note-on with velocity 0 is a `noteOff`. `sysex` is a
+ * whole System Exclusive message, delivered only when asked for.
+ */
+export type MidiInputType = 'noteOff' | 'noteOn' | 'polyPressure' | 'controlChange' | 'programChange' | 'channelPressure' | 'pitchBend' | 'sysex';
 
 /** One message a MIDI device sent LUNA. */
 export interface MidiInputMessage {
   readonly type: MidiInputType;
-  /** Status byte with the channel in it, e.g. `0x90`-`0x9f` note on. */
+  /** Status byte with the channel in it, e.g. `0x90`-`0x9f` note on; `0xf0` for a SysEx. */
   readonly status: number;
-  /** 0-based channel, `status & 0x0f`. */
+  /** 0-based channel, `status & 0x0f`; `-1` for a SysEx, which has none. */
   readonly channel: number;
+  /** `0` for a SysEx. */
   readonly data1: number;
-  /** `0` for a program change or channel pressure, which have one data byte. */
+  /** `0` for a program change or channel pressure, which have one data byte, and for a SysEx. */
   readonly data2: number;
+  /**
+   * A SysEx's whole message, `0xf0` through `0xf7`, for `type: 'sysex'`; `undefined` for a
+   * channel message.
+   */
+  readonly sysex?: readonly number[];
   /**
    * When LUNA received it, in milliseconds on LUNA's MIDI input clock. Compare it with other
    * messages' times (two notes 250 ms apart read 250 apart); it is not `performance.now()` or
@@ -65,6 +76,11 @@ export interface MidiInputListenOptions {
    * be stuck after either; consider releasing them.
    */
   onGap?: (info: { missed: number; dropped: number }) => void;
+  /**
+   * Also deliver SysEx messages (`type: 'sysex'`). Default `false`, so a handler written for
+   * channel messages never sees one. {@link MidiInput.onSysEx} sets it.
+   */
+  sysex?: boolean;
 }
 
 /** The wire shape of `<input port>/midi_events` (fact 125). */
@@ -97,10 +113,23 @@ function typeOf(status: number, data2: number): MidiInputType {
   }
 }
 
-/** Turn one batch into messages, skipping anything that is not a channel message. Exported for tests. */
-export function decodeMidiEvents(events: readonly unknown[], port: MidiPort): MidiInputMessage[] {
+function isSysEx(bytes: unknown): bytes is number[] {
+  if (!Array.isArray(bytes) || bytes.length < 2 || bytes[0] !== 0xf0 || bytes[bytes.length - 1] !== 0xf7) return false;
+  return bytes.every((b, i) => typeof b === 'number' && Number.isInteger(b) && (i === 0 || i === bytes.length - 1 ? true : b >= 0 && b < 0x80));
+}
+
+/**
+ * Turn one batch into messages, skipping anything that is not a channel message, or a SysEx
+ * when `sysex` is true. A SysEx is `[time_ms, 0xf0, [0xf0, ..., 0xf7]]` (fact 138). Exported for
+ * tests.
+ */
+export function decodeMidiEvents(events: readonly unknown[], port: MidiPort, sysex = false): MidiInputMessage[] {
   const out: MidiInputMessage[] = [];
   for (const e of events) {
+    if (sysex && Array.isArray(e) && e.length === 3 && e[1] === 0xf0 && typeof e[0] === 'number' && isSysEx(e[2])) {
+      out.push(Object.freeze({ type: 'sysex', status: 0xf0, channel: -1, data1: 0, data2: 0, sysex: Object.freeze([...(e[2] as number[])]), time: e[0], port }));
+      continue;
+    }
     if (!Array.isArray(e) || e.length < 4) continue;
     const [time, status, data1, data2] = e as unknown[];
     if (typeof time !== 'number' || typeof status !== 'number' || typeof data1 !== 'number' || typeof data2 !== 'number') continue;
@@ -158,7 +187,7 @@ export class MidiInput {
       lastSeq = seq;
       lastDropped = dropped;
       if (missed > 0 || newlyDropped) options.onGap?.({ missed, dropped });
-      for (const message of decodeMidiEvents(events, port)) handler(message);
+      for (const message of decodeMidiEvents(events, port, options.sysex === true)) handler(message);
     });
   }
 
@@ -197,6 +226,30 @@ export class MidiInput {
         if (m.type === 'controlChange') handler(m.data1, m.data2, m);
       },
       options,
+    );
+  }
+
+  /**
+   * Whole SysEx messages from `target`, as `(bytes, message)`, `bytes` running from `0xf0` to
+   * `0xf7`. LUNA joins a SysEx that arrives in pieces and drops one over 64 KB (counted in
+   * `onGap`'s `dropped`). Same targets and rules as {@link listen}. LUNA builds without SysEx
+   * input send none (fact 138).
+   *
+   * @example
+   * await luna.midiDevices.load();
+   * const input = new Luna.MidiInput(luna);
+   * const synth = luna.midiDevices.items.find((d) => d.name.value === 'DX7');
+   * const stop = input.onSysEx(synth, (bytes) => {
+   *   if (bytes[1] === 0x43) console.log('Yamaha SysEx,', bytes.length, 'bytes');
+   * });
+   */
+  onSysEx(target: MidiInputTarget, handler: (bytes: readonly number[], message: MidiInputMessage) => void, options: MidiInputListenOptions = {}): Unsubscribe {
+    return this.listen(
+      target,
+      (m) => {
+        if (m.type === 'sysex' && m.sysex) handler(m.sysex, m);
+      },
+      { ...options, sysex: true },
     );
   }
 

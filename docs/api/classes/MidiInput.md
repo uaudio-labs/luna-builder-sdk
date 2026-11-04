@@ -130,3 +130,42 @@ const stop = input.onNote(keys, (note, velocity, on) => {
   if (on) lights.light(note, velocity); else lights.clear(note);
 });
 ```
+
+***
+
+### onSysEx()
+
+```ts
+onSysEx(
+   target, 
+   handler, 
+   options): Unsubscribe;
+```
+
+Whole SysEx messages from `target`, as `(bytes, message)`, `bytes` running from `0xf0` to
+`0xf7`. LUNA joins a SysEx that arrives in pieces and drops one over 64 KB (counted in
+`onGap`'s `dropped`). Same targets and rules as [listen](#listen). LUNA builds without SysEx
+input send none (fact 138).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `target` | [`MidiInputTarget`](../type-aliases/MidiInputTarget.md) |
+| `handler` | (`bytes`, `message`) => `void` |
+| `options` | [`MidiInputListenOptions`](../interfaces/MidiInputListenOptions.md) |
+
+#### Returns
+
+[`Unsubscribe`](../type-aliases/Unsubscribe.md)
+
+#### Example
+
+```ts
+await luna.midiDevices.load();
+const input = new Luna.MidiInput(luna);
+const synth = luna.midiDevices.items.find((d) => d.name.value === 'DX7');
+const stop = input.onSysEx(synth, (bytes) => {
+  if (bytes[1] === 0x43) console.log('Yamaha SysEx,', bytes.length, 'bytes');
+});
+```

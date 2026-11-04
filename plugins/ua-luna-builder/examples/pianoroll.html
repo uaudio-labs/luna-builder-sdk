@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · Piano roll</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 1050px; margin: 36px auto; padding: 0 24px; }
+  h1 { font-size: 27px; } p { color: #acb9c8; line-height: 1.6; } button, select { font: inherit; padding: 8px 12px; margin: 4px 8px 4px 0; }
+  canvas { width: 100%; height: 360px; background: #101419; border: 1px solid #343d48; display: block; }
+  #status, #info { min-height: 24px; } .toolbar { display: flex; flex-wrap: wrap; align-items: center; }
+  table { border-collapse: collapse; width: 100%; margin-top: 16px; } th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #343d48; } th { color: #acb9c8; }
+</style>
+<h1>Piano roll</h1>
+<p>A read-only piano roll over one MIDI clip of the open session, from
+<code>clip.midi</code>. It is <strong>live</strong>: notes created, edited, muted or deleted
+in LUNA (or by another client) appear without a refresh, because each edit arrives as a
+delta on the clip's MIDI table (fact 40). Positions are beats from the clip's start
+(fact 41).</p>
+<button id="refresh">Connect / rescan clips</button><p id="status" role="status">Connecting…</p>
+<div class="toolbar"><select id="clips" aria-label="MIDI clip"></select></div>
+<p id="info" role="status"></p>
+<canvas id="roll" width="1000" height="360" aria-label="Piano roll"></canvas>
+<table><thead><tr><th>Row</th><th>Pitch</th><th>Start → stop (beats)</th><th>Velocity on / off</th><th>Muted</th></tr></thead><tbody id="notes"></tbody></table>
+<script src="../sdk/luna.global.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const B = Luna.TICKS_PER_BEAT;
+const W = 1000, H = 360;
+const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const name = (p) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`;
+
+let luna, session, current, updates = 0;
+let liveOffs = [];   // the selected clip's listeners
+let laneOffs = [];   // the playlists' clip lists, kept across select()
+const releaseLive = () => { for (const off of liveOffs) off(); liveOffs = []; };
+const releaseLanes = () => { for (const off of laneOffs) off(); laneOffs = []; };
+
+const midiClips = () =>
+  session.playlists.items.flatMap((p) => p.clips.items.filter((c) => c.clipType.value === 'midi').map((c) => ({ clip: c, lane: p })));
+
+function trackName(lane) {
+  const uid = lane.trackUid.value;
+  return uid ? (session.tracks.byId(uid)?.name.value ?? uid) : 'No track';
+}
+
+function draw() {
+  const ctx = $('roll').getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (!current) {
+    ctx.fillStyle = '#acb9c8';
+    ctx.font = '13px system-ui';
+    ctx.fillText('No MIDI clip in the open session. Create notes on an instrument track in LUNA.', 12, 40);
+    $('notes').replaceChildren();
+    $('info').textContent = '';
+    return;
+  }
+  const { clip, midi } = current;
+  const notes = midi.notes.items;
+  // Anything that is not a note-on or note-off is drawn as a tick along the bottom.
+  const others = midi.events.items.filter((e) => (e.status & 0xf0) !== 0x90 && (e.status & 0xf0) !== 0x80);
+  const lengthTicks = Math.max((clip.stop.value ?? 0) - (clip.start.value ?? 0), ...notes.map((n) => n.stopTick ?? n.startTick), B);
+  const beats = Math.max(1, Math.ceil(lengthTicks / B));
+  const x = (tick) => (tick / (beats * B)) * W;
+  const pitches = notes.map((n) => n.pitch);
+  const lo = Math.max(0, Math.min(60, ...pitches) - 2);
+  const hi = Math.min(127, Math.max(72, ...pitches) + 2);
+  const rowH = H / (hi - lo + 1);
+  const y = (p) => H - (p - lo + 1) * rowH;
+
+  ctx.font = '11px system-ui';
+  ctx.textBaseline = 'middle';
+  for (let p = lo; p <= hi; p++) {
+    ctx.fillStyle = [1, 3, 6, 8, 10].includes(p % 12) ? '#141a20' : '#1a2128';
+    ctx.fillRect(0, y(p), W, rowH);
+    if (p % 12 === 0) { ctx.fillStyle = '#6b7c8d'; ctx.fillText(name(p), 4, y(p) + rowH / 2); }
+  }
+  for (let b = 0; b <= beats; b++) {
+    ctx.strokeStyle = b % 4 === 0 ? '#4a5866' : '#2c3640';
+    ctx.beginPath();
+    ctx.moveTo(x(b * B) + 0.5, 0);
+    ctx.lineTo(x(b * B) + 0.5, H);
+    ctx.stroke();
+  }
+  for (const n of notes) {
+    const x0 = x(n.startTick);
+    const x1 = n.stopTick === undefined ? W : x(n.stopTick);
+    ctx.fillStyle = n.muted ? '#4a5866' : `hsl(${160 + (n.velocity / 127) * 60} 60% ${35 + (n.velocity / 127) * 30}%)`;
+    ctx.fillRect(x0, y(n.pitch) + 1, Math.max(2, x1 - x0 - 1), rowH - 2);
+    // An unterminated note-on is outlined rather than given a length.
+    if (n.stopTick === undefined) { ctx.strokeStyle = '#f0c674'; ctx.strokeRect(x0 + 0.5, y(n.pitch) + 1.5, W - x0 - 1, rowH - 3); }
+  }
+  for (const e of others) { ctx.fillStyle = '#f0c674'; ctx.fillRect(x(e.tick) - 1, H - 6, 3, 6); }
+
+  $('info').textContent =
+    `${clip.name.value || clip.id} on ${trackName(current.lane)} · ${notes.length} notes · ${others.length} other events` +
+    ` · ${beats} beats · ${updates} update${updates === 1 ? '' : 's'} since connecting`;
+
+  const tbody = $('notes');
+  tbody.replaceChildren();
+  for (const n of notes) {
+    const tr = document.createElement('tr');
+    const cells = [
+      n.rowid,
+      `${name(n.pitch)} (${n.pitch}) ch ${n.channel + 1}`,
+      `${(n.startTick / B).toFixed(3)} → ${n.stopTick === undefined ? 'open' : (n.stopTick / B).toFixed(3)}`,
+      `${n.velocity} / ${n.offVelocity ?? '–'}`,
+      n.muted ? 'yes' : '',
+    ];
+    for (const v of cells) tr.append(Object.assign(document.createElement('td'), { textContent: String(v) }));
+    tbody.append(tr);
+  }
+}
+
+async function select(uid) {
+  releaseLive();
+  const found = midiClips().find((c) => c.clip.id === uid) ?? midiClips()[0];
+  current = undefined;
+  if (found) {
+    const midi = found.clip.midi;
+    await midi.ready();
+    current = { ...found, midi };
+    liveOffs.push(
+      midi.notes.onChange(() => { updates++; draw(); }),
+      midi.events.onChange(draw),
+      found.clip.stop.onChange(draw),
+      found.clip.name.onChange(draw),
+    );
+  }
+  draw();
+}
+
+function fillSelect() {
+  const sel = $('clips');
+  const keep = sel.value;
+  sel.replaceChildren(...midiClips().map(({ clip, lane }) => Object.assign(document.createElement('option'), {
+    value: clip.id,
+    textContent: `${trackName(lane)} / ${lane.name.value ?? lane.id}: ${clip.name.value || clip.id}`,
+  })));
+  if (Array.from(sel.options).some((o) => o.value === keep)) sel.value = keep;
+}
+
+async function rescan() {
+  fillSelect();
+  await select($('clips').value);
+}
+
+async function refresh() {
+  $('refresh').disabled = true;
+  try {
+    if (!luna) {
+      luna = await Luna.connect();
+      Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+    }
+    await luna.sessions.ready();
+    session = luna.sessions.current();
+    if (!session) { $('status').textContent = 'No session open in LUNA.'; return; }
+    await session.ready();
+    await Promise.all(session.playlists.items.map((p) => p.clips.load()));
+    releaseLanes();
+    // A clip appearing or going away rescans; the Clip objects themselves are replaced.
+    for (const p of session.playlists.items) laneOffs.push(p.clips.onChange(() => { updates++; void rescan(); }));
+    $('clips').onchange = () => { void select($('clips').value); };
+    await rescan();
+    $('status').textContent = `${session.name.value ?? session.uid} · ${midiClips().length} MIDI clip(s)`;
+  } catch (e) { $('status').textContent = e.message; }
+  finally { $('refresh').disabled = false; }
+}
+
+$('refresh').onclick = refresh;
+luna === undefined && void refresh();
+window.addEventListener('pagehide', () => { releaseLive(); releaseLanes(); void luna?.close(); });
+</script>

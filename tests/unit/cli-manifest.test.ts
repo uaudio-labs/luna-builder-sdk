@@ -137,6 +137,17 @@ describe('readManifest', () => {
     expect(() => readManifest(addOn({ run_hidden: 'yes' }))).toThrow(/"run_hidden" must be true or false/);
   });
 
+  it('accepts unload_on_close true, false, or absent, alongside run_hidden, and rejects a non-boolean', () => {
+    expect(readManifest(addOn({ unload_on_close: true })).entries[0]!.unload_on_close).toBe(true);
+    expect(readManifest(addOn({ unload_on_close: false })).entries[0]!.unload_on_close).toBe(false);
+    expect(readManifest(addOn({})).entries[0]!.unload_on_close).toBeUndefined();
+    expect(readManifest(addOn({ target: 'browser', unload_on_close: true })).entries[0]!.unload_on_close).toBe(true);
+    expect(readManifest(addOn({ target: 'editor', unload_on_close: true })).entries[0]!.unload_on_close).toBe(true);
+    const both = readManifest(addOn({ run_hidden: true, unload_on_close: true })).entries[0]!;
+    expect([both.run_hidden, both.unload_on_close]).toEqual([true, true]);
+    expect(() => readManifest(addOn({ unload_on_close: 'true' }))).toThrow(/"unload_on_close" must be true or false/);
+  });
+
   it('accepts fixed_size true, false, or absent, and rejects a non-boolean', () => {
     expect(readManifest(addOn({ fixed_size: true })).entries[0]!.fixed_size).toBe(true);
     expect(readManifest(addOn({ fixed_size: false })).entries[0]!.fixed_size).toBe(false);

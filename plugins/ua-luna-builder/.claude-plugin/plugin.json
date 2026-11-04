@@ -1,0 +1,18 @@
+{
+  "name": "ua-luna-builder",
+  "version": "3.1.1",
+  "description": "Build LUNA Add Ons with the bundled @uaudio/luna-builder-sdk: scaffold a page, connect to a running LUNA over UA Net or to the in-page WebAssembly engine, read and write transport, tracks, controls, clips, effects and meters, test against Luna.MockEngine with no LUNA, then install the Add On so it opens from LUNA's Add Ons menu",
+  "author": {
+    "name": "Universal Audio",
+    "url": "https://www.uaudio.com"
+  },
+  "repository": "https://github.com/uaudio-labs/luna-builder-sdk",
+  "license": "Apache-2.0",
+  "keywords": [
+    "luna",
+    "universal-audio",
+    "ua-net",
+    "daw",
+    "add-on"
+  ]
+}

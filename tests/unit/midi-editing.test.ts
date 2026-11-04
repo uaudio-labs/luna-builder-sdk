@@ -147,6 +147,91 @@ describe('MidiClip.deleteNotes', () => {
   });
 });
 
+describe('MidiClip.moveEvents', () => {
+  const SYSEX = [0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7];
+
+  /** The 3-note clip plus a SysEx at beat 1 and a CC 7 at beat 2. */
+  async function withEvents() {
+    const setup = await midiClip();
+    setup.engine.midiEdit(setup.clip.path, 'added', [
+      { tick: BEAT, sysex: SYSEX },
+      { tick: 2 * BEAT, status: 0xb0, data1: 7, data2: 90 },
+    ]);
+    await setup.engine.settled();
+    const sysex = setup.midi.events.items.find((r) => r.sysex)!;
+    const cc = setup.midi.events.items.find((r) => r.status === 0xb0)!;
+    return { ...setup, sysex, cc };
+  }
+  const moves = (engine: Luna.MockEngine) => engine.requests.filter((r) => r.verb === 'post' && r.path.endsWith('/move_midi_events'));
+
+  it('moves a SysEx and a CC by row id in one post, keeping ids and bytes, and leaves the notes', async () => {
+    const { midi, engine, luna, sysex, cc } = await withEvents();
+    const notesBefore = midi.notes.items.map((n) => [n.rowid, n.startTick]);
+    await midi.moveEvents([sysex, cc.rowid], BEAT / 2);
+    await engine.settled();
+
+    expect(midi.events.byId(String(sysex.rowid))).toMatchObject({ tick: BEAT + BEAT / 2, sysex: SYSEX });
+    expect(midi.events.byId(String(cc.rowid))).toMatchObject({ tick: 2 * BEAT + BEAT / 2, data1: 7, data2: 90 });
+    expect(midi.notes.items.map((n) => [n.rowid, n.startTick])).toEqual(notesBefore);
+    expect(moves(engine)).toHaveLength(1);
+    expect(moves(engine)[0]!.data).toMatchObject({ session_uid: 'abc', row_ids: [sysex.rowid, cc.rowid], offset: BEAT / 2 });
+    await luna.close();
+  });
+
+  it('moves earlier with a negative offset', async () => {
+    const { midi, engine, luna, sysex } = await withEvents();
+    await midi.moveEvents([sysex], -BEAT);
+    await engine.settled();
+    expect(midi.events.byId(String(sysex.rowid))!.tick).toBe(0);
+    await luna.close();
+  });
+
+  it('refuses a note row, an unknown row, a fractional offset and a tick below 0, before anything goes on the wire', async () => {
+    const { midi, engine, luna, sysex } = await withEvents();
+    const noteOn = midi.events.items.find((r) => r.status === NOTE_ON)!;
+    const noteOff = midi.events.items.find((r) => r.status === NOTE_OFF)!;
+    await expect(midi.moveEvents([noteOn], BEAT)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.moveEvents([sysex, noteOff], BEAT)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.moveEvents([9999], BEAT)).rejects.toMatchObject({ code: 'not_found' });
+    await expect(midi.moveEvents([sysex], 0.5)).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.moveEvents([sysex], -2 * BEAT)).rejects.toMatchObject({ code: 'out_of_range' });
+    expect(moves(engine)).toHaveLength(0);
+    expect(midi.events.byId(String(sysex.rowid))!.tick).toBe(BEAT);
+    await luna.close();
+  });
+
+  it('posts nothing for no rows or a zero offset', async () => {
+    const { midi, engine, luna, sysex } = await withEvents();
+    await midi.moveEvents([], BEAT);
+    await midi.moveEvents([sysex], 0);
+    expect(moves(engine)).toHaveLength(0);
+    await luna.close();
+  });
+
+  it('runs inside a batch transaction', async () => {
+    const { midi, session, engine, luna, sysex } = await withEvents();
+    await session.transaction('Move SysEx', async () => {
+      await midi.moveEvents([sysex], BEAT);
+    });
+    await engine.settled();
+    await midi.refresh();
+    expect(engine.transactions).toEqual(['begin', 'commit']);
+    expect(midi.events.byId(String(sysex.rowid))!.tick).toBe(2 * BEAT);
+    await luna.close();
+  });
+});
+
+describe('MockEngine move_midi_events', () => {
+  it('refuses a note row as LUNA does, and changes nothing', async () => {
+    const { engine, luna, clip } = await midiClip();
+    const rows = engine.midiRows(clip.path);
+    const note = rows.find((r) => r.status === NOTE_ON)!;
+    await expect(luna.raw.post('/sessions/abc/contexts/main/commands/move_midi_events', { row_ids: [note.rowid], offset: BEAT })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    expect(engine.midiRows(clip.path)).toEqual(rows);
+    await luna.close();
+  });
+});
+
 describe('Session.transaction', () => {
   it('reports its kind while open, and asks a continuous one for undo notifications (fact 115)', async () => {
     const { session, engine, luna } = await midiClip();

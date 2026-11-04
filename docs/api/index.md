@@ -212,7 +212,7 @@
 | [LogFn](type-aliases/LogFn.md) | Where a port reports what it does: status changes, reconnect attempts, timeouts, and listeners that threw. The default sends `warn` and `error` to the console. |
 | [LogLevel](type-aliases/LogLevel.md) | Severity of a [LogFn](type-aliases/LogFn.md) message. |
 | [MidiInputTarget](type-aliases/MidiInputTarget.md) | Where [MidiInput.listen](classes/MidiInput.md#listen) listens: a device (its input port), an input port, or every device. |
-| [MidiInputType](type-aliases/MidiInputType.md) | What a channel message is, from its status byte. A note-on with velocity 0 is a `noteOff`. |
+| [MidiInputType](type-aliases/MidiInputType.md) | What a message is, from its status byte. A note-on with velocity 0 is a `noteOff`. `sysex` is a whole System Exclusive message, delivered only when asked for. |
 | [MidiOutputTarget](type-aliases/MidiOutputTarget.md) | Where a `...ToOutput` method sends: a MIDI device (its output port), one of its output ports, or an output port's `uid`. |
 | [Operation](type-aliases/Operation.md) | Structural change carried by an [Event](interfaces/Event.md). Absent for a property value change. |
 | [OverviewKind](type-aliases/OverviewKind.md) | `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. |
@@ -256,6 +256,7 @@
 | [LUNA\_DEVICE\_UID](variables/LUNA_DEVICE_UID.md) | The uid of LUNA's own device under `/devices`, which holds its MIDI devices (fact 123). |
 | [MAX\_SECRET\_BYTES](variables/MAX_SECRET_BYTES.md) | Largest secret value, in UTF-8 bytes (Windows Credential Manager's limit, applied everywhere). |
 | [MAX\_SECRET\_NAME\_LENGTH](variables/MAX_SECRET_NAME_LENGTH.md) | Longest secret name, in characters. |
+| [MAX\_SYSEX\_BYTES](variables/MAX_SYSEX_BYTES.md) | The largest SysEx LUNA sends (fact 140): its MIDI output's limit. |
 | [OVERVIEW\_PAIR\_NS](variables/OVERVIEW_PAIR_NS.md) | Nanoseconds per fine overview pair: 125 samples at 48 kHz (fact 72). |
 | [PLUGIN\_ERROR\_MISSING](variables/PLUGIN_ERROR_MISSING.md) | The engine reports a missing plugin with this error string. |
 | [QUARTER\_NOTE](variables/QUARTER_NOTE.md) | - |
@@ -289,7 +290,7 @@
 | [connect](functions/connect.md) | - |
 | [decodeMessage](functions/decodeMessage.md) | Decode one frame. Tolerates an 8-byte `JSON` header (magic + length) and a trailing NUL, and returns `undefined` for anything unparseable so the receive loop survives a bad frame. |
 | [decodeMidiData](functions/decodeMidiData.md) | Unpack the three MIDI bytes the engine packs into one number (fact 39). |
-| [decodeMidiEvents](functions/decodeMidiEvents.md) | Turn one batch into messages, skipping anything that is not a channel message. Exported for tests. |
+| [decodeMidiEvents](functions/decodeMidiEvents.md) | Turn one batch into messages, skipping anything that is not a channel message, or a SysEx when `sysex` is true. A SysEx is `[time_ms, 0xf0, [0xf0, ..., 0xf7]]` (fact 138). Exported for tests. |
 | [derived](functions/derived.md) | A read-only [Prop](interfaces/Prop.md) computed from other props. Recomputes lazily on read and notifies when any source notifies. With `distinct: true` it notifies only when the computed value actually moved ([shallowEquals](functions/shallowEquals.md)) — for a value carved out of a chatty source, such as the tempo on `location` pushes. |
 | [encodeMidiData](functions/encodeMidiData.md) | Pack three MIDI bytes the way the engine's table stores them (fact 39). |
 | [encodePayload](functions/encodePayload.md) | Encode a payload the way the engine parses it: JSON for everything. Strings are quoted so the engine can tell `"1234"` from `1234` (the ambiguity the deprecated String dialect suffers from). [FloatLiteral](classes/FloatLiteral.md)s are written as float literals. |

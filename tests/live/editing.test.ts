@@ -119,6 +119,37 @@ describe.skipIf(!live)('live: editing', () => {
     expect(midi.notes.items.map((n) => n.velocity)).toEqual(original);
   });
 
+  it('moves a CC row by row id, one undo entry, and refuses a note row (fact 141)', async () => {
+    const midi = clip!.midi;
+    const ctx = `/sessions/${session.uid}/contexts/main`;
+    const commands = JSON.stringify(await luna.raw.get(`${ctx}/commands`, { properties: false }));
+    if (!commands.includes('move_midi_events')) return; // a LUNA build without the command
+    await session.context.refreshSelection();
+    const selection = JSON.stringify(session.context.snapshot());
+
+    await clip!.addMidi([{ tick: B / 2, status: 0xb0, data1: 7, data2: 90 }]);
+    await Luna.settle(() => midi.events.items.some((r) => r.status === 0xb0 && r.data1 === 7), 'CC added', { refresh: () => midi.refresh() });
+    const cc = midi.events.items.find((r) => r.status === 0xb0 && r.data1 === 7)!;
+    try {
+      await midi.moveEvents([cc], B);
+      expect(midi.events.byId(String(cc.rowid))).toMatchObject({ tick: cc.tick + B, data1: 7, data2: 90 });
+      await session.context.refreshSelection();
+      expect(JSON.stringify(session.context.snapshot())).toBe(selection);
+
+      // LUNA's own refusal, past the SDK's checks.
+      const note = midi.events.items.find((r) => (r.status & 0xf0) === 0x90)!;
+      await expect(luna.raw.post(`${ctx}/commands/move_midi_events`, { session_uid: session.uid, row_ids: [cc.rowid, note.rowid], offset: B })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+      await expect(luna.raw.post(`${ctx}/commands/move_midi_events`, { session_uid: session.uid, row_ids: [987654321], offset: B })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+      expect(midi.events.byId(String(cc.rowid))!.tick).toBe(cc.tick + B);
+
+      await session.undo();
+      await Luna.settle(() => midi.events.byId(String(cc.rowid))?.tick === cc.tick, 'undo move', { refresh: () => midi.refresh() });
+    } finally {
+      await session.undo(); // the add
+      await Luna.settle(() => !midi.events.byId(String(cc.rowid)), 'undo CC', { refresh: () => midi.refresh() });
+    }
+  });
+
   it('mutes and deletes notes, each one undo entry, selection restored', async () => {
     const midi = clip!.midi;
     await session.context.refreshSelection();

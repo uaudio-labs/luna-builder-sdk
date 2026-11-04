@@ -27,6 +27,7 @@ from `../dist/luna.global.js`, so run `npm run build` in the builder folder firs
 | `browse.html` | A folder browser over the folders you give LUNA: `luna.gui.listFiles()` for each folder, LUNA's folder dialog (`chooseFolders()`), a dropped folder or a typed path inside one to start, an Import button that copies an audio file in (`importPath`) and puts it on a new track at the playhead in one undo entry, and audio rows you can drag onto LUNA's timeline. Needs LUNA's `/gui`. |
 | `import.html` | Pick or drop a file, watch it upload to LUNA in chunks, see it in the live source list, place it as a clip through the tempo map. |
 | `midi-input.html` | Live MIDI input from the MIDI devices LUNA sees, through `Luna.MidiInput`: a log of every message with its time, device, type, channel and bytes, the notes held, and each controller's latest value. Pick one device or all; pause or clear the log. |
+| `sysex.html` | A small SysEx librarian: every SysEx a device sends, logged with its manufacturer and length (`MidiInput.onSysEx`); click one for its hex dump, to send it back out or copy it. Send typed hex, a Universal Identity Request (the reply is decoded: manufacturer, family, model, version), or every message in a `.syx` file (`SendMidi.sendSysExToOutput`). |
 | `pianoroll.html` | A live read-only piano roll over one MIDI clip: notes edited in LUNA appear without a refresh. |
 | `tracks.html` | The raw wire: list the focused session's tracks through `luna.raw`, with no model layer. |
 

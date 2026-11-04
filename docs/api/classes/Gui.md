@@ -356,7 +356,7 @@ and installs. The file has to be shared with anyone who has the link: LUNA does 
 sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
 replace what is installed, so the user always confirms. A url that installs and is not
 one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
-then on, to install again; [removeImportedAddOn](#removeimportedaddon) forgets it.
+then on, to install again; [removeAddOn](#removeaddon) forgets it.
 
 Resolves as LUNA starts, not once installed: watch [addOns](#addons) for the result. A
 repo whose latest release has nothing LUNA can install, or a shared file that is not
@@ -659,6 +659,39 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ***
 
+### removeAddOn()
+
+```ts
+removeAddOn(id): Promise<void>;
+```
+
+Forget a link [installAddOn](#installaddon) (or LUNA's IMPORT URL) saved, as Remove from
+Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
+`/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
+marketplace now and at the next launch; the installed Add On is not touched. Rejects with
+a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
+has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
+`uasrv.missing_field` with no id. A LUNA without the command rejects with
+`Luna.Unsupported`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `id` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.gui.removeAddOn('com.uaudio.qwerty_midi');
+```
+
+***
+
 ### removeBlessedFolder()
 
 ```ts
@@ -685,39 +718,6 @@ LUNA without the command rejects with `Luna.Unsupported`.
 
 ```ts
 for (const folder of luna.gui.blessedFolders.value ?? []) await luna.gui.removeBlessedFolder(folder);
-```
-
-***
-
-### removeImportedAddOn()
-
-```ts
-removeImportedAddOn(id): Promise<void>;
-```
-
-Forget a link [installAddOn](#installaddon) (or LUNA's IMPORT URL) saved, as Remove from
-Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
-`/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
-marketplace now and at the next launch; the installed Add On is not touched. Rejects with
-a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
-has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
-`uasrv.missing_field` with no id. A LUNA without the command rejects with
-`Luna.Unsupported`.
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `id` | `string` |
-
-#### Returns
-
-`Promise`\<`void`\>
-
-#### Example
-
-```ts
-await luna.gui.removeImportedAddOn('com.uaudio.qwerty_midi');
 ```
 
 ***

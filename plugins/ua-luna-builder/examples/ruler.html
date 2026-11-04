@@ -1,0 +1,212 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA ruler</title>
+<!--
+  A bar|beat ruler over the session's tempo map, with tempo, signature and key rows,
+  markers you can click to jump to, and the playhead.
+
+  It also shows LUNA's own bar|beat and seconds annotation beside the SDK's, computed from
+  the tempo map, so you can see the two agree. Musical positions are ticks at 96e9 per beat
+  (fact 16); nothing here converts units behind your back.
+
+  Unlike the raw-wire pages, this one is live: the tempo map, signatures and markers are
+  Collections, so an edit in LUNA redraws without a refresh.
+-->
+<script src="../sdk/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #14171a; color: #e4eaf1; font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid #263039; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; }
+  #status { opacity: .65; }
+  #agreement { padding: 6px 14px; font-variant-numeric: tabular-nums; font-size: 12px; opacity: .85; border-bottom: 1px solid #263039; }
+  #agreement.differ { color: #ff8080; opacity: 1; }
+  canvas { display: block; width: 100%; max-width: 1000px; height: 120px; margin: 10px 14px; background: #191d21; border-radius: 6px; }
+  section { padding: 0 14px 16px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; opacity: .55; margin: 14px 0 6px; }
+  table { border-collapse: collapse; width: 100%; max-width: 1000px; }
+  td { padding: 4px 8px; border-bottom: 1px solid #222a31; }
+  #markers tr { cursor: pointer; }
+  #markers tr:hover td { background: #1f262c; }
+</style>
+<header>
+  <h1>LUNA ruler</h1>
+  <span id="status">connecting…</span>
+</header>
+<div id="agreement"></div>
+<canvas id="ruler" width="1000" height="120"></canvas>
+<section>
+  <h2>Markers — click to jump</h2>
+  <table><tbody id="markers"></tbody></table>
+  <h2>Tempo, signature and key rows</h2>
+  <table><tbody id="rows"></tbody></table>
+</section>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const W = 1000, H = 120;
+  const BEAT = Luna.TICKS_PER_BEAT;
+  const cssColor = (argb) => (typeof argb === 'number' ? `#${(argb & 0xffffff).toString(16).padStart(6, '0')}` : '#7aa2c8');
+  const formatSeconds = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
+
+  let luna, session, musical;
+
+  /** The signature in force at a tick, from the live signature rows. */
+  function signatureAt(tick) {
+    let best = { numerator: 4, denominator: 4 };
+    for (const s of musical.timeSignatures.items) {
+      if ((s.tick.value ?? 0) <= tick) best = { numerator: s.numerator.value ?? 4, denominator: s.denominator.value ?? 4 };
+    }
+    return best;
+  }
+
+  function extent() {
+    const markerTicks = session.markers.items.map((m) => m.location.value ?? 0);
+    const end = Math.max(session.transport.maxTick.value ?? 0, ...markerTicks, musical.timeline.tickAtBar(9));
+    return { start: 0, end: end + BEAT * 4 };
+  }
+
+  function draw() {
+    const ctx = $('ruler').getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    const t = musical.timeline;
+    const { start, end } = extent();
+    const x = (tick) => ((tick - start) / (end - start)) * W;
+    ctx.font = '12px system-ui';
+    ctx.textBaseline = 'top';
+
+    const first = t.barBeat(start).bar;
+    const last = t.barBeat(end).bar;
+    const barStep = Math.max(1, Math.ceil((last - first) / 40));
+    for (let bar = first; bar <= last; bar++) {
+      const barTick = t.tickAtBar(bar);
+      const sig = signatureAt(barTick);
+      const isLabel = (bar - first) % barStep === 0;
+      ctx.strokeStyle = isLabel ? '#8aa0b6' : '#4a5866';
+      ctx.beginPath(); ctx.moveTo(x(barTick), isLabel ? 20 : 34); ctx.lineTo(x(barTick), H); ctx.stroke();
+      if (isLabel) { ctx.fillStyle = '#e4eaf1'; ctx.fillText(String(bar), x(barTick) + 3, 6); }
+      if (barStep === 1 && last - first < 24) {
+        for (let beat = 2; beat <= sig.numerator; beat++) {
+          const bt = t.tickAtBar(bar) + (beat - 1) * BEAT;
+          ctx.strokeStyle = '#343d48';
+          ctx.beginPath(); ctx.moveTo(x(bt), 48); ctx.lineTo(x(bt), H); ctx.stroke();
+        }
+      }
+    }
+    for (const row of musical.tempoMap.items) {
+      ctx.fillStyle = '#f0c674';
+      ctx.fillText(`${row.tempo.value ?? '?'} BPM`, x(row.tick.value ?? 0) + 3, 52);
+    }
+    for (const row of musical.timeSignatures.items) {
+      ctx.fillStyle = '#b294bb';
+      ctx.fillText(`${row.numerator.value ?? 4}/${row.denominator.value ?? 4}`, x(row.tick.value ?? 0) + 3, 66);
+    }
+    for (const m of session.markers.items) {
+      const tick = m.location.value;
+      if (tick === undefined) continue;
+      ctx.fillStyle = cssColor(m.color.value);
+      ctx.fillRect(x(tick), 84, 2, H - 84);
+      ctx.fillText(m.name.value ?? '', x(tick) + 5, 86);
+    }
+    const loc = session.transport.location.value;
+    if (loc) {
+      ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x(loc.tick), 0); ctx.lineTo(x(loc.tick), H); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+  }
+
+  /** LUNA's own annotation of the playhead beside the SDK's, from the tempo map. */
+  function agreement() {
+    const loc = session.transport.location.value;
+    const t = musical.timeline;
+    if (!loc) { $('agreement').textContent = ''; return; }
+    const sdk = t.barBeat(loc.tick);
+    const lunaBB = loc.bar_beat;
+    const lunaSeconds = loc.min_sec ? loc.min_sec.minutes * 60 + loc.min_sec.seconds : undefined;
+    const sdkSeconds = t.seconds(loc.tick);
+    const agree =
+      !!lunaBB && sdk.bar === lunaBB.bar && sdk.beat === lunaBB.beat && sdk.tick === lunaBB.tick &&
+      (lunaSeconds === undefined || Math.abs(sdkSeconds - lunaSeconds) < 1e-6) &&
+      (loc.tempo === undefined || Math.abs(t.tempoAt(loc.tick) - loc.tempo) < 1e-6);
+    $('agreement').className = agree ? '' : 'differ';
+    $('agreement').textContent =
+      `Playhead ${loc.tick} ticks · LUNA ${Luna.formatBarBeat(lunaBB)} ${lunaSeconds === undefined ? '—' : formatSeconds(lunaSeconds)} ${loc.tempo ?? '?'} BPM` +
+      ` · SDK ${Luna.formatBarBeat(sdk)} ${formatSeconds(sdkSeconds)} ${t.tempoAt(loc.tick)} BPM · ${agree ? 'agree' : 'DIFFER'}`;
+  }
+
+  function tables() {
+    const t = musical.timeline;
+    const at = (tick) => (tick === undefined ? 'unknown' : `${Luna.formatBarBeat(t.barBeat(tick))} · ${formatSeconds(t.seconds(tick))}`);
+
+    $('markers').replaceChildren();
+    for (const m of session.markers.items) {
+      const tick = m.location.value;
+      const tr = document.createElement('tr');
+      for (const value of [m.name.value ?? '', at(tick), tick === undefined ? 'unknown' : `${t.tempoAt(tick)} BPM`]) {
+        tr.append(Object.assign(document.createElement('td'), { textContent: value }));
+      }
+      tr.style.borderLeft = `4px solid ${cssColor(m.color.value)}`;
+      tr.onclick = () => {
+        if (tick === undefined) return;
+        session.transport.seek(tick).catch((e) => { $('status').textContent = e.message; });
+      };
+      $('markers').append(tr);
+    }
+    if (!session.markers.items.length) {
+      const td = $('markers').insertRow().insertCell();
+      td.colSpan = 3;
+      td.textContent = 'No markers in the open session.';
+    }
+
+    $('rows').replaceChildren();
+    const addRow = (...values) => {
+      const tr = document.createElement('tr');
+      for (const v of values) tr.append(Object.assign(document.createElement('td'), { textContent: v }));
+      $('rows').append(tr);
+    };
+    for (const r of musical.tempoMap.items) addRow(`tempo ${r.id}`, at(r.tick.value), `${r.tempo.value ?? '?'} BPM`);
+    for (const r of musical.timeSignatures.items) {
+      addRow(`signature ${r.id}`, at(r.tick.value), `${r.numerator.value ?? 4}/${r.denominator.value ?? 4} from bar ${r.bar.value ?? '?'}${r.partial.value ? ' (partial)' : ''}`);
+    }
+    for (const r of musical.keySignatures.items) {
+      addRow(`key ${r.id}`, at(r.tick.value), `${r.sharpsAndFlats.value ?? 0} sharps/flats, ${r.isMinor.value ? 'minor' : 'major'}`);
+    }
+  }
+
+  const redrawAll = () => { draw(); agreement(); tables(); };
+
+  async function build() {
+    session = luna.sessions.current();
+    if (!session) { $('status').textContent = 'No session open in LUNA.'; return; }
+    await session.ready();
+    musical = session.musical;
+    await musical.ready();
+
+    const percent = session.transport.tempoPercent.value;
+    $('status').textContent =
+      `${session.name.value ?? session.uid} · ${musical.tempoMap.items.length} tempo rows` +
+      ` · ${musical.timeSignatures.items.length} signature rows · ${session.markers.items.length} markers` +
+      (percent !== undefined && percent !== 1 ? ` · playback ×${percent}` : '');
+
+    // Live: the playhead redraws the canvas; structural edits redraw the tables too.
+    session.transport.location.onChange(() => { draw(); agreement(); });
+    session.markers.onChange(redrawAll);
+    musical.tempoMap.onChange(redrawAll);
+    musical.timeSignatures.onChange(redrawAll);
+    musical.keySignatures.onChange(redrawAll);
+    redrawAll();
+  }
+
+  try { luna = await Luna.connect(); }
+  catch (e) { $('status').textContent = e.message; return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  luna.status.onChange(() => {
+    if (luna.status.value === 'disconnected') $('status').textContent = 'Disconnected; reconnecting…';
+  });
+  await luna.sessions.ready();
+  await build();
+  luna.sessions.focused.onChange(() => { void build(); });
+  window.addEventListener('pagehide', () => { void luna.close(); });
+})();
+</script>

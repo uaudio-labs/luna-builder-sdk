@@ -148,7 +148,7 @@ Pointers for an agent that wants the shortest path. The API reference is `docs/a
 | 2 Songwriter | `luna.sessions.create`, `session.newTrack`, `channel.insert`, `luna.plugins`, `effect.controls` |
 | 3 Arrangement | `session.playlists`, `playlist.compiledClips`, `Luna.compiledClipAudio`, `Luna.Waveforms`, `Luna.audioNsAtTick`, `Luna.kindForScale`, `Luna.waveformColumns`, `Luna.waveformLanes`, `session.musical.timeline`; `examples/arrangement.html`, `docs/CLIPS.md` |
 | 4 Markers and clips | `session.markers`, `clip.trim`, `clip.move`/`split`/`duplicate`/`slip`/`setMuted`, `clip.setFadeIn`/`setFadeOut`/`crossfade`, `session.setFadeCurve`, `playlist.heal`/`addFades`/`deleteFades`, `session.moveClips`, `session.transaction`, `context.snapshot`/`restore`; `examples/editor.html`, `examples/clip-editor.html`, `docs/CLIPS.md` |
-| 5 Piano roll | `clip.midi.notes`, `midi.setVelocities`, `midi.setMuted`, `midi.deleteNotes`; `examples/pianoroll.html`, `examples/editor.html` |
+| 5 Piano roll | `clip.midi.notes`, `midi.setVelocities`, `midi.setMuted`, `midi.deleteNotes`, `midi.moveEvents` (SysEx, CC); `examples/pianoroll.html`, `examples/editor.html` |
 | 6 Tracking | `luna.audioInputs`, `session.record`, `track.recordEnabled`, `session.uploadFile` (a `File`), `session.importPath` (a path; see FILES.md); `examples/import.html` |
 | 7 Auto-pan | `control.automation` (`insert`/`clear`/`move`/`setValue`), `track.setAutomationMode`; `examples/automation.html` |
 | 8 Sends | `channel.outputs` (`assign`/`unassign`/`retarget`/`moveTo`), `output.controls`, `output.meter`; `examples/sends.html` |
@@ -156,7 +156,7 @@ Pointers for an agent that wants the shortest path. The API reference is `docs/a
 | 10 Report | every read-only surface, plus `luna.renders`; the `check-*.mjs` scripts are the model |
 | 11 Stems | `session.bounce`, `session.exportMain`, `render.progress`, `render.done`, `render.abort`; `examples/jobs.html` |
 | 12 Preset picker | `luna.presets.selection` (`search`, `tags`, `matchAnyTag`, `presets`, `recommendations`, `groups`, `recommendationError`), `luna.assistant.enabled`, `slot.loadPreset`, `slot.presetUid`; `examples/presets.html`, facts 120-122 |
-| 13 MIDI monitor | `Luna.MidiInput` (`listen`, `onNote`, `onControlChange`, `onGap`; never Web MIDI), `luna.midiDevices` (`watch`, `onChange`, `inputPort`), `Luna.MockEngine.receiveMidi`; `examples/midi-input.html`, fact 125 |
+| 13 MIDI monitor | `Luna.MidiInput` (`listen`, `onNote`, `onControlChange`, `onSysEx`, `onGap`; never Web MIDI), `luna.midiDevices` (`watch`, `onChange`, `inputPort`), `Luna.MockEngine.receiveMidi`; `examples/midi-input.html`, fact 125 |
 
 ## Proving it
 

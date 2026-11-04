@@ -8,7 +8,9 @@ type MidiInputType =
   | "controlChange"
   | "programChange"
   | "channelPressure"
-  | "pitchBend";
+  | "pitchBend"
+  | "sysex";
 ```
 
-What a channel message is, from its status byte. A note-on with velocity 0 is a `noteOff`.
+What a message is, from its status byte. A note-on with velocity 0 is a `noteOff`. `sysex` is a
+whole System Exclusive message, delivered only when asked for.

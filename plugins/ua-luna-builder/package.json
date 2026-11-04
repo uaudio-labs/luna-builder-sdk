@@ -1,0 +1,34 @@
+{
+  "name": "@uaudio/luna-builder-sdk",
+  "version": "3.1.1",
+  "description": "Prebuilt @uaudio/luna-builder-sdk shipped inside the ua-luna-builder agent plugin",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./sdk/index.cjs",
+  "module": "./sdk/index.js",
+  "types": "./sdk/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./sdk/index.d.ts",
+      "import": "./sdk/index.js",
+      "require": "./sdk/index.cjs"
+    },
+    "./wire": {
+      "types": "./sdk/wire/index.d.ts",
+      "import": "./sdk/wire/index.js",
+      "require": "./sdk/wire/index.cjs"
+    },
+    "./global": {
+      "types": "./sdk/global.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "ua-builder": "./sdk/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

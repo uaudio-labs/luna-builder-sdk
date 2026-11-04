@@ -52,7 +52,7 @@ export type { GuiPage, AddOnTarget, AddOnInstalledFrom, ProgressTask, FileEntry,
 export type { MidiEvent, ClipNote } from './clip';
 export { MidiClip, pairNotes, decodeMidiData, encodeMidiData } from './midi';
 export type { MidiRow, Note, MidiRowData, MidiHost } from './midi';
-export { SendMidi } from './send-midi';
+export { SendMidi, MAX_SYSEX_BYTES } from './send-midi';
 export type { SendMidiTrackTarget, MidiOutputTarget } from './send-midi';
 export { MidiInput, decodeMidiEvents } from './midi-input';
 export type { MidiInputMessage, MidiInputTarget, MidiInputType, MidiInputListenOptions } from './midi-input';

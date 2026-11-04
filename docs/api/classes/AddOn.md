@@ -21,6 +21,7 @@
 | <a id="runhidden"></a> `runHidden` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `run_hidden`: `false` unless it says `true`. With `true` LUNA keeps the page running at full speed while it is hidden. `undefined` on a LUNA older than the property. | - |
 | <a id="showwithsession"></a> `showWithSession` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `show_with_session`: `false` unless it says `true`. Meaningful for `'window'` only. | - |
 | <a id="target"></a> `target` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`AddOnTarget`](../type-aliases/AddOnTarget.md)\> | - | - |
+| <a id="unloadonclose"></a> `unloadOnClose` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | The manifest's `unload_on_close`: `false` unless it says `true`. With `true` LUNA unloads the page when the Add On is closed and loads it fresh when it is opened again, instead of keeping it running hidden. Meaningful for `'window'`, `'browser'` and `'editor'`. `undefined` on a LUNA older than the property. | - |
 | <a id="version"></a> `version` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The manifest's `version`, or `''` when it has none. Follows a replace (fact 131). | - |
 
 ## Accessors

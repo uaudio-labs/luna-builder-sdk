@@ -63,6 +63,22 @@ function statusByte(value: unknown): number {
   return value;
 }
 
+/** The largest SysEx LUNA sends (fact 140): its MIDI output's limit. */
+export const MAX_SYSEX_BYTES = 65536;
+
+function sysexBytes(value: unknown): number[] {
+  if (!Array.isArray(value) && !(value instanceof Uint8Array)) throw new UAError('invalid_value', 'sysex must be an array of bytes');
+  const bytes = Array.from(value as ArrayLike<unknown>);
+  if (bytes.length < 2 || bytes.length > MAX_SYSEX_BYTES) throw new UAError('out_of_range', `sysex must be 2-${MAX_SYSEX_BYTES} bytes`);
+  if (bytes[0] !== 0xf0 || bytes[bytes.length - 1] !== 0xf7) throw new UAError('out_of_range', 'sysex must start with 0xf0 and end with 0xf7');
+  bytes.forEach((b, i) => {
+    if (i > 0 && i < bytes.length - 1 && (typeof b !== 'number' || !Number.isInteger(b) || b < 0 || b > 0x7f)) {
+      throw new UAError('out_of_range', `sysex data byte ${i} must be an integer 0-127`);
+    }
+  });
+  return bytes as number[];
+}
+
 function channelOf(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 15) {
     throw new UAError('out_of_range', 'channel must be an integer 0-15');
@@ -224,6 +240,24 @@ export class SendMidi {
   sendMidiToOutput(output: MidiOutputTarget, byte0: number, byte1: number, byte2: number): Promise<void> {
     return checked(
       () => ({ midi_input_source: outputPortUid(output), byte_0: statusByte(byte0), byte_1: midiByte(byte1, 'data byte 1'), byte_2: midiByte(byte2, 'data byte 2') }),
+      (payload) => this.post('send_midi', payload),
+    );
+  }
+
+  /**
+   * Send a whole SysEx message out of a MIDI device's output port, to the hardware (fact 140):
+   * `0xf0`, data bytes 0-127, `0xf7`, at most 64 KB. A message that breaks those rules rejects
+   * with `out_of_range` before reaching LUNA. As with {@link sendMidiToOutput}, a port that has
+   * gone fails silently, and a LUNA build without SysEx answers `uasrv.invalid_property`.
+   *
+   * @example
+   * await luna.midiDevices.load();
+   * const synth = luna.midiDevices.items.find((d) => d.name.value === 'DX7');
+   * if (synth?.outputPort) await midi.sendSysExToOutput(synth, [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7]);  // identity request
+   */
+  sendSysExToOutput(output: MidiOutputTarget, sysex: ReadonlyArray<number> | Uint8Array): Promise<void> {
+    return checked(
+      () => ({ midi_input_source: outputPortUid(output), sysex: sysexBytes(sysex) }),
       (payload) => this.post('send_midi', payload),
     );
   }

@@ -1,0 +1,321 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA SysEx</title>
+<!--
+  A small SysEx librarian over the MIDI devices LUNA sees. Every System Exclusive message a
+  device sends is logged with its manufacturer and length; click one for its full hex dump, to
+  send it back out, or to copy it. Send hex you type, a Universal Identity Request (the reply is
+  decoded: manufacturer, family, model, version), or every message in a .syx file. Picking an
+  In device that has a MIDI out makes it the Out device too.
+
+  `new Luna.MidiInput(luna).onSysEx(device, (bytes) => ...)` receives (fact 138): LUNA joins a
+  SysEx that arrives in pieces and hands over the whole message, F0 through F7.
+  `new Luna.SendMidi(luna).sendSysExToOutput(device, bytes)` sends one out of a device's MIDI out
+  (fact 140), after checking it. LUNA builds before SysEx support deliver none and refuse to send.
+
+  `npx ua-builder serve` serves the package over HTTP, or open it from file:// in a real
+  browser. Use this rather than Web MIDI (navigator.requestMIDIAccess()), which LUNA's macOS
+  web view does not have.
+-->
+<script src="../dist/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #17171a; color: #e8e8ec; font: 13px/1.35 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #2a2a30; flex-wrap: wrap; }
+  header .title { font-weight: 600; }
+  label { display: flex; gap: 6px; align-items: center; opacity: .85; }
+  select, button, textarea { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #3a3a42; background: #26262c; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  #status { margin-left: auto; opacity: .6; }
+  #status.error { color: #ff8080; opacity: 1; }
+  main { padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  h2 { margin: 0; font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; opacity: .55; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  textarea { font-family: ui-monospace, Menlo, monospace; min-height: 72px; resize: vertical; }
+  #sendNote { min-height: 18px; opacity: .7; }
+  #sendNote.error { color: #ff8080; opacity: 1; }
+  #identity { padding: 8px 10px; border-radius: 6px; background: #1f2a1f; border: 1px solid #355a35; }
+  #identity[hidden] { display: none; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 500; opacity: .55; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 4px 8px; border-bottom: 1px solid #2a2a30; position: sticky; top: 0; background: #17171a; }
+  td { padding: 3px 8px; border-bottom: 1px solid #222228; white-space: nowrap; }
+  td.hex { font-family: ui-monospace, Menlo, monospace; opacity: .7; overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 45%; }
+  tbody tr { cursor: pointer; }
+  tbody tr.selected { background: #2d3a4a; }
+  #scroll { max-height: calc(100vh - 140px); overflow: auto; }
+  #dump { font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; background: #1d1d22; border: 1px solid #2a2a30; border-radius: 6px; padding: 8px 10px; max-height: 40vh; overflow: auto; margin: 0; }
+  .none { opacity: .4; }
+</style>
+<header>
+  <span class="title">LUNA SysEx</span>
+  <label>In <select id="input" aria-label="MIDI input device"></select></label>
+  <label>Out <select id="output" aria-label="MIDI output device"></select></label>
+  <button id="clear">Clear</button>
+  <span id="status">connecting…</span>
+</header>
+<main>
+  <section>
+    <h2>Received</h2>
+    <div id="count" class="none">nothing received yet</div>
+    <div id="scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Device</th><th>Manufacturer</th><th>Bytes</th><th>Data</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+    </div>
+  </section>
+  <section>
+    <h2>Send</h2>
+    <textarea id="hex" spellcheck="false" aria-label="SysEx to send, in hex">F0 7E 7F 06 01 F7</textarea>
+    <div class="row">
+      <button id="send">Send</button>
+      <button id="identityRequest">Identity Request</button>
+      <label><input type="file" id="syxFile" accept=".syx,.bin,application/octet-stream" hidden><button id="pickFile">Send .syx file…</button></label>
+    </div>
+    <div id="sendNote"></div>
+    <div id="identity" hidden></div>
+    <h2>Selected message</h2>
+    <div class="row">
+      <button id="resend" disabled>Send back out</button>
+      <button id="copy" disabled>Copy hex</button>
+      <button id="toSend" disabled>Edit in Send</button>
+    </div>
+    <pre id="dump" class="none">Click a received message.</pre>
+  </section>
+</main>
+<script>
+(async () => {
+  const MAX_ROWS = 300;
+  const ALL = '';
+  const IDENTITY_REQUEST = [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7];
+  const hex = (b) => b.toString(16).padStart(2, '0').toUpperCase();
+  const hexOf = (bytes) => bytes.map(hex).join(' ');
+
+  // A few well-known MIDI manufacturer ids: one byte, or 00 followed by two.
+  const MANUFACTURERS = {
+    '01': 'Sequential', '04': 'Moog', '06': 'Lexicon', '07': 'Kurzweil', '0F': 'Ensoniq', '10': 'Oberheim',
+    '18': 'E-mu', '3E': 'Waldorf', '40': 'Kawai', '41': 'Roland', '42': 'Korg', '43': 'Yamaha', '44': 'Casio',
+    '47': 'Akai', '7D': 'Non-commercial', '7E': 'Universal (non-real time)', '7F': 'Universal (real time)',
+    '00 20 29': 'Novation', '00 20 32': 'Behringer', '00 20 33': 'Access', '00 20 3C': 'Elektron', '00 20 6B': 'Arturia',
+  };
+  // Where the manufacturer id starts and how long it is, in a message or an identity reply.
+  function manufacturerAt(bytes, at) {
+    if (bytes[at] === undefined) return { id: '', name: '?' };
+    const id = bytes[at] === 0 ? hexOf(bytes.slice(at, at + 3)) : hex(bytes[at]);
+    return { id, name: MANUFACTURERS[id] ?? `id ${id}` };
+  }
+
+  // Universal Identity Reply: F0 7E <device> 06 02 <manufacturer> <family 2> <model 2> <version 4> F7.
+  function identityReply(bytes) {
+    if (bytes[1] !== 0x7e || bytes[3] !== 0x06 || bytes[4] !== 0x02) return undefined;
+    const maker = manufacturerAt(bytes, 5);
+    const at = 5 + (bytes[5] === 0 ? 3 : 1);
+    const word = (i) => bytes[i] | (bytes[i + 1] << 7); // LSB first, 7 bits each
+    if (bytes.length < at + 9) return undefined;
+    return { device: bytes[2], maker: maker.name, family: word(at), model: word(at + 2), version: bytes.slice(at + 4, at + 8).join('.') };
+  }
+
+  // Hex text to bytes: spaces, commas, 0x and line breaks are ignored.
+  function parseHex(text) {
+    const tokens = text.replace(/0x/gi, ' ').split(/[\s,]+/).filter(Boolean);
+    const bytes = tokens.map((t) => (/^[0-9a-f]{1,2}$/i.test(t) ? parseInt(t, 16) : NaN));
+    const bad = tokens.find((_, i) => Number.isNaN(bytes[i]));
+    if (bad !== undefined) throw new Error(`"${bad}" is not a hex byte`);
+    return bytes;
+  }
+
+  // A .syx file is SysEx messages back to back; anything between them is skipped.
+  function splitSyx(data) {
+    const messages = [];
+    let start = -1;
+    data.forEach((b, i) => {
+      if (b === 0xf0) start = i;
+      else if (b === 0xf7 && start >= 0) { messages.push([...data.slice(start, i + 1)]); start = -1; }
+    });
+    return messages;
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const status = $('status');
+  const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
+  const note = (text, err = false) => { $('sendNote').textContent = text; $('sendNote').classList.toggle('error', err); };
+  const inputSel = $('input');
+  const outputSel = $('output');
+  const logEl = $('log');
+
+  let luna;
+  try { luna = await Luna.connect(); } catch (e) { say(e.message, true); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  luna.status.onChange(() => {
+    const connected = luna.status.value === 'connected';
+    say(connected ? '' : 'disconnected from LUNA', !connected);
+  });
+
+  const input = new Luna.MidiInput(luna);
+  const midi = new Luna.SendMidi(luna);
+  let stops = [];
+  let listeningTo = '';
+  let received = 0;
+  let firstTime;
+  let selected;            // the bytes of the selected row
+
+  // Devices are kept by name: their uids change when LUNA restarts.
+  const physical = () => luna.midiDevices.items.filter((d) => d.isPhysical);
+  const byName = (name) => physical().find((d) => d.name.value === name);
+
+  function fill(sel, names, withAll) {
+    const keep = sel.value;
+    sel.replaceChildren(
+      ...(withAll ? [Object.assign(document.createElement('option'), { value: ALL, textContent: 'All devices' })] : []),
+      ...names.map((name) => Object.assign(document.createElement('option'), { value: name, textContent: name })),
+    );
+    if (names.includes(keep) || (withAll && keep === ALL)) sel.value = keep;
+  }
+
+  function relist() {
+    fill(inputSel, physical().filter((d) => d.inputPort).map((d) => d.name.value), true);
+    fill(outputSel, physical().filter((d) => d.outputPort).map((d) => d.name.value), false);
+    enableSend();
+    listen();
+  }
+
+  function enableSend() {
+    for (const id of ['send', 'identityRequest', 'pickFile']) $(id).disabled = !outputSel.value;
+    $('resend').disabled = !selected || !outputSel.value;
+  }
+
+  // Out follows In: a device that answers SysEx (an Identity Request, a dump request) answers on
+  // its own MIDI in, so a device picked as In that has a MIDI out becomes Out too. Out can still
+  // be changed by hand afterwards; "All devices" leaves it as it is.
+  function followInput() {
+    const device = byName(inputSel.value);
+    if (device?.outputPort) {
+      outputSel.value = device.name.value;
+      enableSend();
+    }
+  }
+
+  function listen() {
+    const chosen = inputSel.value;
+    const devices = physical().filter((d) => d.inputPort && (chosen === ALL || d.name.value === chosen));
+    const key = devices.map((d) => d.inputPort.path).join('|');
+    if (key === listeningTo && stops.length) return;
+    listeningTo = key;
+    for (const stop of stops) stop();
+    stops = devices.map((d) => input.onSysEx(d, (bytes, m) => receive(d.name.value, bytes, m.time), {
+      onGap: ({ dropped }) => dropped && say(`LUNA dropped ${dropped} messages (a SysEx over 64 KB counts as one)`, true),
+    }));
+    if (!devices.length) say('no MIDI input devices in LUNA', true);
+    else say(`listening to ${devices.length === 1 ? devices[0].name.value : `${devices.length} devices`}`);
+  }
+
+  function receive(device, bytes, time) {
+    received++;
+    firstTime ??= time;
+    const tr = document.createElement('tr');
+    const cells = [
+      ['time', `${((time - firstTime) / 1000).toFixed(3)} s`],
+      ['device', device],
+      ['maker', manufacturerAt(bytes, 1).name],
+      ['length', String(bytes.length)],
+      ['hex', hexOf(bytes.slice(0, 32)) + (bytes.length > 32 ? ' …' : '')],
+    ];
+    for (const [cls, text] of cells) tr.append(Object.assign(document.createElement('td'), { className: cls, textContent: text }));
+    tr.onclick = () => select(tr, bytes);
+    logEl.prepend(tr); // newest first
+    while (logEl.rows.length > MAX_ROWS) logEl.lastElementChild.remove();
+    $('count').textContent = `${received} message${received === 1 ? '' : 's'} received`;
+    $('count').classList.remove('none');
+
+    const id = identityReply(bytes);
+    if (id) {
+      $('identity').hidden = false;
+      $('identity').textContent = `${device} is a ${id.maker} device: family ${id.family}, model ${id.model}, version ${id.version} (device id ${id.device})`;
+    }
+  }
+
+  function select(tr, bytes) {
+    for (const row of logEl.querySelectorAll('tr.selected')) row.classList.remove('selected');
+    tr.classList.add('selected');
+    selected = bytes;
+    $('dump').classList.remove('none');
+    // 16 bytes a line, with offsets, like a hex editor.
+    const lines = [];
+    for (let i = 0; i < bytes.length; i += 16) lines.push(`${i.toString(16).padStart(4, '0')}  ${hexOf(bytes.slice(i, i + 16))}`);
+    $('dump').textContent = lines.join('\n');
+    $('resend').disabled = !outputSel.value;
+    $('copy').disabled = false;
+    $('toSend').disabled = false;
+  }
+
+  async function send(bytes, label) {
+    const device = byName(outputSel.value);
+    if (!device) { note('pick an output device', true); return false; }
+    try {
+      await midi.sendSysExToOutput(device, bytes);
+      note(`sent ${label ?? `${bytes.length} bytes`} to ${device.name.value}`);
+      return true;
+    } catch (e) {
+      // invalid_property from LUNA itself: a build without SysEx sending.
+      note(e.code === 'uasrv.invalid_property' ? 'this LUNA cannot send SysEx' : e.message, true);
+      return false;
+    }
+  }
+
+  $('send').onclick = () => {
+    let bytes;
+    try { bytes = parseHex($('hex').value); } catch (e) { note(e.message, true); return; }
+    send(bytes);
+  };
+  $('identityRequest').onclick = () => {
+    $('identity').hidden = true;
+    send(IDENTITY_REQUEST, 'an Identity Request');
+  };
+  $('pickFile').onclick = () => $('syxFile').click();
+  $('syxFile').onchange = async () => {
+    const file = $('syxFile').files[0];
+    $('syxFile').value = '';
+    if (!file) return;
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+    const messages = splitSyx(data);
+    if (!messages.length) { note(`${file.name} has no SysEx in it`, true); return; }
+    for (let i = 0; i < messages.length; i++) {
+      if (!(await send(messages[i], `message ${i + 1} of ${messages.length} from ${file.name}`))) return;
+      // A pause between messages: many synths need time to store each one.
+      if (i < messages.length - 1) await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+  $('resend').onclick = () => selected && send(selected);
+  $('copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(hexOf(selected)); note('copied'); } catch { note('the clipboard is not available here', true); }
+  };
+  $('toSend').onclick = () => { $('hex').value = hexOf(selected); };
+  $('clear').onclick = () => {
+    logEl.replaceChildren();
+    received = 0;
+    firstTime = undefined;
+    selected = undefined;
+    $('count').textContent = 'nothing received yet';
+    $('count').classList.add('none');
+    $('dump').textContent = 'Click a received message.';
+    $('dump').classList.add('none');
+    $('identity').hidden = true;
+    for (const id of ['resend', 'copy', 'toSend']) $(id).disabled = true;
+  };
+  inputSel.onchange = () => { followInput(); listen(); };
+  outputSel.onchange = enableSend;
+
+  // Follow devices being plugged in or removed; onChange also fires once a new device's name
+  // and ports arrive, which LUNA sends just after the device itself.
+  await luna.midiDevices.watch().ready;
+  luna.midiDevices.onChange(relist);
+  relist();
+})();
+</script>

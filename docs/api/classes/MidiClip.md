@@ -144,6 +144,43 @@ Pushes keep the cells current afterwards as long as an ancestor is watched.
 
 ***
 
+### moveEvents()
+
+```ts
+moveEvents(rows, byTicks): Promise<void>;
+```
+
+Move MIDI rows other than notes — SysEx, CC, program change, pitch bend, aftertouch — by
+`byTicks`, in one post and one "Move MIDI Events" undo entry (fact 141). Each row keeps its
+id, bytes and `enabled`. This is how LUNA's own MIDI lane drags a SysEx.
+
+Refused before anything is sent: a note-on or note-off row (a note's two rows move
+together; one alone would break the note), a row not in this clip, a `byTicks` that is not
+an integer, or a move to before the clip's MIDI origin. A row moved past either end of the
+clip stays in the table but does not play there; keep `row.tick + byTicks` within the clip
+if it should. Nothing is posted for no rows or `byTicks` 0. LUNA builds without the command
+answer with an error.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `rows` | readonly (`number` \| [`MidiRow`](../interfaces/MidiRow.md))[] |
+| `byTicks` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+// Push every SysEx in the clip one beat later, as one undo entry.
+await clip.midi.moveEvents(clip.midi.events.items.filter((r) => r.sysex), Luna.TICKS_PER_BEAT);
+```
+
+***
+
 ### onDispose()
 
 ```ts

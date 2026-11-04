@@ -1887,6 +1887,127 @@ describe('examples/clip-editor.html', () => {
   });
 });
 
+describe('examples/sysex.html', () => {
+  function engineWithDevices() {
+    const engine = new Luna.MockEngine();
+    engine.addMidiDevice('Volt 876', { uid: 'volt' });
+    engine.addMidiDevice('DX7', { uid: 'dx7' });
+    return engine;
+  }
+  const click = (page: Awaited<ReturnType<typeof loadExamplePage>>, id: string) => (page.document.getElementById(id) as HTMLButtonElement).click();
+  const ready = (page: Awaited<ReturnType<typeof loadExamplePage>>) => page.waitFor(() => page.text('#status').includes('listening to 2 devices'), 'the listeners');
+  const yamaha = [0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7];
+  // Identity reply from a Roland: family 0x0123 (291), model 2, version 1.0.3.0.
+  const identity = [0xf0, 0x7e, 0x10, 0x06, 0x02, 0x41, 0x23, 0x02, 0x02, 0x00, 0x01, 0x00, 0x03, 0x00, 0xf7];
+
+  it('logs each SysEx with its device, manufacturer and length, newest first, and ignores channel messages', async () => {
+    const engine = engineWithDevices();
+    const page = await loadExamplePage('sysex.html', engine);
+    await ready(page);
+    await engine.settled();
+    engine.receiveMidi('volt', [[0x90, 60, 100], yamaha]);
+    engine.receiveMidi('dx7', [[0xf0, 0x00, 0x20, 0x6b, 0x7f, 0x42, 0xf7]]);
+    await page.waitFor(() => page.all('#log tr').length === 2, 'two rows');
+    const rows = page.all('#log tr').map((tr) => [...tr.querySelectorAll('td')].slice(1, 4).map((td) => td.textContent));
+    expect(rows).toEqual([
+      ['DX7', 'Arturia', '7'],
+      ['Volt 876', 'Yamaha', '9'],
+    ]);
+    expect(page.all('#log tr')[1]!.querySelector('.hex')!.textContent).toBe('F0 43 10 4C 00 00 7E 00 F7');
+    expect(page.text('#count')).toContain('2 messages');
+
+    // Selecting one shows its dump and lets it be sent back out.
+    (page.all('#log tr')[1] as HTMLElement).click();
+    expect(page.text('#dump')).toBe('0000  F0 43 10 4C 00 00 7E 00 F7');
+    click(page, 'resend');
+    await page.waitFor(() => engine.midiSent.length === 1, 'the resend');
+    expect(engine.midiSent[0]).toMatchObject({ outputPortUid: 'volt_out', sysex: yamaha });
+
+    click(page, 'clear');
+    expect(page.all('#log tr')).toHaveLength(0);
+    expect((page.document.getElementById('resend') as HTMLButtonElement).disabled).toBe(true);
+    page.close();
+  });
+
+  it('sends an Identity Request and decodes the reply', async () => {
+    const engine = engineWithDevices();
+    const page = await loadExamplePage('sysex.html', engine);
+    await ready(page);
+    const output = page.document.getElementById('output') as HTMLSelectElement;
+    output.value = 'DX7';
+    output.dispatchEvent(new page.window.Event('change'));
+    click(page, 'identityRequest');
+    await page.waitFor(() => engine.midiSent.length === 1, 'the request');
+    expect(engine.midiSent[0]).toMatchObject({ outputPortUid: 'dx7_out', sysex: [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7] });
+    await engine.settled();
+    engine.receiveMidi('dx7', [identity]);
+    await page.waitFor(() => !(page.document.getElementById('identity') as HTMLElement).hidden, 'the decoded reply');
+    expect(page.text('#identity')).toBe('DX7 is a Roland device: family 291, model 2, version 1.0.3.0 (device id 16)');
+    page.close();
+  });
+
+  it('makes the picked In device the Out device too, and leaves Out alone for one without a MIDI out', async () => {
+    const engine = engineWithDevices();
+    engine.addMidiDevice('Pads', { uid: 'pads', output: false });
+    const page = await loadExamplePage('sysex.html', engine);
+    await page.waitFor(() => page.text('#status').includes('listening to 3 devices'), 'the listeners');
+    const input = page.document.getElementById('input') as HTMLSelectElement;
+    const output = page.document.getElementById('output') as HTMLSelectElement;
+    const pick = (name: string) => {
+      input.value = name;
+      input.dispatchEvent(new page.window.Event('change'));
+    };
+    expect(output.value).toBe('Volt 876');
+    pick('DX7');
+    expect(output.value).toBe('DX7');
+    click(page, 'identityRequest');
+    await page.waitFor(() => engine.midiSent.length === 1, 'the request');
+    expect(engine.midiSent[0]).toMatchObject({ outputPortUid: 'dx7_out' });
+    pick('Pads'); // no MIDI out: Out stays on DX7
+    expect(output.value).toBe('DX7');
+    // Out can still be changed by hand, and choosing All keeps that choice.
+    output.value = 'Volt 876';
+    output.dispatchEvent(new page.window.Event('change'));
+    pick('');
+    expect(output.value).toBe('Volt 876');
+    page.close();
+  });
+
+  it('sends typed hex, and refuses text that is not a whole SysEx before LUNA sees it', async () => {
+    const engine = engineWithDevices();
+    const page = await loadExamplePage('sysex.html', engine);
+    await ready(page);
+    const hex = page.document.getElementById('hex') as HTMLTextAreaElement;
+    hex.value = '0xF0, 0x41 10\n42 F7';
+    click(page, 'send');
+    await page.waitFor(() => page.text('#sendNote').startsWith('sent 5 bytes'), 'the send');
+    expect(engine.midiSent[0]).toMatchObject({ outputPortUid: 'volt_out', sysex: [0xf0, 0x41, 0x10, 0x42, 0xf7] });
+
+    hex.value = 'F0 4G F7';
+    click(page, 'send');
+    await page.waitFor(() => page.text('#sendNote').includes('"4G" is not a hex byte'), 'the hex error');
+    hex.value = 'F0 41 10';
+    click(page, 'send');
+    await page.waitFor(() => page.text('#sendNote').includes('0xf7'), 'the SDK check');
+    expect(engine.midiSent).toHaveLength(1);
+    page.close();
+  });
+
+  it('sends every message in a .syx file, skipping what lies between them', async () => {
+    const engine = engineWithDevices();
+    const page = await loadExamplePage('sysex.html', engine);
+    await ready(page);
+    const input = page.document.getElementById('syxFile') as HTMLInputElement;
+    const file = new page.window.File([new Uint8Array([0x00, ...yamaha, 0x55, 0xf0, 0x7d, 0x01, 0xf7])], 'patches.syx');
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new page.window.Event('change'));
+    await page.waitFor(() => engine.midiSent.length === 2, 'both messages', 3000);
+    expect(engine.midiSent.map((m) => m.sysex)).toEqual([yamaha, [0xf0, 0x7d, 0x01, 0xf7]]);
+    expect(page.text('#sendNote')).toBe('sent message 2 of 2 from patches.syx to Volt 876');
+    page.close();
+  });
+});
+
 describe('examples/midi-input.html', () => {
   function engineWithDevices() {
     const engine = new Luna.MockEngine();

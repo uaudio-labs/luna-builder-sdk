@@ -1,0 +1,194 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LUNA presets</title>
+<!--
+  Preset selection for a plugin on an insert slot, the way LUNA's own plugin pages offer it:
+  type to filter presets by name, pick tags from the plugin's tag groups, and let UA Assistant
+  recommend presets for the same text. Click a preset or a recommendation to load it.
+
+  `luna.presets.selection(pluginId)` does the work: set its `search` and `tags`, read its
+  `presets` and `recommendations`. It debounces typing and drops replies a newer request
+  overtook. Recommendations keep only presets carrying the selected tags (facts 120-121).
+
+  Recommendations need UA Assistant connected to LUNA, and LUNA builds a plugin's search index
+  when the plugin is instantiated while the assistant is connected: if it connected later,
+  re-insert the plugin. Try UA Paradise Guitar Studio, whose presets are tagged.
+
+  `npx ua-builder serve` serves the package over HTTP, or open it from file:// in a real
+  browser.
+-->
+<script src="../sdk/luna.global.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #17171a; color: #e8e8ec; font: 13px/1.35 -apple-system, system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #2a2a30; flex-wrap: wrap; }
+  header .title { font-weight: 600; }
+  select, button, input { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #3a3a42; background: #26262c; color: inherit; }
+  button { cursor: pointer; }
+  #status { margin-left: auto; opacity: .6; }
+  #status.error { color: #ff8080; opacity: 1; }
+  main { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+  #search { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .label { opacity: .55; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; min-width: 110px; }
+  .chip { padding: 3px 10px; border-radius: 12px; font-size: 12px; }
+  .chip[aria-pressed="true"] { background: #2d5a8a; border-color: #5a9ae0; }
+  #recs button { border-color: #6a5ac0; }
+  #recs .note { opacity: .55; }
+  #list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+  .preset { text-align: left; display: flex; flex-direction: column; gap: 2px; }
+  .preset .tags { font-size: 11px; opacity: .55; }
+  .preset[data-current="true"], #recs button[data-current="true"] { background: #2f4a2f; border-color: #7c7; }
+  #count { opacity: .55; }
+</style>
+<header>
+  <span class="title">LUNA presets</span>
+  <select id="slot"></select>
+  <label><input type="checkbox" id="any"> match any tag</label>
+  <span id="status">connecting…</span>
+</header>
+<main>
+  <input id="search" type="search" placeholder="Search presets, or describe a sound…" autocomplete="off">
+  <div class="row" id="recs"><span class="label">Recommended</span></div>
+  <div id="groups"></div>
+  <div id="count"></div>
+  <div id="list"></div>
+</main>
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  const say = (text, err = false) => { status.textContent = text; status.classList.toggle('error', err); };
+  const slotSel = document.getElementById('slot');
+  const searchEl = document.getElementById('search');
+  const anyEl = document.getElementById('any');
+  const recsEl = document.getElementById('recs');
+  const groupsEl = document.getElementById('groups');
+  const countEl = document.getElementById('count');
+  const listEl = document.getElementById('list');
+
+  let luna;
+  try { luna = await Luna.connect(); } catch (e) { say(e.message, true); return; }
+  Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+  luna.status.onChange(() => {
+    const connected = luna.status.value === 'connected';
+    say(connected ? '' : 'disconnected from LUNA', !connected);
+  });
+  await luna.plugins.load();
+
+  // `slots` lists every loaded insert; `sel` is the selection for the chosen one.
+  let slots = [], slot, sel, selOffs = [], slotOffs = [];
+
+  async function build() {
+    for (const off of slotOffs) off();
+    slotOffs = [];
+    const session = luna.sessions.current();
+    if (!session) { say('no session open in LUNA', true); return; }
+    await session.ready();
+    const channels = [...session.visibleTracks, ...session.buses.items];
+    await Promise.all(channels.map((ch) => ch.effects.load()));
+    const relist = () => {
+      slots = channels.flatMap((ch) => ch.effectSlots.filter((s) => !s.isEmpty).map((s) => ({ ch, s })));
+      slotSel.replaceChildren(...slots.map(({ ch, s }) => Object.assign(document.createElement('option'), {
+        value: s.path,
+        textContent: `${ch.name.value ?? ch.id} · ${luna.plugins.byId(s.pluginId.value)?.name.value ?? s.pluginId.value}`,
+      })));
+      const keep = slots.find(({ s }) => s === slot && s.pluginId.value === sel?.pluginId);
+      if (keep) { slotSel.value = slot.path; return; }
+      void pick(slots[0]?.s);
+    };
+    for (const ch of channels) for (const s of ch.effectSlots) slotOffs.push(s.pluginId.onChange(relist));
+    relist();
+  }
+
+  slotSel.onchange = () => { void pick(slots.find(({ s }) => s.path === slotSel.value)?.s); };
+
+  async function pick(next) {
+    for (const off of selOffs) off();
+    selOffs = [];
+    sel?.dispose();
+    slot = next;
+    sel = undefined;
+    if (!slot) { say('insert a plugin on a track to pick its presets', true); render(); return; }
+    say('');
+    sel = luna.presets.selection(slot.pluginId.value, { maxRecommendations: 5 });
+    // Carry the typed text and match mode over to the new plugin.
+    await sel.search.set(searchEl.value);
+    await sel.matchAnyTag.set(anyEl.checked);
+    await sel.ready();
+    for (const prop of [sel.presets, sel.recommendations, sel.groups, sel.tags, sel.recommendationsAvailable, sel.recommendationError, sel.error, slot.presetUid]) {
+      selOffs.push(prop.onChange(render));
+    }
+    render();
+  }
+
+  searchEl.oninput = () => { void sel?.search.set(searchEl.value); };
+  anyEl.onchange = () => { void sel?.matchAnyTag.set(anyEl.checked); };
+
+  const load = (uid) => slot?.loadPreset(uid).catch((e) => say(e.message, true));
+  const isCurrent = (uid) => String(slot?.presetUid.value === uid);
+
+  function render() {
+    renderRecs();
+    renderGroups();
+    const rows = sel?.presets.items ?? [];
+    countEl.textContent = sel ? `${rows.length} preset${rows.length === 1 ? '' : 's'}` : '';
+    if (sel?.error.value) say(sel.error.value.message, true);
+    listEl.replaceChildren(...rows.map((row) => {
+      const b = document.createElement('button');
+      b.className = 'preset';
+      b.dataset.uid = row.uid;
+      b.dataset.current = isCurrent(row.uid);
+      b.innerHTML = '<span class="name"></span><span class="tags"></span>';
+      b.querySelector('.name').textContent = row.name + (row.factory ? '' : ' (user)');
+      b.querySelector('.tags').textContent = (row.tags ?? []).join(', ');
+      b.onclick = () => load(row.uid);
+      return b;
+    }));
+  }
+
+  // Recommendations are only asked for while UA Assistant is connected; a refusal (for
+  // example text it will not search on) leaves them empty with a code to explain why.
+  function renderRecs() {
+    const label = recsEl.firstElementChild;
+    const note = (text) => Object.assign(document.createElement('span'), { className: 'note', textContent: text });
+    if (!sel) { recsEl.replaceChildren(label); return; }
+    if (!sel.recommendationsAvailable.value) { recsEl.replaceChildren(label, note('UA Assistant is not connected to LUNA')); return; }
+    const error = sel.recommendationError.value;
+    if (error) {
+      const why = error.code === 'assistant.preset_search_not_initialized_error' ? 're-insert the plugin to index its presets'
+        : error.code === 'assistant.input_classifier_rejected' ? 'try describing a sound' : error.message;
+      recsEl.replaceChildren(label, note(why));
+      return;
+    }
+    const recs = sel.recommendations.items;
+    if (recs.length === 0) { recsEl.replaceChildren(label, note(searchEl.value.trim() ? 'none among the selected tags' : 'type to get recommendations')); return; }
+    recsEl.replaceChildren(label, ...recs.map((rec) => {
+      const b = Object.assign(document.createElement('button'), { textContent: rec.name, title: `score ${rec.score.toFixed(4)}` });
+      b.dataset.uid = rec.uid;
+      b.dataset.current = isCurrent(rec.uid);
+      b.onclick = () => load(rec.uid);
+      return b;
+    }));
+  }
+
+  function renderGroups() {
+    const selected = sel?.tags.value ?? [];
+    groupsEl.replaceChildren(...(sel?.groups.value ?? []).map((group) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.append(Object.assign(document.createElement('span'), { className: 'label', textContent: group.name }));
+      for (const tag of group.tags) {
+        const chip = Object.assign(document.createElement('button'), { className: 'chip', textContent: tag });
+        chip.setAttribute('aria-pressed', String(selected.includes(tag)));
+        chip.onclick = () => { void sel.toggleTag(tag); };
+        row.append(chip);
+      }
+      return row;
+    }));
+  }
+
+  await luna.sessions.ready();
+  await build();
+  luna.sessions.focused.onChange(() => { void build(); });
+})();
+</script>

@@ -147,6 +147,28 @@ describe('Luna.SendMidi to a MIDI output port (fact 124)', () => {
     expect(engine.midiSent).toEqual([]);
   });
 
+  it('sends a whole SysEx out of an output port (fact 140)', async () => {
+    const { engine, midi, volt } = await withDevices();
+    await midi.sendSysExToOutput(volt, [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7]);
+    await midi.sendSysExToOutput('volt_out', new Uint8Array([0xf0, 0xf7]));
+    expect(engine.midiSent).toEqual([
+      { outputPortUid: 'volt_out', bytes: [0xf0, 0, 0], sysex: [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7], recordEnabled: false },
+      { outputPortUid: 'volt_out', bytes: [0xf0, 0, 0], sysex: [0xf0, 0xf7], recordEnabled: false },
+    ]);
+  });
+
+  it('rejects a malformed SysEx before it reaches LUNA', async () => {
+    const { engine, midi, volt, kbd } = await withDevices();
+    await expect(midi.sendSysExToOutput(volt, [0x01, 0xf7])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.sendSysExToOutput(volt, [0xf0, 0x01])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.sendSysExToOutput(volt, [0xf0, 0x80, 0xf7])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.sendSysExToOutput(volt, [0xf0])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.sendSysExToOutput(volt, [0xf0, ...new Array(Luna.MAX_SYSEX_BYTES).fill(1), 0xf7])).rejects.toMatchObject({ code: 'out_of_range' });
+    await expect(midi.sendSysExToOutput(volt, 'f0f7' as never)).rejects.toMatchObject({ code: 'invalid_value' });
+    await expect(midi.sendSysExToOutput(kbd, [0xf0, 0xf7])).rejects.toMatchObject({ code: 'not_found' });
+    expect(engine.midiSent).toEqual([]);
+  });
+
   it('still feeds a device name in as that device\'s input', async () => {
     const { engine, midi } = await withDevices();
     await midi.sendDeviceNote('Volt 876', 60, 100, true);

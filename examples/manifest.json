@@ -160,6 +160,18 @@
             "height": 700
         },
         {
+            "id": "com.uaudio.builder.sysex",
+            "title": "SysEx (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "sysex.html",
+            "local_content_offset": "..",
+            "width": 1000,
+            "height": 700
+        },
+        {
             "id": "com.uaudio.builder.mixer",
             "title": "Mixer (Builder)",
             "version": "0.1.0",

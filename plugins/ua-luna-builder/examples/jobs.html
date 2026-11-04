@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · Bounce and export</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 26px; } h2 { margin-top: 26px; font-size: 18px; }
+  p { color: #acb9c8; line-height: 1.6; }
+  button, select, input[type=text], input[type=number] { font: inherit; padding: 7px 11px; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .5; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  #channels { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0; }
+  #channels label { color: #e4eaf1; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid #343d48; }
+  th { color: #acb9c8; font-weight: 400; }
+  progress { width: 140px; }
+  .state-completed { color: #8ec07c; } .state-running { color: #6db3f2; }
+  .state-aborted, .state-failed { color: #ff8080; }
+  #status { min-height: 24px; } code { color: #f0c674; }
+</style>
+<h1>Bounce and export</h1>
+<p>Pick channels and a bar range, then bounce them through LUNA's render engine, or run
+LUNA's own main-bus export. Renders are objects under <code>/renders</code> with live state
+and progress (fact 44), so every render — including ones started in LUNA itself — appears in
+the table, and any of them can be aborted or deleted from here.</p>
+<p>A bounce without output paths adds its audio to the session as new sources. An offline
+render reports no time remaining, because it runs faster than real time.</p>
+<button id="refresh">Connect</button><p id="status" role="status">Connecting…</p>
+<h2>What to render</h2>
+<div id="channels"></div>
+<div class="row">
+  <label>Name <input id="name" type="text" placeholder="Stem"></label>
+  <label>From bar <input id="fromBar" type="number" value="1" min="1"></label>
+  <label>To bar <input id="toBar" type="number" value="9" min="2"></label>
+  <label><input id="realtime" type="checkbox"> real time</label>
+  <button id="bounce" disabled>Bounce channels</button>
+  <button id="export" disabled>Export main bus</button>
+</div>
+<h2>Renders</h2>
+<table>
+  <thead><tr><th>name</th><th>state</th><th>progress</th><th>remaining</th><th>result</th><th>actions</th></tr></thead>
+  <tbody id="jobs"></tbody>
+</table>
+<script src="../sdk/luna.global.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const B = Luna.TICKS_PER_BEAT;
+let luna, session, timeline, rendersWatch;
+const offs = [];
+const results = new Map();
+const rows = new Map();
+
+const fail = (err) => { $('status').textContent = `Error: ${err?.message ?? err}`; };
+
+async function refresh() {
+  for (const off of offs.splice(0)) off();
+  rows.clear();
+  $('jobs').replaceChildren();
+  $('channels').replaceChildren();
+  try {
+    if (!luna) {
+      luna = await Luna.connect();
+      Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+    }
+    await luna.sessions.ready();
+    session = luna.sessions.current();
+    if (!session) { $('status').textContent = 'No session open in LUNA.'; return; }
+    await session.ready();
+    timeline = session.musical.timeline;
+    // /renders sits outside the session, so it needs its own subscription (fact 34).
+    rendersWatch ??= luna.renders.watch();
+    await rendersWatch.ready;
+
+    const folder = await luna.raw.get(`${session.path}/export_folder_path`, { children: false, flatvalue: true }).catch(() => undefined);
+    $('status').textContent = `${session.name.value ?? session.uid} · export folder: ${folder ?? '?'}`;
+
+    for (const ch of [...session.visibleTracks, ...session.buses.items]) {
+      const isTrack = !(ch instanceof Luna.Bus);
+      const label = document.createElement('label');
+      const box = Object.assign(document.createElement('input'), { type: 'checkbox', value: ch.id, checked: isTrack });
+      label.append(box, ` ${ch.name.value ?? ch.id}${isTrack ? '' : ` (${ch.busType.value ?? 'bus'})`}`);
+      $('channels').append(label);
+    }
+    offs.push(luna.renders.onChange(drawRenders));
+    drawRenders();
+    $('bounce').disabled = $('export').disabled = false;
+  } catch (err) { fail(err); }
+}
+
+function range() {
+  if (!timeline) return undefined;
+  const from = Number($('fromBar').value), to = Number($('toBar').value);
+  if (!(to > from)) return undefined;
+  return { startTick: timeline.tickAtBar(from), stopTick: timeline.tickAtBar(to) };
+}
+
+function drawRenders() {
+  const seen = new Set();
+  for (const render of luna.renders.items) {
+    seen.add(render.id);
+    const existing = rows.get(render.id);
+    if (existing) {
+      existing.paint();          // a result can arrive after the row was built
+      continue;
+    }
+    const row = document.createElement('tr');
+    row.innerHTML = '<td></td><td></td><td><progress max="1" value="0"></progress></td><td></td><td></td><td></td>';
+    const abort = Object.assign(document.createElement('button'), { textContent: 'Abort' });
+    abort.onclick = () => render.abort().catch(fail);
+    const del = Object.assign(document.createElement('button'), { textContent: 'Delete' });
+    del.onclick = () => render.delete().catch(fail);
+    row.lastElementChild.append(abort, del);
+    $('jobs').append(row);
+
+    const paint = () => {
+      const state = render.state.value ?? '';
+      row.children[0].textContent = render.name.value ?? render.id;
+      row.children[1].textContent = state;
+      row.children[1].className = `state-${state}`;
+      const bar = row.children[2].firstElementChild;
+      bar.value = render.progress.value ?? 0;
+      bar.title = `${Math.round((render.progress.value ?? 0) * 100)} %`;
+      row.children[3].textContent = render.isOffline.value ? 'offline' : render.timeRemaining.value === undefined ? '' : `${render.timeRemaining.value.toFixed(1)} s`;
+      row.children[4].textContent = results.get(render.id) ?? render.errorMessage.value ?? '';
+      abort.disabled = render.isTerminal;
+    };
+    offs.push(
+      render.name.onChange(paint), render.state.onChange(paint), render.percentComplete.onChange(paint),
+      render.timeRemaining.onChange(paint), render.errorMessage.onChange(paint),
+    );
+    rows.set(render.id, { row, paint });
+    paint();
+  }
+  for (const [uid, entry] of rows) {
+    if (!seen.has(uid)) { entry.row.remove(); rows.delete(uid); }
+  }
+}
+
+/**
+ * After a render the engine sits at the range's end, and a control whose lane is in `read`
+ * mode reads the lane's value there (a fade-out can leave the master at -inf): seek a beat
+ * away and back so LUNA re-reads the lanes at the playhead.
+ */
+async function relaxLanes() {
+  try {
+    const at = session.transport.playStart.value ?? 0;
+    await session.transport.seek(at + B);
+    await session.transport.seek(at);
+  } catch { /* not fatal; the render already finished */ }
+}
+
+async function track(render, describe) {
+  drawRenders();
+  try {
+    await render.done();
+    results.set(render.id, describe());
+  } catch (err) {
+    results.set(render.id, `${err.code ?? ''}: ${err.message}`);
+  }
+  await relaxLanes();
+  drawRenders();
+}
+
+$('bounce').onclick = async () => {
+  const channelUids = Array.from($('channels').querySelectorAll('input:checked')).map((i) => i.value);
+  if (!channelUids.length) return fail(new Error('pick at least one channel'));
+  try {
+    const { render, fileUids } = await session.bounce({
+      channelUids,
+      name: $('name').value || 'Stem',
+      realTime: $('realtime').checked,
+      range: range(),
+    });
+    await track(render, () => `${fileUids.length} source(s) added to the session`);
+  } catch (err) { fail(err); }
+};
+
+$('export').onclick = async () => {
+  try {
+    const { render, file } = await session.exportMain({
+      name: $('name').value || 'Export',
+      realTime: $('realtime').checked,
+      range: range(),
+    });
+    await track(render, () => (file ? `file: ${file}` : 'exported'));
+  } catch (err) { fail(err); }
+};
+
+$('refresh').onclick = refresh;
+window.addEventListener('pagehide', () => {
+  for (const off of offs) off();
+  rendersWatch?.release();
+  void luna?.close();
+});
+refresh();
+</script>

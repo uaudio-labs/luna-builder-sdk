@@ -273,6 +273,8 @@ export interface ManifestEntry {
   fixed_size?: boolean;
   /** Keep running at full speed while hidden (no throttling, no suspension). */
   run_hidden?: boolean;
+  /** Unload the page when the Add On is closed; reopening loads it fresh. */
+  unload_on_close?: boolean;
   version?: string;
   /** Who makes the Add On; LUNA shows it in Settings > Add Ons. Overrides a top-level one. */
   manufacturer?: string;
@@ -410,7 +412,7 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
     if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
     if (e.target !== undefined && !['window', 'app', 'page', 'browser', 'editor'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
-    for (const k of ['floating', 'show_with_session', 'fixed_size', 'run_hidden'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
+    for (const k of ['floating', 'show_with_session', 'fixed_size', 'run_hidden', 'unload_on_close'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
     if (e.manufacturer !== undefined && typeof e.manufacturer !== 'string') problems.push(`${where}: "manufacturer" must be a string`);
     if (e.description !== undefined && !isDescription(e.description)) problems.push(`${where}: "description" must be a string or an array of strings`);
   }

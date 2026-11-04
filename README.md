@@ -58,13 +58,17 @@ which also carries the SDK builds, its CLI, the scaffold template, the examples 
 consumer docs. An agent holding only the plugin can build, test and install an Add On with
 no checkout, no npm install and no network.
 
+The GitHub repo carries the built plugin, so it is a marketplace on its own: no clone and
+no `npm ci` needed.
+
 ### Claude Code
 
 ```bash
-claude plugin marketplace add <path to this folder>
+claude plugin marketplace add uaudio-labs/luna-builder-sdk
 claude plugin install ua-luna-builder@luna-builder-sdk
 ```
 
+From an SDK folder instead, use `claude plugin marketplace add <path to this folder>`.
 `.claude-plugin/marketplace.json` points at `./plugins/ua-luna-builder` in this folder, so a
 marketplace added from this folder resolves the plugin without a release tag. To try the
 plugin without a marketplace:
@@ -75,12 +79,14 @@ claude --plugin-dir ./plugins/ua-luna-builder
 
 ### Codex
 
-From this SDK folder, register the marketplace and install the plugin:
+Register the marketplace and install the plugin:
 
 ```bash
-codex plugin marketplace add .
+codex plugin marketplace add uaudio-labs/luna-builder-sdk
 codex plugin add ua-luna-builder@luna-builder-sdk
 ```
+
+From an SDK folder instead, use `codex plugin marketplace add .`.
 
 Alternatively, after registering the marketplace, open the Plugins Directory, choose
 the registered source, and install **LUNA Add On Builder**. Start a fresh task so it
@@ -88,9 +94,9 @@ loads the skills. Try: "Use the create-add-on skill to build a LUNA Add On with 
 bar/beat counter." The catalog is
 `.agents/plugins/marketplace.json`; its source path resolves from the repository root.
 
-The marketplace needs the generated `plugins/ua-luna-builder/` folder: the `npm ci`
-from "Get set up" creates it, as does `npm run build`; distributed SDK packages
-already include it.
+A marketplace added from a folder needs the generated `plugins/ua-luna-builder/` folder: the
+`npm ci` from "Get set up" creates it, as does `npm run build`; the GitHub repo and
+distributed SDK packages already include it.
 
 The plugin carries both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
 Installing from this folder is not a release: the package is not published to npm, and nothing

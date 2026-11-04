@@ -48,6 +48,13 @@ export class AddOn extends Node {
    * running at full speed while it is hidden. `undefined` on a LUNA older than the property.
    */
   readonly runHidden: Prop<boolean>;
+  /**
+   * The manifest's `unload_on_close`: `false` unless it says `true`. With `true` LUNA unloads
+   * the page when the Add On is closed and loads it fresh when it is opened again, instead of
+   * keeping it running hidden. Meaningful for `'window'`, `'browser'` and `'editor'`.
+   * `undefined` on a LUNA older than the property.
+   */
+  readonly unloadOnClose: Prop<boolean>;
   /** The manifest's `manufacturer`, or `''` when it has none. */
   readonly manufacturer: Prop<string>;
   /** The manifest's `description`, an array of strings already concatenated, or `''` when it has none. */
@@ -77,6 +84,7 @@ export class AddOn extends Node {
     this.showWithSession = this.prop<boolean>('show_with_session');
     this.fixedSize = this.prop<boolean>('fixed_size');
     this.runHidden = this.prop<boolean>('run_hidden');
+    this.unloadOnClose = this.prop<boolean>('unload_on_close');
     this.manufacturer = this.prop<string>('manufacturer');
     this.description = this.prop<string>('description');
     this.version = this.prop<string>('version');
@@ -304,7 +312,7 @@ export class Gui extends Node {
    * sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
    * replace what is installed, so the user always confirms. A url that installs and is not
    * one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
-   * then on, to install again; {@link removeImportedAddOn} forgets it.
+   * then on, to install again; {@link removeAddOn} forgets it.
    *
    * Resolves as LUNA starts, not once installed: watch {@link addOns} for the result. A
    * repo whose latest release has nothing LUNA can install, or a shared file that is not
@@ -336,10 +344,10 @@ export class Gui extends Node {
    * `Luna.Unsupported`.
    *
    * @example
-   * await luna.gui.removeImportedAddOn('com.uaudio.qwerty_midi');
+   * await luna.gui.removeAddOn('com.uaudio.qwerty_midi');
    */
-  async removeImportedAddOn(id: string): Promise<void> {
-    await this.post('remove_imported_add_on', { id }).catch(olderLuna('removeImportedAddOn', 'remove_imported_add_on'));
+  async removeAddOn(id: string): Promise<void> {
+    await this.post('remove_add_on', { id }).catch(olderLuna('removeAddOn', 'remove_add_on'));
   }
 
   /**

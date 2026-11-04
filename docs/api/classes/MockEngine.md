@@ -28,7 +28,7 @@ new MockEngine(options): MockEngine;
 | <a id="blessrequests"></a> `blessRequests` | `public` | `string`[] | `[]` | Every folder LUNA asked the user about (`/gui/add_blessed_folder`, `show_folder_dialog`), in order, whatever the answer. |
 | <a id="builtinaddons"></a> `builtInAddOns` | `public` | `string`[] | `[]` | Add On ids (lowercase) under `/gui/add_ons` that are built into LUNA, which `/gui/uninstall_add_on` refuses. |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
-| <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [marketplace](#marketplace) that were imported from a link, which `/gui/remove_imported_add_on` removes (from here and from `marketplace`); any other package is the marketplace's own and is refused. |
+| <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [marketplace](#marketplace) that were imported from a link, which `/gui/remove_add_on` removes (from here and from `marketplace`); any other package is the marketplace's own and is refused. |
 | <a id="installingpackages"></a> `installingPackages` | `public` | `string`[] | `[]` | Package ids `/gui/install_add_on` treats as already installing. |
 | <a id="listlimit"></a> `listLimit` | `public` | `number` | `10000` | Entries a recursive `/gui/list_files` returns before it sets `truncated` (LUNA: 10,000). |
 | <a id="marketplace"></a> `marketplace` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The marketplace `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
@@ -950,15 +950,15 @@ MIDI arriving from a device, as LUNA publishes it (fact 125): one batch on the d
 input port `midi_events`, and the same batch on `All`'s. Like LUNA, nothing is published
 on a port no one subscribes to by its `midi_events` path, and a `get` reads no events.
 `device` is a uid from [addMidiDevice](#addmididevice) or a device name; each message is
-`[status, data1, data2]`, stamped `timeMs` (default 0) apart by `stepMs` (default 1).
-Returns how many ports published.
+`[status, data1, data2]`, or a whole SysEx `[0xf0, ..., 0xf7]` (fact 138), stamped `timeMs`
+(default 0) apart by `stepMs` (default 1). Returns how many ports published.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `device` | `string` |
-| `messages` | readonly readonly \[`number`, `number`, `number`\][] |
+| `messages` | readonly (readonly `number`[] \| readonly \[`number`, `number`, `number`\])[] |
 | `options` | \{ `stepMs?`: `number`; `timeMs?`: `number`; \} |
 | `options.stepMs?` | `number` |
 | `options.timeMs?` | `number` |
@@ -971,7 +971,7 @@ Returns how many ports published.
 
 ```ts
 engine.addMidiDevice('Volt 876', { uid: 'volt' });
-engine.receiveMidi('volt', [[0x90, 60, 100], [0x80, 60, 0]]);
+engine.receiveMidi('volt', [[0x90, 60, 100], [0x80, 60, 0], [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7]]);
 ```
 
 ***

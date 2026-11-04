@@ -85,6 +85,8 @@ export interface MockMidiRow {
   data1?: number;
   data2?: number;
   enabled?: boolean;
+  /** A SysEx row's whole message, `0xf0` through `0xf7`, with `status` `0xf0`; `null` on other rows (fact 139). */
+  sysex?: number[] | null;
 }
 
 /** One live MIDI message the mock delivered, in {@link MockEngine.midiSent}. */
@@ -96,12 +98,15 @@ export interface MockMidiSent {
   outputPortUid?: string;
   /** `send_midi_all_notes_off`, recorded as CC 123. */
   allNotesOff?: true;
+  /** `[0xf0, 0, 0]` for a SysEx, whose message is in {@link sysex}. */
   bytes: [number, number, number];
+  /** A SysEx's whole message (fact 140). */
+  sysex?: number[];
   /** Also handed to LUNA's record input. */
   recordEnabled: boolean;
 }
 
-const EMPTY_MIDI_TABLE =(): Record<string, unknown> => ({ operation: 'update', row_ids: [], enabled: [], midi_data: [], tick: [] });
+const EMPTY_MIDI_TABLE =(): Record<string, unknown> => ({ operation: 'update', row_ids: [], enabled: [], midi_data: [], tick: [], sysex: [] });
 
 /** Pack rows the way the engine's column table does (fact 39). */
 function encodeMidiTable(operation: string, rows: readonly Required<MockMidiRow>[]): Record<string, unknown> {
@@ -111,14 +116,16 @@ function encodeMidiTable(operation: string, rows: readonly Required<MockMidiRow>
     enabled: rows.map((r) => r.enabled),
     midi_data: rows.map((r) => ((r.status & 0xff) << 16) | ((r.data1 & 0x7f) << 8) | (r.data2 & 0x7f)),
     tick: rows.map((r) => r.tick),
+    // LUNA's sysex column (fact 139): the message's bytes, null on every other row.
+    sysex: rows.map((r) => r.sysex),
   };
 }
 
 function decodeMidiTable(value: unknown): Required<MockMidiRow>[] {
-  const table = value as { row_ids?: number[]; enabled?: boolean[]; midi_data?: number[]; tick?: number[] } | undefined;
+  const table = value as { row_ids?: number[]; enabled?: boolean[]; midi_data?: number[]; tick?: number[]; sysex?: (number[] | null)[] } | undefined;
   return (table?.row_ids ?? []).map((rowid, i) => {
     const packed = table?.midi_data?.[i] ?? 0;
-    return { rowid, tick: table?.tick?.[i] ?? 0, status: (packed >>> 16) & 0xff, data1: (packed >>> 8) & 0x7f, data2: packed & 0x7f, enabled: table?.enabled?.[i] !== false };
+    return { rowid, tick: table?.tick?.[i] ?? 0, status: (packed >>> 16) & 0xff, data1: (packed >>> 8) & 0x7f, data2: packed & 0x7f, enabled: table?.enabled?.[i] !== false, sysex: table?.sysex?.[i] ?? null };
   });
 }
 
@@ -256,8 +263,17 @@ export class MockEngine {
         },
         // Facts 108 and 109, after deviced's Edit_SendMidi.
         send_midi: (data, engine) => {
-          const body = (data ?? {}) as { session_uid?: string; track_uid?: string; tracks?: { track_uid?: string; record_enabled?: boolean }[]; midi_input_source?: string; record_enabled?: boolean; byte_0?: number; byte_1?: number; byte_2?: number };
+          const body = (data ?? {}) as { session_uid?: string; track_uid?: string; tracks?: { track_uid?: string; record_enabled?: boolean }[]; midi_input_source?: string; record_enabled?: boolean; byte_0?: number; byte_1?: number; byte_2?: number; sysex?: unknown };
           const invalid = (): UAError => new UAError('uasrv.invalid_property', 'post /sessions/send_midi: uasrv.invalid_property', { cmd: 'post', path: '/sessions/send_midi' });
+          if (body.sysex !== undefined) {
+            // Fact 140: a whole SysEx, only with midi_input_source and no bytes or tracks.
+            const s = body.sysex;
+            const ok = Array.isArray(s) && s.length >= 2 && s.length <= 65536 && s[0] === 0xf0 && s[s.length - 1] === 0xf7 && s.slice(1, -1).every((b) => Number.isInteger(b) && b >= 0 && b < 0x80);
+            if (!ok || !body.midi_input_source || body.byte_0 !== undefined || body.track_uid !== undefined || body.tracks !== undefined) throw invalid();
+            const sent = { bytes: [0xf0, 0, 0] as [number, number, number], sysex: [...(s as number[])], recordEnabled: false };
+            engine.midiSent.push(engine.isMidiOutputPortUid(body.midi_input_source) ? { outputPortUid: body.midi_input_source, ...sent } : { midiInputSource: body.midi_input_source, ...sent });
+            return null;
+          }
           const { byte_0, byte_1, byte_2 } = body;
           if (typeof byte_0 !== 'number' || typeof byte_1 !== 'number' || typeof byte_2 !== 'number') throw invalid();
           const bytes = [byte_0, byte_1, byte_2] as [number, number, number];
@@ -489,9 +505,9 @@ export class MockEngine {
           engine.addOnInstalls.push({ id: pkg });
           return null;
         },
-        // Fact 128: remove_imported_add_on's checks and codes as LUNA's.
-        remove_imported_add_on: (data, engine) => {
-          const fail = (code: string, why: string) => new UAError(code, `remove_imported_add_on: ${why}`, { cmd: 'post', path: '/gui/remove_imported_add_on' });
+        // Fact 128: remove_add_on's checks and codes as LUNA's.
+        remove_add_on: (data, engine) => {
+          const fail = (code: string, why: string) => new UAError(code, `remove_add_on: ${why}`, { cmd: 'post', path: '/gui/remove_add_on' });
           const body = typeof data === 'object' && data !== null ? (data as { id?: unknown }) : {};
           if (typeof body.id !== 'string') throw fail('uasrv.missing_field', 'id is required');
           const id = body.id.toLowerCase();
@@ -678,7 +694,7 @@ export class MockEngine {
     this.addNode('/gui/windows/main', { properties: { page: 'timeline' } });
     this.addNode('/gui/transport', { properties: { arm_mode: false } });
     this.addNode('/gui/add_ons', { properties: { blessed_folders: [] }, readOnly: ['blessed_folders'] });
-    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, fixed_size: false, run_hidden: false, manufacturer: 'Example Co', description: 'A demo Add On.', version: '1.0.0', installed_from: 'folder' } });
+    this.addNode('/gui/add_ons/com.example.demo', { properties: { id: 'com.example.demo', name: 'Demo', target: 'window', icon: '', floating: true, show_with_session: false, fixed_size: false, run_hidden: false, unload_on_close: false, manufacturer: 'Example Co', description: 'A demo Add On.', version: '1.0.0', installed_from: 'folder' } });
     this.addNode('/gui/file_chooser');
     this.addNode('/gui/plugin_windows', { properties: { open: [] }, readOnly: ['open'] });
     if (options.gui === false) this.removeNode('/gui');
@@ -736,7 +752,7 @@ export class MockEngine {
 
   /**
    * Package ids in {@link marketplace} that were imported from a link, which
-   * `/gui/remove_imported_add_on` removes (from here and from `marketplace`); any other
+   * `/gui/remove_add_on` removes (from here and from `marketplace`); any other
    * package is the marketplace's own and is refused.
    */
   importedPackages: string[] = [];
@@ -1759,10 +1775,11 @@ export class MockEngine {
     for (const row of rows) {
       const rowid = row.rowid ?? next++;
       if (operation === 'deleted') {
-        applied.push({ rowid, tick: 0, status: 0, data1: 0, data2: 0, enabled: true });
+        applied.push({ rowid, tick: 0, status: 0, data1: 0, data2: 0, enabled: true, sysex: null });
         continue;
       }
-      const merged = { rowid, tick: row.tick ?? 0, status: row.status ?? 0x90, data1: row.data1 ?? 60, data2: row.data2 ?? 0, enabled: row.enabled ?? true };
+      const sysex = row.sysex ?? null;
+      const merged = { rowid, tick: row.tick ?? 0, status: sysex ? 0xf0 : (row.status ?? 0x90), data1: sysex ? 0 : (row.data1 ?? 60), data2: sysex ? 0 : (row.data2 ?? 0), enabled: row.enabled ?? true, sysex: sysex ? [...sysex] : null };
       applied.push(merged);
     }
     const kept = operation === 'deleted' ? stored.filter((r) => !applied.some((a) => a.rowid === r.rowid)) : [...stored.filter((r) => !applied.some((a) => a.rowid === r.rowid)), ...applied];
@@ -2479,6 +2496,36 @@ export class MockEngine {
           }
           return null;
         },
+        /**
+         * Moves rows other than notes by `offset` ticks, by row id across the session's clips
+         * (fact 141). Refuses note rows, unknown rows and a move below tick 0, before changing
+         * any; nothing happens for no rows or offset 0.
+         */
+        move_midi_events: (data, engine) => {
+          const body = (data ?? {}) as { row_ids?: unknown; offset?: unknown };
+          const path = `${base}/contexts/main/commands/move_midi_events`;
+          if (!Array.isArray(body.row_ids) || typeof body.offset !== 'number') throw new UAError('uasrv.missing_field', 'move_midi_events: row_ids and offset are required', { cmd: 'post', path });
+          const offset = body.offset;
+          const wanted = new Set(body.row_ids as number[]);
+          const byClip = new Map<string, Required<MockMidiRow>[]>();
+          const found = new Set<number>();
+          for (const pl of engine.children(`${base}/playlists`)) {
+            for (const clipUid of engine.children(`${base}/playlists/${pl}/clips`)) {
+              const clip = `${base}/playlists/${pl}/clips/${clipUid}`;
+              const rows = engine.midiRows(clip).filter((r) => wanted.has(r.rowid));
+              for (const r of rows) {
+                const command = r.status & 0xf0;
+                if (command === 0x80 || command === 0x90 || r.tick + offset < 0) throw new UAError('uasrv.invalid_value', 'move_midi_events: a note row, or a tick below 0', { cmd: 'post', path });
+                found.add(r.rowid);
+              }
+              if (rows.length) byClip.set(clip, rows);
+            }
+          }
+          if (found.size !== wanted.size) throw new UAError('uasrv.invalid_value', 'move_midi_events: no such row', { cmd: 'post', path });
+          if (offset === 0) return null;
+          for (const [clip, rows] of byClip) engine.midiEdit(clip, 'changed', rows.map((r) => ({ ...r, tick: r.tick + offset })));
+          return null;
+        },
         nudge: (data, engine) => engine.clipEdit(base, 'nudge', data),
         separate_clips: (data, engine) => engine.clipEdit(base, 'separate_clips', data),
         heal_separation: (data, engine) => engine.clipEdit(base, 'heal_separation', data),
@@ -2685,21 +2732,22 @@ export class MockEngine {
    * input port `midi_events`, and the same batch on `All`'s. Like LUNA, nothing is published
    * on a port no one subscribes to by its `midi_events` path, and a `get` reads no events.
    * `device` is a uid from {@link addMidiDevice} or a device name; each message is
-   * `[status, data1, data2]`, stamped `timeMs` (default 0) apart by `stepMs` (default 1).
-   * Returns how many ports published.
+   * `[status, data1, data2]`, or a whole SysEx `[0xf0, ..., 0xf7]` (fact 138), stamped `timeMs`
+   * (default 0) apart by `stepMs` (default 1). Returns how many ports published.
    *
    * @example
    * engine.addMidiDevice('Volt 876', { uid: 'volt' });
-   * engine.receiveMidi('volt', [[0x90, 60, 100], [0x80, 60, 0]]);
+   * engine.receiveMidi('volt', [[0x90, 60, 100], [0x80, 60, 0], [0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7]]);
    */
-  receiveMidi(device: string, messages: ReadonlyArray<readonly [number, number, number]>, options: { timeMs?: number; stepMs?: number } = {}): number {
+  receiveMidi(device: string, messages: ReadonlyArray<readonly [number, number, number] | readonly number[]>, options: { timeMs?: number; stepMs?: number } = {}): number {
     const folder = `/devices/${LUNA_DEVICE_UID}/midi`;
     if (!this.has(folder)) throw new Error('MockEngine.receiveMidi: no MIDI devices; call addMidiDevice first');
     const uid = this.children(folder).find((d) => d === device || this.value(`${folder}/${d}`, 'name') === device);
     if (!uid || !this.has(`${folder}/${uid}/input_ports/0`)) throw new Error(`MockEngine.receiveMidi: no MIDI device ${device} with an input port`);
     const start = options.timeMs ?? 0;
     const step = options.stepMs ?? 1;
-    const events = messages.map(([status, data1, data2], i) => [start + i * step, status, data1, data2]);
+    // A message starting 0xf0 is a whole SysEx, published as LUNA does: [time, 0xf0, [bytes]] (fact 138).
+    const events = messages.map((m, i) => (m[0] === 0xf0 ? [start + i * step, 0xf0, [...m]] : [start + i * step, m[0], m[1], m[2]]));
     const all = this.children(folder).find((d) => this.value(`${folder}/${d}`, 'name') === 'All');
     let published = 0;
     for (const id of all && all !== uid ? [uid, all] : [uid]) {

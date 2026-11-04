@@ -3,6 +3,17 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## Unreleased
+
+- **Breaking:** `luna.gui.removeImportedAddOn` is now `luna.gui.removeAddOn`, following LUNA's
+  renamed `/gui` `remove_add_on` command.
+- New manifest `unload_on_close` unloads a window, browser or editor Add On's page when it is
+  closed, so it reopens fresh instead of running on hidden.
+- **MIDI SysEx:** `Luna.MidiInput` delivers whole SysEx messages from hardware (`onSysEx`, or
+  `sysex: true` in `listen`), a clip's `MidiRow` has `sysex`, and
+  `SendMidi.sendSysExToOutput()` sends one out of a MIDI port; needs a LUNA with SysEx. New
+  example `examples/sysex.html`, a small SysEx librarian.
+
 ## 3.1.1 Beta 2 — 2026-11-03
 
 - **Breaking:** `session.newTrack()` now resolves to the new `Luna.Track[]` and

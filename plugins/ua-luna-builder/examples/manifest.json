@@ -1,0 +1,259 @@
+{
+    "package_name": "Builder SDK Examples",
+    "min_luna_version": "3.1.1",
+    "manufacturer": "Universal Audio",
+    "add_ons": [
+        {
+            "id": "com.uaudio.builder.arrangement",
+            "title": "Clips and waveforms (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "arrangement.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 900
+        },
+        {
+            "id": "com.uaudio.builder.clip-editor",
+            "title": "Edit clips and fades (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "clip-editor.html",
+            "local_content_offset": "..",
+            "width": 1200,
+            "height": 960
+        },
+        {
+            "id": "com.uaudio.builder.automation",
+            "title": "Automation (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "automation.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 820
+        },
+        {
+            "id": "com.uaudio.builder.browse",
+            "title": "Folder browser (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "browse.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.editor",
+            "title": "Edit clips and notes (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "editor.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 820
+        },
+        {
+            "id": "com.uaudio.builder.files",
+            "title": "File routes (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "files.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 900
+        },
+        {
+            "id": "com.uaudio.builder.folders",
+            "title": "Folder tracks (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "folders.html",
+            "local_content_offset": "..",
+            "width": 1000,
+            "height": 720
+        },
+        {
+            "id": "com.uaudio.builder.secrets",
+            "title": "Secrets (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "secrets.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.secrets.second",
+            "title": "Secrets, second Add On (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "secrets.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.import",
+            "title": "Import and record (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "import.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 720
+        },
+        {
+            "id": "com.uaudio.builder.inserts",
+            "title": "Inserts (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "inserts.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 700
+        },
+        {
+            "id": "com.uaudio.builder.jobs",
+            "title": "Bounce and export (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "jobs.html",
+            "local_content_offset": "..",
+            "width": 1160,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.midi-input",
+            "title": "MIDI input (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "midi-input.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 700
+        },
+        {
+            "id": "com.uaudio.builder.sysex",
+            "title": "SysEx (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "sysex.html",
+            "local_content_offset": "..",
+            "width": 1000,
+            "height": 700
+        },
+        {
+            "id": "com.uaudio.builder.mixer",
+            "title": "Mixer (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "mixer.html",
+            "local_content_offset": "..",
+            "width": 1200,
+            "height": 420
+        },
+        {
+            "id": "com.uaudio.builder.order",
+            "title": "Track order (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "order.html",
+            "local_content_offset": "..",
+            "width": 900,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.pianoroll",
+            "title": "Piano roll (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "pianoroll.html",
+            "local_content_offset": "..",
+            "width": 1100,
+            "height": 820
+        },
+        {
+            "id": "com.uaudio.builder.presets",
+            "title": "Presets (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "presets.html",
+            "local_content_offset": "..",
+            "width": 1000,
+            "height": 760
+        },
+        {
+            "id": "com.uaudio.builder.ruler",
+            "title": "Ruler (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "ruler.html",
+            "local_content_offset": "..",
+            "width": 1040,
+            "height": 720
+        },
+        {
+            "id": "com.uaudio.builder.sends",
+            "title": "Sends (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "sends.html",
+            "local_content_offset": "..",
+            "width": 1200,
+            "height": 600
+        },
+        {
+            "id": "com.uaudio.builder.tracks",
+            "title": "Tracks, raw wire (Builder)",
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "tracks.html",
+            "local_content_offset": "..",
+            "width": 520,
+            "height": 520
+        }
+    ]
+}

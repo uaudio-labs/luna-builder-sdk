@@ -11,7 +11,8 @@
  * and deletion go through LUNA's edit context, which acts on the *selection* rather than on
  * a clip (fact 74), so {@link MidiClip.setVelocities}, {@link MidiClip.setMuted} and
  * {@link MidiClip.deleteNotes} save the user's selection, write their own, post, and put the
- * user's back. Each is one undo entry.
+ * user's back. Each is one undo entry. {@link MidiClip.moveEvents} moves rows other than notes
+ * (SysEx, controllers) by row id, without touching the selection.
  *
  * All of them run inside `session.transaction()` too. In a batch, LUNA holds the table's
  * deltas until the commit (fact 74), so the verbs post without waiting and the lists catch up
@@ -52,6 +53,11 @@ export interface MidiRow {
   readonly data2: number;
   /** `false` is LUNA's per-note mute on a note-on row. */
   readonly enabled: boolean;
+  /**
+   * A SysEx row's whole message, `0xf0` through `0xf7` (`status` is `0xf0`, `data1` and `data2`
+   * are 0); `undefined` on every other row, and on LUNA builds without SysEx (fact 139).
+   */
+  readonly sysex?: readonly number[];
 }
 
 /**
@@ -90,6 +96,8 @@ export interface MidiRowData {
   enabled?: boolean[];
   midi_data?: number[];
   tick?: number[];
+  /** A SysEx row's bytes, `null` on other rows; absent before LUNA stored SysEx (fact 139). */
+  sysex?: (number[] | null)[];
 }
 
 /** Unpack the three MIDI bytes the engine packs into one number (fact 39). */
@@ -114,7 +122,9 @@ function rowsOf(data: MidiRowData, origin: number): MidiRow[] {
     const tick = data.tick?.[i];
     if (typeof rowid !== 'number' || typeof packed !== 'number' || typeof tick !== 'number') return; // an incomplete row is not a row
     const { status, data1, data2 } = decodeMidiData(packed);
-    out.push(Object.freeze({ rowid, tick: tick - origin, status, channel: status & 0x0f, data1, data2, enabled: data.enabled?.[i] !== false }));
+    const sysex = data.sysex?.[i];
+    const row = { rowid, tick: tick - origin, status, channel: status & 0x0f, data1, data2, enabled: data.enabled?.[i] !== false };
+    out.push(Object.freeze(status === 0xf0 && Array.isArray(sysex) ? { ...row, sysex: Object.freeze([...sysex]) } : row));
   });
   return out;
 }
@@ -371,6 +381,44 @@ export class MidiClip extends Node {
       await this.wire.post(`${this.host.sessionPath}/contexts/main/commands/clear`, { session_uid: this.host.sessionUid });
       await this.settleEdit(() => targets.every((t) => this.notes.byId(String(t.rowid)) === undefined), 'delete notes');
     });
+  }
+
+  /**
+   * Move MIDI rows other than notes — SysEx, CC, program change, pitch bend, aftertouch — by
+   * `byTicks`, in one post and one "Move MIDI Events" undo entry (fact 141). Each row keeps its
+   * id, bytes and `enabled`. This is how LUNA's own MIDI lane drags a SysEx.
+   *
+   * Refused before anything is sent: a note-on or note-off row (a note's two rows move
+   * together; one alone would break the note), a row not in this clip, a `byTicks` that is not
+   * an integer, or a move to before the clip's MIDI origin. A row moved past either end of the
+   * clip stays in the table but does not play there; keep `row.tick + byTicks` within the clip
+   * if it should. Nothing is posted for no rows or `byTicks` 0. LUNA builds without the command
+   * answer with an error.
+   *
+   * @example
+   * // Push every SysEx in the clip one beat later, as one undo entry.
+   * await clip.midi.moveEvents(clip.midi.events.items.filter((r) => r.sysex), Luna.TICKS_PER_BEAT);
+   */
+  async moveEvents(rows: ReadonlyArray<MidiRow | number>, byTicks: number): Promise<void> {
+    if (this.disposed) throw new UAError('disposed', 'moveEvents(): the clip is gone', { path: this.path });
+    if (typeof byTicks !== 'number' || !Number.isInteger(byTicks)) throw new UAError('out_of_range', 'moveEvents(): byTicks must be an integer', { path: this.path });
+    const targets: MidiRow[] = [];
+    for (const row of rows) {
+      const found = this.events.byId(String(typeof row === 'number' ? row : row.rowid));
+      if (!found) throw new UAError('not_found', 'moveEvents(): no such row in this clip', { path: this.path });
+      if ((found.status & 0xf0) === 0x80 || (found.status & 0xf0) === 0x90) {
+        throw new UAError('out_of_range', 'moveEvents(): a note row; it moves only with its note-on or note-off', { path: this.path });
+      }
+      if (found.tick + this.shift + byTicks < 0) throw new UAError('out_of_range', "moveEvents(): a row would move before the clip's MIDI origin", { path: this.path });
+      if (!targets.some((t) => t.rowid === found.rowid)) targets.push(found);
+    }
+    if (!targets.length || byTicks === 0) return;
+    await this.wire.post(`${this.host.sessionPath}/contexts/main/commands/move_midi_events`, {
+      session_uid: this.host.sessionUid,
+      row_ids: targets.map((t) => t.rowid),
+      offset: byTicks,
+    });
+    await this.settleEdit(() => targets.every((t) => this.events.byId(String(t.rowid))?.tick === t.tick + byTicks), 'move MIDI events');
   }
 
   private resolveOne(note: Note | number): Note {
