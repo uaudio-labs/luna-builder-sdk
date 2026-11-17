@@ -248,20 +248,21 @@ Re-`get` every loaded path. Called automatically after a reconnect.
 set(
    nodePath, 
    property, 
-value): Promise<void>;
+   value, 
+wire): Promise<void>;
 ```
 
-Optimistic write. The cell takes `value` immediately with a fresh version; the engine's
-acknowledgement resolves the promise. On rejection the previous value is restored if the
-cell still holds our write, then the error is rethrown.
+Write a property: the cell takes `value` at once, and `wire` (default `value`) is what is
+sent, for a value whose wire form differs, such as a number that must go as a float literal.
 
 #### Parameters
 
-| Parameter | Type |
-| ------ | ------ |
-| `nodePath` | `string` |
-| `property` | `string` |
-| `value` | `unknown` |
+| Parameter | Type | Default value |
+| ------ | ------ | ------ |
+| `nodePath` | `string` | `undefined` |
+| `property` | `string` | `undefined` |
+| `value` | `unknown` | `undefined` |
+| `wire` | `unknown` | `value` |
 
 #### Returns
 

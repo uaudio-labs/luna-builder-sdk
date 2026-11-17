@@ -1,11 +1,12 @@
 {
     "package_name": "Builder SDK Examples",
-    "min_luna_version": "3.1.1",
+    "min_luna_version": "3.1.2",
     "manufacturer": "Universal Audio",
     "add_ons": [
         {
             "id": "com.uaudio.builder.arrangement",
             "title": "Clips and waveforms (Builder)",
+            "categories": ["Editing"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -18,6 +19,7 @@
         {
             "id": "com.uaudio.builder.clip-editor",
             "title": "Edit clips and fades (Builder)",
+            "categories": ["Editing"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -30,6 +32,7 @@
         {
             "id": "com.uaudio.builder.automation",
             "title": "Automation (Builder)",
+            "categories": ["Mixing & Mastering"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -42,6 +45,7 @@
         {
             "id": "com.uaudio.builder.browse",
             "title": "Folder browser (Builder)",
+            "categories": ["Import & Export"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -54,6 +58,7 @@
         {
             "id": "com.uaudio.builder.editor",
             "title": "Edit clips and notes (Builder)",
+            "categories": ["Editing", "MIDI"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -66,6 +71,7 @@
         {
             "id": "com.uaudio.builder.files",
             "title": "File routes (Builder)",
+            "categories": ["Import & Export"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -78,6 +84,7 @@
         {
             "id": "com.uaudio.builder.folders",
             "title": "Folder tracks (Builder)",
+            "categories": ["Workflow"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -90,6 +97,7 @@
         {
             "id": "com.uaudio.builder.secrets",
             "title": "Secrets (Builder)",
+            "categories": ["Utility"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -102,6 +110,7 @@
         {
             "id": "com.uaudio.builder.secrets.second",
             "title": "Secrets, second Add On (Builder)",
+            "categories": ["Utility"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -114,6 +123,7 @@
         {
             "id": "com.uaudio.builder.import",
             "title": "Import and record (Builder)",
+            "categories": ["Import & Export", "Recording"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -126,6 +136,7 @@
         {
             "id": "com.uaudio.builder.inserts",
             "title": "Inserts (Builder)",
+            "categories": ["Mixing & Mastering"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -138,6 +149,7 @@
         {
             "id": "com.uaudio.builder.jobs",
             "title": "Bounce and export (Builder)",
+            "categories": ["Import & Export"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -150,6 +162,7 @@
         {
             "id": "com.uaudio.builder.midi-input",
             "title": "MIDI input (Builder)",
+            "categories": ["MIDI"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -162,6 +175,7 @@
         {
             "id": "com.uaudio.builder.sysex",
             "title": "SysEx (Builder)",
+            "categories": ["MIDI"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -174,6 +188,7 @@
         {
             "id": "com.uaudio.builder.mixer",
             "title": "Mixer (Builder)",
+            "categories": ["Mixing & Mastering"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -186,6 +201,7 @@
         {
             "id": "com.uaudio.builder.order",
             "title": "Track order (Builder)",
+            "categories": ["Workflow"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -198,6 +214,7 @@
         {
             "id": "com.uaudio.builder.pianoroll",
             "title": "Piano roll (Builder)",
+            "categories": ["MIDI", "Editing"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -210,6 +227,7 @@
         {
             "id": "com.uaudio.builder.presets",
             "title": "Presets (Builder)",
+            "categories": ["Mixing & Mastering"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -222,6 +240,7 @@
         {
             "id": "com.uaudio.builder.ruler",
             "title": "Ruler (Builder)",
+            "categories": ["Utility"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -234,6 +253,7 @@
         {
             "id": "com.uaudio.builder.sends",
             "title": "Sends (Builder)",
+            "categories": ["Mixing & Mastering"],
             "version": "0.1.0",
             "engines": [
                 "luna"
@@ -246,6 +266,7 @@
         {
             "id": "com.uaudio.builder.tracks",
             "title": "Tracks, raw wire (Builder)",
+            "categories": ["Utility"],
             "version": "0.1.0",
             "engines": [
                 "luna"

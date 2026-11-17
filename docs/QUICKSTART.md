@@ -116,7 +116,7 @@ const bus = session.buses.items.find((b) => b.busType.value === 'aux') ?? await 
 await track.outputs.load(); const send = track.outputs.byId('send_0');
 await send.retarget(bus.id);            // assign appends; retarget replaces (fact 43)
 send.destinations.value;                // [{ uid, busUid, name, error }]; send.unassign(dest.uid)
-track.meter.onChange(() => bar.width = track.meter.level.value[0]);  // subscribes only while observed
+track.meter.onChange(() => bar.style.transform = `scaleY(${track.meter.max})`);  // subscribes while observed; DRAWING.md
 ```
 
 Anything untyped: `track.property('latency_override')`, `track.command('name', payload)`.
@@ -289,9 +289,9 @@ page on `?engine=mock` with no LUNA: a demo session, or `--mock fixture.js` sett
 
 ## 15. Inside LUNA vs a browser
 
-LUNA adds `?port=` (`Luna.isEmbeddedInLuna()`); a browser reaches LUNA on localhost, or
-runs on `?engine=mock`. Windows loads Add Ons from `file://`: use the script-tag bundle.
-The WebSocket has no auth. Files differ most: [FILES.md](FILES.md), "Inside LUNA today".
+LUNA adds `?port=` (`Luna.isEmbeddedInLuna()`); a browser reaches LUNA on localhost, or runs on
+`?engine=mock`. Windows loads Add Ons from `file://`: use the script-tag bundle. No WebSocket auth.
+Files differ most ([FILES.md](FILES.md)); so does drawing at playback rate ([DRAWING.md](DRAWING.md)).
 
 ## 16. Units, in one line
 

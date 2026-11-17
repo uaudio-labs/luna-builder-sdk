@@ -11,6 +11,10 @@ class FakeModule implements WasmModule {
   nextId = 1;
   running = 1;
   audioState = 1;
+  /** The browser resumes asynchronously: the state changes this long after the call. */
+  resumeDelayMs = 0;
+  /** wasmd_audio_input_state: 0 not requested, 1 prompting, 2 connected, 3 denied, 5 failed. */
+  inputState = 0;
   calls: string[] = [];
   hooks!: WasmHooks;
   ccall(name: string, _ret: string | null, _types: string[], args: unknown[]): unknown {
@@ -26,7 +30,14 @@ class FakeModule implements WasmModule {
       case 'wasmd_audio_state_export':
         return this.audioState;
       case 'wasmd_resume_audio_export':
-        this.audioState = 1;
+        if (this.resumeDelayMs) setTimeout(() => (this.audioState = 1), this.resumeDelayMs);
+        else this.audioState = 1;
+        return 1;
+      case 'wasmd_audio_input_state_export':
+        return this.inputState;
+      case 'wasmd_request_audio_input_export':
+      case 'wasmd_retry_audio_input_export':
+        this.inputState = 1;
         return 1;
       case 'wasmd_shutdown_export':
         this.running = 0;
@@ -106,6 +117,114 @@ describe('bootWasmEngine', () => {
     expect(err).toBeInstanceOf(UAError);
     expect(err.code).toBe('engine_boot');
     expect(err.message).toContain('no SharedArrayBuffer');
+  });
+
+  /** Boots a suspended engine with gestures on `gestures`; `whileBooting` runs before `running`. */
+  async function bootSuspended(gestures: EventTarget, options: { resumeOnGesture?: boolean; whileBooting?: () => void } = {}): Promise<FakeModule> {
+    resetWasmBoot();
+    const mod = new FakeModule();
+    mod.audioState = 0;
+    const target: { WasmDeviced?: WasmHooks } = {};
+    await bootWasmEngine({
+      hooksTarget_: target,
+      gestureTarget_: gestures,
+      ...(options.resumeOnGesture === undefined ? {} : { resumeOnGesture: options.resumeOnGesture }),
+      factory_: async () => {
+        queueMicrotask(() => {
+          target.WasmDeviced!.onState('booting', '');
+          options.whileBooting?.();
+          target.WasmDeviced!.onState('running', '');
+        });
+        return mod;
+      },
+      log: () => undefined,
+    });
+    return mod;
+  }
+
+  it('resumes audio on a click or key press once running', async () => {
+    const gestures = new EventTarget();
+    const mod = await bootSuspended(gestures);
+    expect(mod.calls).not.toContain('wasmd_resume_audio_export');
+    gestures.dispatchEvent(new Event('pointerdown'));
+    expect(mod.calls).toContain('wasmd_resume_audio_export');
+    expect(mod.audioState).toBe(1);
+    mod.calls = [];
+    gestures.dispatchEvent(new Event('keydown'));
+    expect(mod.calls).toContain('wasmd_resume_audio_export');
+  });
+
+  it('replays a click made while the engine was booting', async () => {
+    const gestures = new EventTarget();
+    const mod = await bootSuspended(gestures, { whileBooting: () => gestures.dispatchEvent(new Event('pointerup')) });
+    expect(mod.calls).toContain('wasmd_resume_audio_export');
+  });
+
+  it('leaves audio alone with resumeOnGesture: false', async () => {
+    const gestures = new EventTarget();
+    const mod = await bootSuspended(gestures, { resumeOnGesture: false, whileBooting: () => gestures.dispatchEvent(new Event('pointerdown')) });
+    gestures.dispatchEvent(new Event('pointerdown'));
+    expect(mod.calls).not.toContain('wasmd_resume_audio_export');
+  });
+
+  it('resumeAudio waits for the browser to resume the context', async () => {
+    const { mod, engine } = await booted();
+    mod.audioState = 0;
+    mod.resumeDelayMs = 50;
+    expect(await engine.resumeAudio()).toBe(true);
+    mod.audioState = 0;
+    mod.resumeDelayMs = 500;
+    expect(await engine.resumeAudio(100)).toBe(false);
+  });
+
+  describe('microphone on record arm', () => {
+    const ARM = '/sessions/s/tracks/t1/record_enabled';
+    const asked = (mod: FakeModule) => mod.calls.filter((c) => c === 'wasmd_request_audio_input_export' || c === 'wasmd_retry_audio_input_export');
+
+    it('asks inside the click that armed a track', async () => {
+      const { mod, engine, port } = await booted();
+      engine.noteGesture();
+      port.set(ARM, true).catch(() => undefined);
+      expect(asked(mod)).toEqual(['wasmd_request_audio_input_export']);
+    });
+
+    it('asks on the next click when the arm had no gesture to ask inside', async () => {
+      const { mod, engine, port } = await booted();
+      port.set(ARM, true).catch(() => undefined);
+      expect(asked(mod)).toEqual([]);
+      engine.noteGesture();
+      expect(asked(mod)).toEqual(['wasmd_request_audio_input_export']);
+    });
+
+    it('arms the session too, and leaves disarming and other writes alone', async () => {
+      const { mod, engine, port } = await booted();
+      engine.noteGesture();
+      port.set('/sessions/s/record_enabled_count', true).catch(() => undefined);
+      port.set(ARM, false).catch(() => undefined);
+      expect(asked(mod)).toEqual([]);
+      port.set('/sessions/s/record_enabled', true).catch(() => undefined);
+      expect(asked(mod)).toEqual(['wasmd_request_audio_input_export']);
+    });
+
+    it('does not ask again while asking or connected, and retries after a denial', async () => {
+      const { mod, engine, port } = await booted();
+      engine.noteGesture();
+      mod.inputState = 2;
+      port.set(ARM, true).catch(() => undefined);
+      expect(asked(mod)).toEqual([]);
+      mod.inputState = 3;
+      port.set(ARM, true).catch(() => undefined);
+      expect(asked(mod)).toEqual(['wasmd_retry_audio_input_export']);
+    });
+
+    it('leaves the microphone alone with audioInputOnRecord off', async () => {
+      const { mod, engine, port } = await booted();
+      engine.audioInputOnRecord = false;
+      engine.noteGesture();
+      port.set(ARM, true).catch(() => undefined);
+      engine.noteGesture();
+      expect(asked(mod)).toEqual([]);
+    });
   });
 
   it('times out when running never arrives', async () => {

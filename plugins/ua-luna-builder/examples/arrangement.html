@@ -11,6 +11,9 @@
   table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 10px; border-bottom: 1px solid #343d48; }
   th { color: #acb9c8; } canvas { width: 100%; background: #101419; border: 1px solid #343d48; display: block; }
   #wave { height: 210px; } #timeline { height: 260px; }
+  /* The playhead is its own element over the canvas, moved by a transform, so following
+     playback never redraws the canvas (docs/DRAWING.md). */
+  .tlwrap { position: relative; } .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: #ff5a5a; pointer-events: none; will-change: transform; } .playhead[hidden] { display: none; }
   #status, #waveStatus, #live, #timelineStatus { min-height: 24px; } .toolbar { display: flex; flex-wrap: wrap; align-items: center; }
   tr.updated td { background: #1f3a2f; transition: background 1.5s; } tr td { transition: background 1.5s; }
   .marker { display: inline-block; margin: 2px 8px 2px 0; padding: 2px 8px; border-radius: 4px; background: #24303c; }
@@ -33,7 +36,7 @@ analysis draws nothing rather than silence.</p>
   <select id="zoom" aria-label="Zoom"><option value="session">Whole session</option><option value="32">8 bars</option><option value="8">2 bars</option><option value="4">1 bar</option></select>
   <input id="scroll" type="range" min="0" max="1000" value="0" aria-label="Scroll">
 </div>
-<p id="timelineStatus" role="status"></p><canvas id="timeline" width="1000" height="260" aria-label="Clips on the timeline"></canvas>
+<p id="timelineStatus" role="status"></p><div class="tlwrap"><canvas id="timeline" width="1000" height="260" aria-label="Clips on the timeline"></canvas><div id="playhead" class="playhead" hidden></div></div>
 <h2>Playlists and clips</h2>
 <p id="live" role="status"></p>
 <table><thead><tr><th>Track / playlist</th><th>Clip</th><th>Start → stop (beats)</th><th>Source offsets (seconds)</th><th>Plays</th></tr></thead><tbody id="clips"></tbody></table>
@@ -170,6 +173,7 @@ async function drawTimeline() {
 function paintTimeline() {
   const ctx = $('timeline').getContext('2d');
   ctx.clearRect(0, 0, W, TH);
+  placePlayhead();
   if (!scene || !session) return;
   const { t, start, end, span, nsPerPixel, kind, lanes } = scene, x = (tick) => (tick - start) / span * W;
   ctx.font = '12px system-ui'; ctx.textBaseline = 'top';
@@ -221,12 +225,7 @@ function paintTimeline() {
     const top = 24 + row * laneH;
     for (const { fadeIn, fadeOut } of clips) fades += drawFade(ctx, x, fadeIn, true, top + 15, laneH - 18) + drawFade(ctx, x, fadeOut, false, top + 15, laneH - 18);
   }
-  const tick = session.transport.location.value?.tick;
-  if (tick !== undefined && tick >= start && tick <= end) {
-    ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x(tick), 0); ctx.lineTo(x(tick), TH); ctx.stroke();
-    ctx.lineWidth = 1;
-  }
+  placePlayhead();
   $('timelineStatus').textContent =
     `${kind} pairs · ${(nsPerPixel / 1e6).toFixed(2)} ms per pixel · ${drawn} segment${drawn === 1 ? '' : 's'} drawn` +
     `${pending ? ` · ${pending} render pending` : ''}${missing ? ` · ${missing} without analysis` : ''}` +
@@ -274,9 +273,17 @@ function drawFade(ctx, x, fade, fadingIn, top, height) {
 }
 
 // Location pushes arrive faster than frames during playback; paint at most once per frame.
+// Location pushes arrive many times a second while playing: they move the playhead element only.
 function schedulePlayhead() {
   if (playheadFrame) return;
-  playheadFrame = requestAnimationFrame(() => { playheadFrame = 0; paintTimeline(); });
+  playheadFrame = requestAnimationFrame(() => { playheadFrame = 0; placePlayhead(); });
+}
+/** Put the playhead over the canvas at the live location (canvas pixels scaled to CSS pixels). */
+function placePlayhead() {
+  const head = $('playhead'), tick = session?.transport.location.value?.tick;
+  const shown = scene !== undefined && tick !== undefined && tick >= scene.start && tick <= scene.end;
+  head.hidden = !shown;
+  if (shown) head.style.transform = `translateX(${((tick - scene.start) / scene.span) * $('timeline').clientWidth}px)`;
 }
 
 // ── lists ───────────────────────────────────────────────────────────────────────────────

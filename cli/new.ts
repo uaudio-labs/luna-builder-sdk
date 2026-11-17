@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { addOnClashes, bundlePath, flagNumber, flagString, installedAddOns, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
+import { ADD_ON_CATEGORIES, suggestAddOnCategories } from '../src/model/add-on-categories';
+import { addOnClashes, bundlePath, categoryList, flagNumber, flagString, installedAddOns, isWindow, menuFor, packageRoot, sdkVersion, type Args } from './util';
 
 /**
  * Template files stored without their leading dot, because `npm pack` leaves `.npmrc` and
@@ -61,7 +62,7 @@ export function vendorBundle(target: string): void {
 export async function newAddOn(args: Args): Promise<number> {
   const name = args.positional[0];
   if (!name) {
-    console.error('usage: ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--description "Text"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
+    console.error('usage: ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--description "Text"] [--categories "MIDI,Utility"] [--target window|app|browser|editor] [--no-floating] [--show-with-session] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]\n  --no-floating, --show-with-session, --width and --height apply to --target window only');
     return 2;
   }
   const dir = resolve(flagString(args, 'dir') ?? process.cwd(), name);
@@ -87,6 +88,24 @@ export async function newAddOn(args: Args): Promise<number> {
   const displayName = flagString(args, 'name') ?? flagString(args, 'title') ?? titleCase(name);
   const manufacturer = flagString(args, 'manufacturer');
   const description = flagString(args, 'description');
+  // --category is accepted as an alias. Names match without case; the manifest gets them as listed.
+  const categoriesFlag = flagString(args, 'categories') ?? flagString(args, 'category');
+  let categories: string[] | undefined;
+  if (categoriesFlag !== undefined) {
+    categories = [];
+    for (const raw of categoriesFlag.split(',').map((c) => c.trim()).filter(Boolean)) {
+      const match = ADD_ON_CATEGORIES.find((c) => c.name.toLowerCase() === raw.toLowerCase());
+      if (!match) {
+        console.error(`unknown category "${raw}"; use one or more of ${categoryList()}, separated by commas`);
+        return 2;
+      }
+      if (!categories.includes(match.name)) categories.push(match.name);
+    }
+    if (!categories.length) {
+      console.error(`--categories needs one or more of ${categoryList()}`);
+      return 2;
+    }
+  }
   const clashes = addOnClashes([{ id, name: displayName }], installedAddOns());
   if (clashes.length) {
     console.error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nPick another with --id com.x.y and/or --name "Name".`);
@@ -99,6 +118,7 @@ export async function newAddOn(args: Args): Promise<number> {
     __TITLE__: displayName,
     __MANUFACTURER__: JSON.stringify(manufacturer ?? '').slice(1, -1),
     __DESCRIPTION__: JSON.stringify(description ?? '').slice(1, -1),
+    __CATEGORIES__: JSON.stringify(categories ?? []),
     __TARGET__: target,
     __FLOATING__: String(!args.flags['no-floating']),
     __SHOW_WITH_SESSION__: String(!!args.flags['show-with-session']),
@@ -114,12 +134,19 @@ export async function newAddOn(args: Args): Promise<number> {
     let text = readFileSync(file, 'utf8');
     for (const [k, v] of Object.entries(replacements)) text = text.replaceAll(k, v);
     if (rel === 'manifest.json') {
-      const omit = [...(isWindow(target) ? [] : WINDOW_ONLY_FIELDS), ...(manufacturer ? [] : ['manufacturer']), ...(description ? [] : ['description'])];
+      const omit = [...(isWindow(target) ? [] : WINDOW_ONLY_FIELDS), ...(manufacturer ? [] : ['manufacturer']), ...(description ? [] : ['description']), ...(categories ? [] : ['categories'])];
       if (omit.length) text = withoutFields(text, omit);
     }
     writeFileSync(dest, text);
   }
   vendorBundle(dir);
+  if (!categories) {
+    const guess = suggestAddOnCategories(`${displayName} ${description ?? ''}`);
+    console.log(`No --categories given, so manifest.json has none. Add a "categories" array with one or more of
+${categoryList()}
+(suggested from the name${description ? ' and description' : ''}: ${guess.map((g) => `"${g}"`).join(', ')}). See docs/MANIFEST.md.
+`);
+  }
   if (typescript) {
     console.log(`Created ${dir}
 

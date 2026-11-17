@@ -1052,8 +1052,9 @@ describe('examples/files.html Folders tab', () => {
     engine.grantedFolders = [];
     engine.nextDialogFiles = ['/Users/me/Samples'];
     const page = await loadExamplePage('files.html', engine, { search: '?tab=folders' });
-    await page.waitFor(() => !(page.document.querySelector('#fAdd') as HTMLButtonElement).disabled, 'the page to connect');
-    expect(notice(page)).toContain('No folder open');
+    // Add Folder enables before the page has watched the folders and listed; wait for the notice.
+    await page.waitFor(() => notice(page).includes('No folder open'), 'the page to connect');
+    expect((page.document.querySelector('#fAdd') as HTMLButtonElement).disabled).toBe(false);
     (page.document.querySelector('#fAdd') as HTMLButtonElement).click();
     await page.waitFor(() => names(page).length === 4 && sidebar(page).join() === '▸Samples', 'the chosen folder');
     const list = page.document.querySelector('#fList')!;
@@ -1542,6 +1543,52 @@ describe('examples/clip-editor.html', () => {
     fire('pointerup', 14 * px, 140);
     page.document.getElementById('timeline')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 's', bubbles: true }));
     await page.waitFor(() => engine.value(clipPath('bass'), 'stop') === 14 * B, 'the split');
+    expect(page.all('#log .error')).toHaveLength(0);
+    page.close();
+  });
+
+  it('keeps the subscriptions of clips an edit did not touch, and releases a removed clip\'s', async () => {
+    const { engine, page, clipPath } = await twoLanes();
+    const client = page.clients[0]!;
+    const session = await client.session();            // the page's own Session instance
+    const lanes = session.visibleTracks.map((t) => session.playlistFor(t)!);
+    // Count every subscribe the page makes on the clips and segments there now. An edit that
+    // re-subscribes them (unsubscribe all, subscribe all) would leave the listener totals
+    // unchanged, so the calls themselves are counted.
+    let subscribes = 0;
+    const watch = (props: Luna.Prop<unknown>[]) => {
+      for (const p of props) {
+        const original = p.onChange.bind(p);
+        (p as { onChange: Luna.Prop<unknown>['onChange'] }).onChange = (l) => { subscribes++; return original(l); };
+      }
+    };
+    for (const lane of lanes) {
+      for (const c of lane.clips.items) watch([c.name, c.start, c.stop, c.sourceStart, c.muted, c.gain, c.renderState, c.clipType]);
+      for (const s of lane.compiledClips.items) watch([s.start, s.stop, s.sourceStart, s.fadeIn, s.fadeOut]);
+    }
+    // Listeners on a clip's properties, read off the store's cells.
+    const listeners = (path: string) => ['name', 'start', 'stop', 'source_start', 'mute', 'gain', 'render_state', 'clip_type']
+      .reduce((n, prop) => n + (client.store.cell(path, prop) as unknown as { listenerCount: number }).listenerCount, 0);
+    const perClip = listeners(clipPath('bass'));
+    expect(perClip).toBeGreaterThanOrEqual(7);
+
+    // LUNA adds a clip over the middle of Bass: Bass's clip list and segments change.
+    const bassLane = clipPath('bass').replace(/\/clips\/bass$/, '');
+    engine.addNode(`${bassLane}/clips/top`, { properties: { uid: 'top', name: 'top', start: 9 * B, stop: 10 * B, source_uid: 'src1', source_start: 0, source_stop: 0.5e9, clip_type: 0, gain: 0, bypass: false, midi_source_start: 0, layer: 1, mute: false } });
+    await page.waitFor(() => /2 lanes · 5 segments/.test(page.text('#status')), 'the new clip');
+    await engine.settled();
+    // Nothing that was there before was subscribed again; the new clip was subscribed once.
+    expect(subscribes).toBe(0);
+    expect(listeners(`${bassLane}/clips/top`)).toBe(perClip);
+    expect(listeners(clipPath('left'))).toBe(perClip);
+
+    // LUNA removes it again: its subscriptions go with it, and the others stay.
+    engine.removeNode(`${bassLane}/clips/top`);
+    await page.waitFor(() => /2 lanes · 3 segments/.test(page.text('#status')), 'the removed clip');
+    await engine.settled();
+    expect(listeners(`${bassLane}/clips/top`)).toBe(0);
+    expect(subscribes).toBe(0);
+    expect(listeners(clipPath('bass'))).toBe(perClip);
     expect(page.all('#log .error')).toHaveLength(0);
     page.close();
   });

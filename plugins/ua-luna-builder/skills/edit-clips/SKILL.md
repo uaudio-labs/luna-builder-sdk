@@ -56,6 +56,9 @@ from.
 - `addFades` and `clip.slip` work only on a track's active playlist.
 - A raw `luna.raw.set` is not echoed to its writer: write through SDK props.
 - `seg.reportsFades.value === false` means the LUNA cannot say, not that there are none.
+- Redrawing the canvas on each `transport.location` push stutters inside LUNA while it plays
+  (docs/DRAWING.md): draw the playhead as its own element over the canvas, moved by
+  `translateX`, and redraw the canvas only when the scene or view changes.
 
 ## SDK feedback
 

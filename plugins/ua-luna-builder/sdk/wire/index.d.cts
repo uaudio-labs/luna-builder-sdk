@@ -428,6 +428,25 @@ declare class MockEngine {
     /** Per playlist path: published compiled-clip node names by start tick, and the next name. */
     private readonly compiled;
     constructor(options?: MockEngineOptions);
+    /**
+     * Open a page of an installed Add On, as LUNA does when it shows one (fact 143): a node at
+     * `/gui/add_ons/<id>/instances/<add_on_inst>` with its `target` and size. The target is
+     * `options.target`, one of the Add On's `targets` (the host the user swapped it to), or else
+     * the first, its default. Width and height are writable for a `'window'` and clamped to the
+     * Add On's `min_*`/`max_*`. Returns the id.
+     *
+     * @example
+     * const inst = engine.openAddOnInstance('com.example.demo', { width: 400, height: 300 });
+     */
+    openAddOnInstance(addOnId: string, options?: {
+        instanceId?: string;
+        target?: string;
+        width?: number;
+        height?: number;
+    }): string;
+    /** Close a page opened with {@link openAddOnInstance}. */
+    closeAddOnInstance(addOnId: string, instanceId: string): void;
+    private resizeAddOnInstance;
     /** What the next mock file dialog "selects"; empty means the user cancelled. */
     nextDialogFiles: string[];
     /**
@@ -447,19 +466,19 @@ declare class MockEngine {
         path: string;
     }[];
     /**
-     * The marketplace `/gui/install_add_on` installs from: each package id to the ids of the
+     * The showcase `/gui/install_add_on` installs from: each package id to the ids of the
      * Add Ons in it, all lowercase.
      *
      * @example
-     * engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
+     * engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
      */
-    marketplace: Record<string, string[]>;
+    showcase: Record<string, string[]>;
     /** Package ids `/gui/install_add_on` treats as already installing. */
     installingPackages: string[];
     /**
-     * Package ids in {@link marketplace} that were imported from a link, which
-     * `/gui/remove_add_on` removes (from here and from `marketplace`); any other
-     * package is the marketplace's own and is refused.
+     * Package ids in {@link showcase} that were imported from a link, which
+     * `/gui/remove_add_on` removes (from here and from `showcase`); any other
+     * package is the showcase's own and is refused.
      */
     importedPackages: string[];
     /**
@@ -517,7 +536,8 @@ declare class MockEngine {
     controlPathByUid(uid: string): string | undefined;
     /**
      * Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
-     * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
+     * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent);
+     * `version` its installed version (`1.0.0` when absent).
      */
     addPlugin(pluginId: string, options?: {
         name?: string;
@@ -526,6 +546,7 @@ declare class MockEngine {
         effectType?: string;
         formats?: [string, string][];
         favorite?: boolean;
+        version?: string;
     }): void;
     /** `/plugins/query` (fact 127), with LUNA's slot rules. Categories pass through untranslated. */
     queryPlugins(data: unknown): {
@@ -850,6 +871,14 @@ declare class MockEngine {
      */
     private overviewPage;
     private describe;
+    /**
+     * A plugin parameter's `real_value` wants a float literal (fact 142): a bare whole number is
+     * refused with `uasrv.invalid_value`. (LUNA ignores one sent to `value`; the mock cannot
+     * address a control's `value` property, which it reads as the `/value` suffix.) The mock sees
+     * payload objects, so a `FloatLiteral` stands for the literal and a plain integer for the bare
+     * token. Throws for a write to refuse.
+     */
+    private ignoresBareWhole;
     private set;
     /**
      * A client write to one view of a control (fact 97): re-derive the other three and push

@@ -33,10 +33,16 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
    floating: a window floats with LUNA's plugin windows by default. Pass `--no-floating`
    only if the user asks for an ordinary window.
 
+   Then ask for its categories, where the showcase lists it. Suggest one or two from the
+   request (`Luna.suggestAddOnCategories(text)` guesses from a description; the list and what
+   each is for are in `docs/MANIFEST.md`, "Categories") and have the user confirm or pick
+   others. If the request is too vague to say yet, scaffold without `--categories` and ask
+   again once the feature has taken shape.
+
 2. Scaffold with the answers as explicit flags. From the folder that should contain the
    Add On:
    ```sh
-   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] [--description "<what it does>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600] [--template add-on-typescript]   # floating, session and size flags: window only
+   npx ua-builder new <name> --name "<Name>" [--manufacturer "<Name>"] [--description "<what it does>"] [--categories "<Category>,<Category>"] --target window|app|browser|editor [--no-floating] [--show-with-session] [--width 900 --height 600] [--template add-on-typescript]   # floating, session and size flags: window only
    cd <name> && npm install && npm test
    ```
    Pass `--template add-on-typescript` when the Add On is TypeScript, React or anything else
@@ -46,9 +52,11 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
    how to add React.
    Pass `--manufacturer` with the author's company or name; LUNA shows it in Settings > Add
    Ons, and without it the field is left out of the manifest. Pass `--description` with a
-   sentence or two on what the Add On does; it is likewise left out without the flag.
+   sentence or two on what the Add On does; it is likewise left out without the flag. Pass
+   `--categories` with the ones the user confirmed, comma-separated; without it `new` prints
+   suggestions, and `install` and `pack` warn until `manifest.json` has some.
    See `docs/MANIFEST.md` (`target`, `floating`, `show_with_session`, `manufacturer`,
-   `description`).
+   `description`, `categories`).
    `new` refuses an `id` or `name` that an installed Add On already uses; pass a different
    `--id` or `--name`, and do not remove the other Add On without asking.
    Tests run against `Luna.MockEngine`; LUNA is not needed. If `ua-builder` is not on the path,
@@ -91,6 +99,10 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
   drag or a regenerated preview use `{ continuous: true }`, where each command replaces the
   last; write each step from the starting state, not as a change from the previous one.
 - Keep every unsubscribe function and call it when the session changes.
+- Meters and the playhead update many times a second while LUNA plays, and LUNA's web view
+  repaints far slower than Chrome (docs/DRAWING.md): move them with `transform`, never
+  `height`/`width`/`left`, and keep a playhead off the canvas, in its own element over it.
+  Copy the meter from `examples/mixer.html`.
 - Use `luna.raw` only when no typed method exists, and then consider adding one
   (see the add-feature skill).
 - The SDK does not stream audio. To play notes live on a track use `Luna.SendMidi` (or
@@ -111,6 +123,9 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
   recommendations) and `slot.loadPreset(uid)`; copy `examples/presets.html`. Recommendations
   need `luna.assistant.enabled` and the plugin inserted after UA Assistant connected; show
   `recommendationError` rather than failing the page (docs/EVIDENCE.md, facts 120-122).
+- Inside LUNA the page reaches no server but LUNA unless `manifest.json` lists it in `network`
+  (docs/MANIFEST.md, "Network"): add every web API, CDN or font host the Add On uses, https
+  only, and tell the user LUNA will ask them to allow it.
 - API keys and tokens go in `luna.secrets` (docs/MANIFEST.md, "Secrets"), never in
   `localStorage`, IndexedDB, cookies, the manifest or a file in the Add On. Name them by
   service (`openai.api_key`), and say so in the UI when `luna.secrets.storage` is `'memory'`.
@@ -120,6 +135,8 @@ description: Scaffold a new LUNA Add On with @uaudio/luna-builder-sdk, connect i
 
 `npm test` passes. The page renders in `ua-builder serve` against a running LUNA and shows
 the session name. Inside LUNA the Add On appears in the menu named by `manifest.json`.
+`manifest.json` has `categories` the user confirmed; if `ua-builder` warns it has none,
+suggest some from what the Add On now does and ask.
 
 ## SDK feedback
 

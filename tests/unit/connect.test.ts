@@ -41,12 +41,31 @@ describe('Luna.connect', () => {
     (globalThis as G).location = { search: '?port=4719&host=10.1.1.1' };
     expect(Luna.isEmbeddedInLuna()).toBe(true);
     expect(Luna.locationOptions()).toEqual({ host: '10.1.1.1', port: 4719 });
+    expect(Luna.addOnTarget()).toBeUndefined();   // a LUNA older than ?target=
     const connecting = Luna.connect({ WebSocket: FakeSocket });
     expect(FakeSocket.latest.url).toBe('ws://10.1.1.1:4719');
     FakeSocket.latest.open();
     const luna = await connecting;
     expect(luna.engine).toBe('luna');
     await luna.close();
+  });
+
+  it('takes the engine from a <meta name="luna-engine"> when the URL names none, and never inside LUNA', () => {
+    type D = { document?: { querySelector: (s: string) => { getAttribute: (n: string) => string | null } | null } };
+    (globalThis as D).document = {
+      querySelector: (s) => (s === 'meta[name="luna-engine"]' ? { getAttribute: (n) => (n === 'content' ? 'wasm' : null) } : null),
+    };
+    try {
+      expect(Luna.locationOptions()).toEqual({ engine: 'wasm' });
+      (globalThis as G).location = { search: '?host=10.1.1.1' };
+      expect(Luna.locationOptions()).toEqual({ engine: 'wasm', host: '10.1.1.1' });
+      (globalThis as G).location = { search: '?engine=luna' };
+      expect(Luna.locationOptions().engine).toBe('luna');
+      (globalThis as G).location = { search: '?port=4718' };
+      expect(Luna.locationOptions()).toEqual({ port: 4718 });
+    } finally {
+      delete (globalThis as D).document;
+    }
   });
 
   it('lets explicit options beat the page URL', async () => {
@@ -100,7 +119,15 @@ describe('Luna.connect', () => {
     }
   });
 
+  it('reads the host LUNA loaded the page in from ?target=, ignoring an unknown one', () => {
+    (globalThis as G).location = { search: '?port=4718&add_on_inst=abc&target=browser' };
+    expect(Luna.addOnTarget()).toBe('browser');
+    (globalThis as G).location = { search: '?port=4718&target=panel' };
+    expect(Luna.addOnTarget()).toBeUndefined();
+  });
+
   it('is not embedded without a port on the URL', () => {
+    expect(Luna.addOnTarget()).toBeUndefined();
     expect(Luna.isEmbeddedInLuna()).toBe(false);
     expect(Luna.hasNativeBridge()).toBe(false);
   });

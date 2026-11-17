@@ -3,16 +3,51 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
-## Unreleased
+## 3.1.2 Beta 1 — 2026-11-17
 
+- **Breaking:** inside LUNA an Add On page now reaches only the servers its new manifest
+  `network` field lists and the user allows; `Luna.AddOn.network` and `networkAllowed` read them
+  back. An Add On that calls a web API or loads from a CDN must list it. Needs a LUNA with the
+  change.
+- **Breaking:** `Luna.AddOn.target` is replaced by `Luna.AddOn.targets`, default first; a page's
+  current host is still `luna.gui.thisInstance()`'s `target`. See `CHANGELOG.md`.
 - **Breaking:** `luna.gui.removeImportedAddOn` is now `luna.gui.removeAddOn`, following LUNA's
   renamed `/gui` `remove_add_on` command.
+- **Breaking:** LUNA's Add On Marketplace is now the Add On Showcase: its `/gui` paths moved to
+  `/gui/showcase/...`, its DEV key is `add_ons_showcase`, and `Luna.MockEngine.marketplace` is
+  now `Luna.MockEngine.showcase`. See `CHANGELOG.md`.
+- New Add Ons declare `min_luna_version` `3.1.2`; an older LUNA will not open them.
+- New manifest `requires_plugins` names the plugins an Add On goes with, and the version it
+  needs. LUNA lists the Add On disabled, with the plugin it needs, and will not open it while
+  one is missing or too old; an `optional` one only adds the note. `Luna.AddOn.requiresPlugins`
+  and `luna.plugins.unmetRequirements()` let a page check the same. Needs a LUNA with the change.
+- New manifest `targets` lets the user move an Add On between window, browser and editor from
+  its header, and `Luna.addOnTarget()` tells a page which host it was loaded in. Needs a LUNA
+  with the change.
+- New manifest `min_width`, `min_height`, `max_width` and `max_height` set a window Add On's size
+  limits; `Luna.AddOn` reads them back.
+- Every Add On page now knows its own instance: `luna.gui.thisInstance()` gives its size, and
+  `resize()` lets a window Add On set its own size. A `show_with_session` window's size and
+  open state are now saved with the session. Needs a LUNA with the change.
+- A session keeps its app Add On: it reopens on it, or with it on the toolbar when you had
+  moved to the Timeline or Mixer. Needs a LUNA with the change.
+- New manifest `categories` says where the Showcase lists an Add On. `ua-builder` checks the
+  names, suggests some when there are none, and `new --categories` writes them;
+  `Luna.AddOn.categories` reads them back from LUNA.
 - New manifest `unload_on_close` unloads a window, browser or editor Add On's page when it is
   closed, so it reopens fresh instead of running on hidden.
 - **MIDI SysEx:** `Luna.MidiInput` delivers whole SysEx messages from hardware (`onSysEx`, or
   `sysex: true` in `listen`), a clip's `MidiRow` has `sysex`, and
   `SendMidi.sendSysExToOutput()` sends one out of a MIDI port; needs a LUNA with SysEx. New
   example `examples/sysex.html`, a small SysEx librarian.
+- `clip.midi.moveEvents()` moves a clip's non-note MIDI rows (SysEx, CC, program change, pitch
+  bend, aftertouch) in one undo step. Needs a LUNA with the change.
+- New `docs/DRAWING.md`: how to draw meters and playheads that keep up while LUNA plays. The
+  examples' meters and playheads no longer stutter inside LUNA.
+- **Fixed:** a plugin reloaded into a slot now starts at its defaults and powered on, instead
+  of coming back with the old plugin's values or power state. Needs a LUNA with the change.
+- **Fixed:** whole-number writes to a plugin's continuous parameters (`real.set(-3)`) are no
+  longer refused or ignored by LUNA.
 
 ## 3.1.1 Beta 2 — 2026-11-03
 

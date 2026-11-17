@@ -344,27 +344,27 @@ await luna.gui.hidePlugin(track.id, 'effect_0');
 installAddOn(from): Promise<void>;
 ```
 
-Install Add Ons into LUNA, as Settings > Add Ons > MARKETPLACE does (fact 128). Give
-`{ id }`, a marketplace package id or the id of an Add On in one (its whole package
+Install Add Ons into LUNA, as LUNA's Add On Showcase does (fact 128). Give
+`{ id }`, a showcase package id or the id of an Add On in one (its whole package
 installs), or `{ url }`: a public GitHub repo (`https://github.com/<owner>/<repo>`; the
 scheme, `www.`, `.git` and a path inside the repo are tolerated), whose latest release
-LUNA lists in the marketplace and installs every `.lunaaddon` of; or a Google Drive share
+LUNA lists in the showcase and installs every `.lunaaddon` of; or a Google Drive share
 link to a `.lunaaddon` (`https://drive.google.com/file/d/<id>/view?usp=sharing`), an
 iCloud Drive one (`https://www.icloud.com/iclouddrive/<id>#<name>`) or a Dropbox one
 (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=0`), which LUNA downloads
 and installs. The file has to be shared with anyone who has the link: LUNA does not
 sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
 replace what is installed, so the user always confirms. A url that installs and is not
-one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
+one of the showcase's own repos is saved, and LUNA lists it in its showcase from
 then on, to install again; [removeAddOn](#removeaddon) forgets it.
 
 Resolves as LUNA starts, not once installed: watch [addOns](#addons) for the result. A
 repo whose latest release has nothing LUNA can install, or a shared file that is not
 shared with anyone, a folder, or not an Add On, is only found out after this resolves, and LUNA tells the user. Rejects with a `Luna.Error` whose `code` is
-`uasrv.invalid_value` for an id no marketplace package has, a url that is not a GitHub
+`uasrv.invalid_value` for an id no showcase package has, a url that is not a GitHub
 repo or a Drive, iCloud Drive or Dropbox file link, or both given; `uasrv.missing_field` for neither; `uasrv.too_many_requests` while
 that package is already installing. A LUNA without the command (an older one, or one
-without its Add On marketplace) rejects with `Luna.Unsupported`.
+without its Add On showcase) rejects with `Luna.Unsupported`.
 
 #### Parameters
 
@@ -666,11 +666,11 @@ removeAddOn(id): Promise<void>;
 ```
 
 Forget a link [installAddOn](#installaddon) (or LUNA's IMPORT URL) saved, as Remove from
-Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
-`/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
-marketplace now and at the next launch; the installed Add On is not touched. Rejects with
-a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
-has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
+Showcase in LUNA does (fact 128). `id` is the package's id under
+`/gui/showcase/packages`, or the id of an Add On in it. Its listing leaves LUNA's
+showcase now and at the next launch; the installed Add On is not touched. Rejects with
+a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no showcase package
+has, `uasrv.not_permitted` for a package of the showcase's own repos, and
 `uasrv.missing_field` with no id. A LUNA without the command rejects with
 `Luna.Unsupported`.
 
@@ -919,6 +919,35 @@ Show a progress task in LUNA. Call `progress()` with 0..100, then `done()`.
 #### Returns
 
 `Promise`\<[`ProgressTask`](../interfaces/ProgressTask.md)\>
+
+***
+
+### thisInstance()
+
+```ts
+thisInstance(instanceId): Promise<AddOnInstance | undefined>;
+```
+
+This page's own instance (fact 143), from the `add_on_inst` LUNA puts in an Add On page's
+URL, watched so its size follows LUNA. `undefined` outside LUNA, on a LUNA older than
+instances, or when no live instance has that id. Pass an id to look up another page.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `instanceId` | `string` \| `undefined` |
+
+#### Returns
+
+`Promise`\<[`AddOnInstance`](AddOnInstance.md) \| `undefined`\>
+
+#### Example
+
+```ts
+const me = await luna.gui.thisInstance();
+if (me) console.log(me.addOnId, me.instanceId, me.width.value, me.height.value);
+```
 
 ***
 

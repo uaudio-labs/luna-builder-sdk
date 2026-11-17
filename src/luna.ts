@@ -49,7 +49,7 @@ export { connect } from './client/connect';
 export type { ConnectOptions } from './client/connect';
 export { Client, clients } from './client/client';
 export type { Engine } from './client/client';
-export { isEmbeddedInLuna, locationOptions, hasNativeBridge, isLunaEnginePort } from './client/detect';
+export { addOnTarget, isEmbeddedInLuna, locationOptions, hasNativeBridge, isLunaEnginePort } from './client/detect';
 export type { LocationOptions } from './client/detect';
 export { onPathDrop, canDropPaths } from './client/path-drop';
 export type { PathDrop, PathDropHandlers } from './client/path-drop';

@@ -351,6 +351,25 @@ declare class MockEngine {
     /** Per playlist path: published compiled-clip node names by start tick, and the next name. */
     private readonly compiled;
     constructor(options?: MockEngineOptions);
+    /**
+     * Open a page of an installed Add On, as LUNA does when it shows one (fact 143): a node at
+     * `/gui/add_ons/<id>/instances/<add_on_inst>` with its `target` and size. The target is
+     * `options.target`, one of the Add On's `targets` (the host the user swapped it to), or else
+     * the first, its default. Width and height are writable for a `'window'` and clamped to the
+     * Add On's `min_*`/`max_*`. Returns the id.
+     *
+     * @example
+     * const inst = engine.openAddOnInstance('com.example.demo', { width: 400, height: 300 });
+     */
+    openAddOnInstance(addOnId: string, options?: {
+        instanceId?: string;
+        target?: string;
+        width?: number;
+        height?: number;
+    }): string;
+    /** Close a page opened with {@link openAddOnInstance}. */
+    closeAddOnInstance(addOnId: string, instanceId: string): void;
+    private resizeAddOnInstance;
     /** What the next mock file dialog "selects"; empty means the user cancelled. */
     nextDialogFiles: string[];
     /**
@@ -370,19 +389,19 @@ declare class MockEngine {
         path: string;
     }[];
     /**
-     * The marketplace `/gui/install_add_on` installs from: each package id to the ids of the
+     * The showcase `/gui/install_add_on` installs from: each package id to the ids of the
      * Add Ons in it, all lowercase.
      *
      * @example
-     * engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
+     * engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
      */
-    marketplace: Record<string, string[]>;
+    showcase: Record<string, string[]>;
     /** Package ids `/gui/install_add_on` treats as already installing. */
     installingPackages: string[];
     /**
-     * Package ids in {@link marketplace} that were imported from a link, which
-     * `/gui/remove_add_on` removes (from here and from `marketplace`); any other
-     * package is the marketplace's own and is refused.
+     * Package ids in {@link showcase} that were imported from a link, which
+     * `/gui/remove_add_on` removes (from here and from `showcase`); any other
+     * package is the showcase's own and is refused.
      */
     importedPackages: string[];
     /**
@@ -440,7 +459,8 @@ declare class MockEngine {
     controlPathByUid(uid: string): string | undefined;
     /**
      * Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
-     * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
+     * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent);
+     * `version` its installed version (`1.0.0` when absent).
      */
     addPlugin(pluginId: string, options?: {
         name?: string;
@@ -449,6 +469,7 @@ declare class MockEngine {
         effectType?: string;
         formats?: [string, string][];
         favorite?: boolean;
+        version?: string;
     }): void;
     /** `/plugins/query` (fact 127), with LUNA's slot rules. Categories pass through untranslated. */
     queryPlugins(data: unknown): {
@@ -773,6 +794,14 @@ declare class MockEngine {
      */
     private overviewPage;
     private describe;
+    /**
+     * A plugin parameter's `real_value` wants a float literal (fact 142): a bare whole number is
+     * refused with `uasrv.invalid_value`. (LUNA ignores one sent to `value`; the mock cannot
+     * address a control's `value` property, which it reads as the `/value` suffix.) The mock sees
+     * payload objects, so a `FloatLiteral` stands for the literal and a plain integer for the bare
+     * token. Throws for a write to refuse.
+     */
+    private ignoresBareWhole;
     private set;
     /**
      * A client write to one view of a control (fact 97): re-derive the other three and push
@@ -849,7 +878,7 @@ interface WasmHooks {
 }
 type ModuleFactory = (options: Record<string, unknown>) => Promise<WasmModule>;
 interface BootOptions {
-    /** Directory URL holding `devicedwasm.js` and `devicedwasm.wasm`. Default `/__engine/`. */
+    /** Directory URL holding `luna-engine.js` and `luna-engine.wasm`. Default `/__engine/`. */
     engineUrl?: string;
     /** Persist the workspace to OPFS between page loads. Default true. */
     persist?: boolean;
@@ -859,6 +888,15 @@ interface BootOptions {
     log?: (line: string, level: 'out' | 'err') => void;
     /** Boot timeout. Default 120 000 ms (the unstripped module is large). */
     timeoutMs?: number;
+    /** Resume audio on the page's clicks and key presses. Default true. */
+    resumeOnGesture?: boolean;
+    /**
+     * Ask for the microphone when a track or the session is record-armed, inside the click that
+     * armed it (or the next one). Default true. False leaves it to `requestAudioInput()`.
+     */
+    audioInputOnRecord?: boolean;
+    /** Listen for gestures on this target instead of `document` (tests). */
+    gestureTarget_?: EventTarget;
     /** Already-loaded module factory (tests, or a page that loaded the script itself). */
     factory_?: ModuleFactory;
     /** Install hooks on this object instead of `globalThis.WasmDeviced` (tests). */
@@ -892,16 +930,24 @@ declare class WasmEngine {
     private readonly stateListeners;
     private replyHandler;
     private updateHandler;
+    /** `Date.now()` of the last click or key press seen while running. */
+    private lastGestureAt;
+    /** A microphone was wanted with no gesture to ask inside; the next one asks. */
+    private inputWanted;
     get state(): WasmState;
     get isRunning(): boolean;
     onState(listener: (state: WasmState, detail: string) => void): () => void;
     /**
      * Resume the AudioContext. Browsers only allow this after a user gesture, so call it from a
-     * click handler. Resolves true if the context is running afterwards.
+     * click handler; the loader already does on every click and key press. Resolves true once
+     * the context runs, or false if it is not running within `timeoutMs` (the browser resumes
+     * asynchronously, so the state lags the call).
      */
-    resumeAudio(): Promise<boolean>;
+    resumeAudio(timeoutMs?: number): Promise<boolean>;
     /** Ask for microphone input (getUserMedia). Needs a secure context and a user gesture. */
     requestAudioInput(): boolean;
+    private askForInput;
+    private inputState;
     audio(): AudioHealth;
     /** OPFS persistence status, when the module was built with it. */
     persistStatus(): {
@@ -927,7 +973,8 @@ declare function bootWasmEngine(options?: BootOptions): Promise<WasmEngine>;
  *   add is the node path with a `{ properties, ... }` object; a removal is the node path with
  *   `null`. A few boot-time announcements use a bare property path with a scalar.
  * - The engine does echo the writer's own `set` (unlike native LUNA); the Store dedupes.
- * - A missing path answers error `uasrv.invalid_object` (native LUNA answers `{}`).
+ * - A missing path answers `{}`, as on native LUNA; engines before November 2026 answered
+ *   error `uasrv.invalid_object` (fact 10).
  * - No reconnect: the engine boots once per page. `stopped`/`error` close the port.
  */
 
@@ -1195,7 +1242,11 @@ declare class Store {
      * acknowledgement resolves the promise. On rejection the previous value is restored if the
      * cell still holds our write, then the error is rethrown.
      */
-    set(nodePath: string, property: string, value: unknown): Promise<void>;
+    /**
+     * Write a property: the cell takes `value` at once, and `wire` (default `value`) is what is
+     * sent, for a value whose wire form differs, such as a number that must go as a float literal.
+     */
+    set(nodePath: string, property: string, value: unknown, wire?: unknown): Promise<void>;
     /** Raw event tap, called before cells are written. For delta-stream properties. */
     onEvent(listener: (event: Event$1) => void): Unsubscribe;
     /** Drop a subtree from the mirror (after a `removed`, or when a view is disposed). */
@@ -1656,6 +1707,13 @@ declare class Control extends Node {
     /** Automation captured during the current record pass. */
     get automationRecording(): Automation;
     protected release(): void;
+    /**
+     * A number written to a continuous control goes as a float literal (fact 142): LUNA refuses a
+     * bare whole number for a plugin parameter's `real_value` and ignores one for its `value`, so
+     * `real.set(-3)` would fail where `real.set(-3.5)` works. A discrete control's step value
+     * stays a whole number, which is what it requires; so do booleans and anything else.
+     */
+    private wireNumber;
     /** True when `real` is boolean-like (mute, solo, switches). */
     get isSwitch(): boolean;
     /** For switches: current state as a boolean. */
@@ -1745,6 +1803,30 @@ interface PluginQueryOptions {
     /** Maximum number of rows. */
     limit?: number;
 }
+/**
+ * One entry of an Add On manifest's `requires_plugins`, as LUNA reports it on
+ * {@link AddOn.requiresPlugins} (fact 148). It is met when any of `plugin_id` is installed at
+ * `min_version` or later (any version when `''`). One plugin has a different id per format (AU,
+ * VST3, ...), so list each. `name` is what LUNA shows, since a plugin that is not installed has
+ * no name to look up. Unless `optional`, LUNA will not open the Add On while it is unmet.
+ */
+interface PluginRequirement {
+    name: string;
+    plugin_id: string[];
+    min_version: string;
+    optional: boolean;
+}
+/**
+ * Whether plugin version `installed` meets `minVersion`, as LUNA compares them (fact 148):
+ * every dot-separated part as a number, missing parts as 0, so `'0.4.10'` meets `'0.4.3'` and
+ * `'0.4.3.1'` meets `'0.4.3'`. An empty `minVersion` is met by anything; an empty or malformed
+ * `installed` meets only that.
+ *
+ * @example
+ * Luna.pluginVersionMeets('0.4.10', '0.4.3'); // true
+ * Luna.pluginVersionMeets('0.4.2', '0.4.3');  // false
+ */
+declare function pluginVersionMeets(installed: string | undefined, minVersion: string): boolean;
 /** One plugin {@link Plugins.query} returned. */
 interface PluginRow {
     pluginId: string;
@@ -1766,12 +1848,36 @@ declare class Plugin extends Node {
     readonly manifest: Prop<PluginManifest>;
     readonly defaultPresetUid: Prop<string | null>;
     get manufacturer(): string | undefined;
+    /**
+     * Whether it is installed at `minVersion` or later, as LUNA checks an Add On's
+     * `requires_plugins` (fact 148). Reads the loaded {@link installed} and {@link version}.
+     *
+     * @example
+     * const ok = luna.plugins.byId('com.eventfield.vst3.clex')?.isAtLeast('0.4.3') ?? false;
+     */
+    isAtLeast(minVersion: string): boolean;
     get categories(): string[];
 }
 declare class Plugins extends Collection<Plugin> {
     /** Case-insensitive match on name, short names, manufacturer or id. */
     find(query: string): Plugin[];
     byCategory(category: string): Plugin[];
+    /**
+     * The `requirements` the loaded catalog does not meet, as LUNA decides (fact 148): none of a
+     * requirement's `plugin_id` is installed at its `min_version` or later. Pass an Add On's
+     * {@link AddOn.requiresPlugins}; with `blockingOnly`, the ones not marked `optional`, which
+     * are what keeps LUNA from opening it. Load the catalog first.
+     *
+     * @example
+     * await luna.plugins.load();
+     * const me = luna.gui.addOns.byId('com.eventfield.clingy-ex-addon');
+     * for (const r of luna.plugins.unmetRequirements(me?.requiresPlugins.value ?? [])) {
+     *   console.warn(`needs ${r.name}${r.min_version ? ` ${r.min_version}` : ''}`);
+     * }
+     */
+    unmetRequirements(requirements: readonly PluginRequirement[], options?: {
+        blockingOnly?: boolean;
+    }): PluginRequirement[];
     /** All categories in the catalog, sorted. */
     get categories(): string[];
     /**
@@ -5022,7 +5128,17 @@ declare class AddOn extends Node {
     readonly addOnId: Prop<string>;
     /** The manifest's `name`: its menu item and panel header. */
     readonly name: Prop<string>;
-    readonly target: Prop<AddOnTarget>;
+    /**
+     * Every host the Add On can be shown in, default first (fact 144): the manifest's `targets`, such as
+     * `['window', 'browser']`, or a one-entry list from its single `target`. The user can swap an
+     * Add On with more than one between them from its header. The host a page is in now is its
+     * {@link AddOnInstance.target}. `undefined` on a LUNA older than the property.
+     *
+     * @example
+     * const canBePanel = addOn.targets.value?.includes('browser') ?? false;
+     * const defaultHost = addOn.targets.value?.[0];
+     */
+    readonly targets: Prop<AddOnTarget[]>;
     /** Absolute file path of the icon, or `''`. */
     readonly icon: Prop<string>;
     /** The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. */
@@ -5050,11 +5166,38 @@ declare class AddOn extends Node {
     readonly manufacturer: Prop<string>;
     /** The manifest's `description`, an array of strings already concatenated, or `''` when it has none. */
     readonly description: Prop<string>;
+    /**
+     * The manifest's `categories`, such as `['MIDI', 'Utility']` (see {@link ADD_ON_CATEGORIES}),
+     * or `[]` when it has none. LUNA does not check the names, so one from a newer SDK can appear.
+     * `undefined` on a LUNA older than the property.
+     *
+     * @example
+     * const midi = luna.gui.addOns.items.filter((a) => a.categories.value?.includes('MIDI'));
+     */
+    readonly categories: Prop<string[]>;
+    /**
+     * Every server the Add On would connect to (fact 147): its manifest's `network` hosts,
+     * normalized (`'api.example.com'`, `'*.example.com'`, `'host:8443'`), plus a hosted page's own
+     * server. `[]` when none. `undefined` on a LUNA older than the property.
+     *
+     * @example
+     * const servers = addOn.network.value ?? [];
+     */
+    readonly network: Prop<string[]>;
+    /**
+     * Those of {@link AddOn.network} the user allowed (fact 147). Only LUNA's own prompts and
+     * Settings > Add Ons > SERVERS change it; nothing an Add On sends can. A page loads with the
+     * set fixed and is loaded again when it changes.
+     *
+     * @example
+     * const blocked = (addOn.network.value ?? []).filter((h) => !addOn.networkAllowed.value?.includes(h));
+     */
+    readonly networkAllowed: Prop<string[]>;
     /** The manifest's `version`, or `''` when it has none. Follows a replace (fact 131). */
     readonly version: Prop<string>;
     /**
      * Where it is installed (fact 131): `'folder'`, a folder in LUNA's Add Ons folder (from a
-     * `.lunaaddon`, the marketplace, or copied there); `'link'`, a symlink there, as
+     * `.lunaaddon`, the showcase, or copied there); `'link'`, a symlink there, as
      * `ua-builder install` makes on macOS; `'built_in'`, bundled with LUNA. {@link Gui.uninstallAddOn}
      * removes `'folder'` and `'link'` ones (a link loses only the link) and refuses `'built_in'`.
      * `undefined` on a LUNA older than the property.
@@ -5063,10 +5206,83 @@ declare class AddOn extends Node {
      * const removable = addOn.installedFrom.value === 'folder' || addOn.installedFrom.value === 'link';
      */
     readonly installedFrom: Prop<AddOnInstalledFrom>;
-    /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
-     *  menu item), show a `'browser'` in the secondary browser, or an `'editor'` in the Timeline's
-     *  editor panel (never toggling either closed). */
+    /**
+     * The manifest's `min_width`, `min_height`, `max_width` and `max_height` (fact 143): the
+     * window's size limits in pixels, `null` when the manifest declares none. LUNA stops the
+     * user's resize at them and clamps {@link AddOnInstance.resize} to them. Meaningful for
+     * `'window'` only. `undefined` on a LUNA older than the properties.
+     *
+     * @example
+     * const tooNarrow = addOn.minWidth.value != null && innerWidth < addOn.minWidth.value;
+     */
+    readonly minWidth: Prop<number | null>;
+    readonly minHeight: Prop<number | null>;
+    readonly maxWidth: Prop<number | null>;
+    readonly maxHeight: Prop<number | null>;
+    /**
+     * The manifest's `requires_plugins` as LUNA read it (fact 148): the plugins the Add On needs,
+     * each with every `plugin_id` it accepts (always an array), its `min_version` (`''` for any)
+     * and whether it is `optional`; `[]` when it has none. Whether each is met is not here, since
+     * it changes with the installed plugins: ask {@link Plugins.unmetRequirements}. LUNA lists an
+     * Add On whose non-optional requirement is unmet disabled, with the plugin it needs, and
+     * will not open it. `undefined` on a LUNA older than the property.
+     *
+     * @example
+     * await luna.plugins.load();
+     * const missing = luna.plugins.unmetRequirements(addOn.requiresPlugins.value ?? []);
+     * if (missing.length) banner.textContent = `Install ${missing.map((r) => r.name).join(', ')}`;
+     */
+    readonly requiresPlugins: Prop<PluginRequirement[]>;
+    /**
+     * Its pages open in LUNA right now, by `add_on_inst` (fact 143): one per window, browser
+     * panel, editor panel or app page showing it. Use {@link Gui.thisInstance} for your own page.
+     *
+     * @example
+     * await addOn.instances.load();
+     * addOn.instances.items.map((i) => `${i.target.value} ${i.width.value}x${i.height.value}`);
+     */
+    readonly instances: Collection<AddOnInstance>;
+    /** Show it in LUNA in the host it is in now (one of {@link targets}): navigate to an `'app'`,
+     *  open a `'window'` (toggling it like its menu item), show a `'browser'` in the secondary
+     *  browser, or an `'editor'` in the Timeline's editor panel (never toggling either closed). */
     show(): Promise<unknown>;
+}
+/**
+ * One page of an installed Add On open in LUNA (fact 143): `/gui/add_ons/<id>/instances/<add_on_inst>`.
+ * LUNA gives every Add On page an `add_on_inst` in its URL; {@link Gui.thisInstance} finds the
+ * page's own. A window keeps its instance while it exists, and a `show_with_session` window
+ * keeps it in the session, so it is the same after the session is closed and opened again: a
+ * page can key its own `session.storage` records by it.
+ *
+ * @example
+ * const me = await luna.gui.thisInstance();
+ * if (me?.target.value === 'window') await me.resize(640, 480);
+ * me?.width.onChange(() => layout(me.width.value ?? 0));
+ */
+declare class AddOnInstance extends Node {
+    /** The host the page is in: one of its Add On's {@link AddOn.targets}. */
+    readonly target: Prop<AddOnTarget>;
+    /** The page's width in points; follows the user's resize. `undefined` until loaded. */
+    readonly width: Prop<number>;
+    /** The page's height in points; follows the user's resize. `undefined` until loaded. */
+    readonly height: Prop<number>;
+    /** The `add_on_inst` LUNA gave the page. */
+    get instanceId(): string;
+    /** The manifest `id` of the Add On this page belongs to, in lowercase. */
+    get addOnId(): string;
+    /**
+     * Ask LUNA to resize a `'window'` instance's window to this page size, in points. A size left
+     * out keeps the current one. LUNA clamps it to the manifest's `min_*`/`max_*`, leaves full
+     * screen first, keeps the window's top-left corner, and saves it as it would a user resize
+     * (with the session, for a `show_with_session` window). Resolves once the size LUNA applied is
+     * in {@link width} and {@link height}. Rejects with `uasrv.read_only` for another
+     * target or a `fixed_size` window, and `uasrv.invalid_value` for a size of 0 or less.
+     *
+     * @example
+     * await me.resize(800);          // width only
+     * await me.resize(undefined, 600); // height only
+     */
+    resize(width?: number, height?: number): Promise<void>;
 }
 declare class GuiWindow extends Node {
     /** Current page; writable for `mixer | timeline | home | addon | dashboard`. */
@@ -5149,6 +5365,16 @@ declare class Gui extends Node {
     /** True when LUNA has the editor of `slot` on `channelUid` open; `undefined` until known. */
     isPluginOpen(channelUid: string, slot: string, sessionUid?: string): boolean | undefined;
     /**
+     * This page's own instance (fact 143), from the `add_on_inst` LUNA puts in an Add On page's
+     * URL, watched so its size follows LUNA. `undefined` outside LUNA, on a LUNA older than
+     * instances, or when no live instance has that id. Pass an id to look up another page.
+     *
+     * @example
+     * const me = await luna.gui.thisInstance();
+     * if (me) console.log(me.addOnId, me.instanceId, me.width.value, me.height.value);
+     */
+    thisInstance(instanceId?: string | undefined): Promise<AddOnInstance | undefined>;
+    /**
      * True when the engine has LUNA's `/gui` (fact 103). Read once per connection: the
      * root's children are listed, because a `get` of a missing `/gui` answers `{}` (fact 10).
      *
@@ -5171,27 +5397,27 @@ declare class Gui extends Node {
     showSessionInFinder(sessionPackageUid?: string): Promise<unknown>;
     showAddOn(id: string): Promise<unknown>;
     /**
-     * Install Add Ons into LUNA, as Settings > Add Ons > MARKETPLACE does (fact 128). Give
-     * `{ id }`, a marketplace package id or the id of an Add On in one (its whole package
+     * Install Add Ons into LUNA, as LUNA's Add On Showcase does (fact 128). Give
+     * `{ id }`, a showcase package id or the id of an Add On in one (its whole package
      * installs), or `{ url }`: a public GitHub repo (`https://github.com/<owner>/<repo>`; the
      * scheme, `www.`, `.git` and a path inside the repo are tolerated), whose latest release
-     * LUNA lists in the marketplace and installs every `.lunaaddon` of; or a Google Drive share
+     * LUNA lists in the showcase and installs every `.lunaaddon` of; or a Google Drive share
      * link to a `.lunaaddon` (`https://drive.google.com/file/d/<id>/view?usp=sharing`), an
      * iCloud Drive one (`https://www.icloud.com/iclouddrive/<id>#<name>`) or a Dropbox one
      * (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=0`), which LUNA downloads
      * and installs. The file has to be shared with anyone who has the link: LUNA does not
      * sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
      * replace what is installed, so the user always confirms. A url that installs and is not
-     * one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
+     * one of the showcase's own repos is saved, and LUNA lists it in its showcase from
      * then on, to install again; {@link removeAddOn} forgets it.
      *
      * Resolves as LUNA starts, not once installed: watch {@link addOns} for the result. A
      * repo whose latest release has nothing LUNA can install, or a shared file that is not
      * shared with anyone, a folder, or not an Add On, is only found out after this resolves, and LUNA tells the user. Rejects with a `Luna.Error` whose `code` is
-     * `uasrv.invalid_value` for an id no marketplace package has, a url that is not a GitHub
+     * `uasrv.invalid_value` for an id no showcase package has, a url that is not a GitHub
      * repo or a Drive, iCloud Drive or Dropbox file link, or both given; `uasrv.missing_field` for neither; `uasrv.too_many_requests` while
      * that package is already installing. A LUNA without the command (an older one, or one
-     * without its Add On marketplace) rejects with `Luna.Unsupported`.
+     * without its Add On showcase) rejects with `Luna.Unsupported`.
      *
      * @example
      * await luna.gui.installAddOn({ url: 'https://github.com/uaudio-labs/video-window' });
@@ -5207,11 +5433,11 @@ declare class Gui extends Node {
     }): Promise<void>;
     /**
      * Forget a link {@link installAddOn} (or LUNA's IMPORT URL) saved, as Remove from
-     * Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
-     * `/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
-     * marketplace now and at the next launch; the installed Add On is not touched. Rejects with
-     * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
-     * has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
+     * Showcase in LUNA does (fact 128). `id` is the package's id under
+     * `/gui/showcase/packages`, or the id of an Add On in it. Its listing leaves LUNA's
+     * showcase now and at the next launch; the installed Add On is not touched. Rejects with
+     * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no showcase package
+     * has, `uasrv.not_permitted` for a package of the showcase's own repos, and
      * `uasrv.missing_field` with no id. A LUNA without the command rejects with
      * `Luna.Unsupported`.
      *
@@ -5640,8 +5866,11 @@ declare abstract class Node {
     property<T = unknown>(name: string): WritableProp<T>;
     /** Invoke any command on this node by name. Prefer a typed method when one exists. */
     command<R = unknown>(name: string, payload?: unknown): Promise<R>;
-    /** Writable property view; `set` is optimistic with rollback, and refuses once disposed. */
-    protected writableProp<T>(name: string): WritableProp<T>;
+    /**
+     * Writable property view; `set` is optimistic with rollback, and refuses once disposed.
+     * `toWire` gives the form sent to the engine when it differs from the value the view holds.
+     */
+    protected writableProp<T>(name: string, toWire?: (value: T) => unknown): WritableProp<T>;
     /** The cell holding this node's child names. */
     protected childNames(): Cell<string[]>;
     /** Invoke a command on this node. Refuses once disposed. */
@@ -6364,6 +6593,33 @@ interface TraceWaveformOptions {
 declare function traceWaveform(target: WaveformPathTarget, channel: WaveformChannel, lane: WaveformLane, x0: number, options?: TraceWaveformOptions): void;
 
 /**
+ * The categories an Add On's manifest `categories` names (HBH-36068): one or more of these, by
+ * `name`. LUNA reports them as {@link AddOn.categories}; `ua-builder` checks each against this
+ * list and suggests some with {@link suggestAddOnCategories} when a manifest has none.
+ */
+/** One Add On category: its `name`, as a manifest writes it, and what belongs in it. */
+interface AddOnCategoryInfo {
+    readonly name: AddOnCategory;
+    readonly description: string;
+}
+/** A category name a manifest's `categories` can hold. */
+type AddOnCategory = 'AI Tools' | 'Control' | 'Create' | 'MIDI' | 'Recording' | 'Editing' | 'Mixing & Mastering' | 'Workflow' | 'Session Management' | 'Import & Export' | 'Utility';
+/** Every Add On category, in the order the showcase lists them. */
+declare const ADD_ON_CATEGORIES: readonly AddOnCategoryInfo[];
+/** True when `name` is one of {@link ADD_ON_CATEGORIES}, written exactly (case included). */
+declare function isAddOnCategory(name: unknown): name is AddOnCategory;
+/**
+ * Categories that suit an Add On, best first, guessed from what it says about itself (its
+ * name, description, a prompt that asked for it). At most `max` (default 3); when nothing in
+ * the text points anywhere, `['Utility']`. A guess to confirm with the author, never to write
+ * into a manifest unasked.
+ *
+ * @example
+ * Luna.suggestAddOnCategories('Quantize and humanize MIDI notes'); // ['MIDI', ...]
+ */
+declare function suggestAddOnCategories(text: string, max?: number): AddOnCategory[];
+
+/**
  * Live MIDI: play a message on a track now, the way a MIDI keyboard would, through
  * `/sessions/send_midi` and `/sessions/send_midi_all_notes_off` (fact 108). Nothing is written to
  * a clip; to add notes to a clip use {@link Clip.addNotes}. A track that is not record-enabled
@@ -6860,6 +7116,17 @@ interface LocationOptions {
 }
 /** `host` and `port` from the page URL, if present. */
 declare function locationOptions(): LocationOptions;
+/**
+ * The host LUNA loaded this Add On page in, from the `?target=` it puts on the page URL (fact 144):
+ * `'window'`, `'browser'`, `'editor'` or `'app'`. `undefined` outside LUNA and on a LUNA older
+ * than the parameter. Synchronous, so a page that lists several manifest `targets` can lay
+ * itself out for its host before it connects. LUNA reloads the page when the user moves it to
+ * another host, so it never changes while the page runs.
+ *
+ * @example
+ * document.body.classList.add(`host-${Luna.addOnTarget() ?? 'window'}`);
+ */
+declare function addOnTarget(): AddOnTarget | undefined;
 /** True when the page was opened by LUNA (a `?port=` is on the URL). */
 declare function isEmbeddedInLuna(): boolean;
 /** True when the page is talking to LUNA's own engine on its default port. */
@@ -6928,10 +7195,15 @@ declare function onPathDrop(handlers: PathDropHandlers | ((drop: PathDrop) => vo
  */
 declare const VERSION: string;
 
+declare const luna_ADD_ON_CATEGORIES: typeof ADD_ON_CATEGORIES;
 declare const luna_AUTOMATION_MODES: typeof AUTOMATION_MODES;
 type luna_AddOn = AddOn;
 declare const luna_AddOn: typeof AddOn;
+type luna_AddOnCategory = AddOnCategory;
+type luna_AddOnCategoryInfo = AddOnCategoryInfo;
 type luna_AddOnInstalledFrom = AddOnInstalledFrom;
+type luna_AddOnInstance = AddOnInstance;
+declare const luna_AddOnInstance: typeof AddOnInstance;
 type luna_AddOnTarget = AddOnTarget;
 type luna_AlgType = AlgType;
 type luna_Assistant = Assistant;
@@ -7126,6 +7398,7 @@ type luna_Plugin = Plugin;
 declare const luna_Plugin: typeof Plugin;
 type luna_PluginManifest = PluginManifest;
 type luna_PluginQueryOptions = PluginQueryOptions;
+type luna_PluginRequirement = PluginRequirement;
 type luna_PluginRow = PluginRow;
 type luna_PluginWindow = PluginWindow;
 type luna_Plugins = Plugins;
@@ -7263,6 +7536,7 @@ type luna_WireMessage = WireMessage;
 type luna_Workspace = Workspace;
 declare const luna_Workspace: typeof Workspace;
 type luna_WritableProp<T> = WritableProp<T>;
+declare const luna_addOnTarget: typeof addOnTarget;
 declare const luna_audioNsAtTick: typeof audioNsAtTick;
 declare const luna_automationModeOrdinal: typeof automationModeOrdinal;
 declare const luna_beatsToTicks: typeof beatsToTicks;
@@ -7294,6 +7568,7 @@ declare const luna_formatMinSec: typeof formatMinSec;
 declare const luna_formatTimeSignature: typeof formatTimeSignature;
 declare const luna_getOptionsToParams: typeof getOptionsToParams;
 declare const luna_hasNativeBridge: typeof hasNativeBridge;
+declare const luna_isAddOnCategory: typeof isAddOnCategory;
 declare const luna_isEmbeddedInLuna: typeof isEmbeddedInLuna;
 declare const luna_isLunaEnginePort: typeof isLunaEnginePort;
 declare const luna_joinPath: typeof joinPath;
@@ -7307,6 +7582,7 @@ declare const luna_pairNotes: typeof pairNotes;
 declare const luna_pairNs: typeof pairNs;
 declare const luna_pairRange: typeof pairRange;
 declare const luna_parseChord: typeof parseChord;
+declare const luna_pluginVersionMeets: typeof pluginVersionMeets;
 declare const luna_propertyValue: typeof propertyValue;
 declare const luna_requireTick: typeof requireTick;
 declare const luna_secondsToTicks: typeof secondsToTicks;
@@ -7315,6 +7591,7 @@ declare const luna_settle: typeof settle;
 declare const luna_shallowEquals: typeof shallowEquals;
 declare const luna_splitPath: typeof splitPath;
 declare const luna_stripValueSuffix: typeof stripValueSuffix;
+declare const luna_suggestAddOnCategories: typeof suggestAddOnCategories;
 declare const luna_ticksToBeats: typeof ticksToBeats;
 declare const luna_ticksToSeconds: typeof ticksToSeconds;
 declare const luna_toEvent: typeof toEvent;
@@ -7326,7 +7603,7 @@ declare const luna_waveformPeak: typeof waveformPeak;
 declare const luna_writable: typeof writable;
 declare const luna_yieldTask: typeof yieldTask;
 declare namespace luna {
-  export { luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnInstalledFrom as AddOnInstalledFrom, type luna_AddOnTarget as AddOnTarget, type luna_AlgType as AlgType, luna_Assistant as Assistant, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Chord as Chord, type luna_ChordSpec as ChordSpec, luna_Chords as Chords, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipNote as ClipNote, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, type luna_ClockOptions as ClockOptions, luna_Collection as Collection, type luna_CommandHandler as CommandHandler, luna_CompiledClip as CompiledClip, type luna_CompiledClipLike as CompiledClipLike, type luna_CompiledClipSnapshot as CompiledClipSnapshot, luna_CompiledClips as CompiledClips, type luna_CompiledFade as CompiledFade, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, type luna_CrossfadeAlign as CrossfadeAlign, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, luna_Drivers as Drivers, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, type Event$1 as Event, type luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, type luna_FadeShape as FadeShape, type luna_FileEntry as FileEntry, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, type luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_ImportPathOptions as ImportPathOptions, type luna_InsertClipOptions as InsertClipOptions, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, luna_LUNA_DEVICE_UID as LUNA_DEVICE_UID, type luna_LengthFollows as LengthFollows, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, type luna_LogFn as LogFn, type luna_LogLevel as LogLevel, luna_MAX_SECRET_BYTES as MAX_SECRET_BYTES, luna_MAX_SECRET_NAME_LENGTH as MAX_SECRET_NAME_LENGTH, luna_MAX_SYSEX_BYTES as MAX_SYSEX_BYTES, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, luna_MidiDevice as MidiDevice, luna_MidiDevices as MidiDevices, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, luna_MidiInput as MidiInput, type luna_MidiInputListenOptions as MidiInputListenOptions, type luna_MidiInputMessage as MidiInputMessage, type luna_MidiInputTarget as MidiInputTarget, type luna_MidiInputType as MidiInputType, type luna_MidiOutputTarget as MidiOutputTarget, luna_MidiPort as MidiPort, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, type luna_MockEngineOptions as MockEngineOptions, type luna_MockMidiRow as MockMidiRow, type luna_MockMidiSent as MockMidiSent, type luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, type luna_MoveToFolderOptions as MoveToFolderOptions, luna_Musical as Musical, type luna_NestedFileEntry as NestedFileEntry, type luna_NewBusOptions as NewBusOptions, type luna_NewFolderOptions as NewFolderOptions, type luna_NewNote as NewNote, type luna_NewTrackFromPresetOptions as NewTrackFromPresetOptions, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, type luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, type luna_ParsedChord as ParsedChord, type luna_PathDrop as PathDrop, type luna_PathDropHandlers as PathDropHandlers, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, type luna_PluginQueryOptions as PluginQueryOptions, type luna_PluginRow as PluginRow, type luna_PluginWindow as PluginWindow, luna_Plugins as Plugins, type luna_Port as Port, type luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_PresetQueryOptions as PresetQueryOptions, type luna_PresetRecommendation as PresetRecommendation, type luna_PresetRow as PresetRow, luna_PresetSelection as PresetSelection, type luna_PresetSelectionOptions as PresetSelectionOptions, type luna_PresetTagGroup as PresetTagGroup, luna_Presets as Presets, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, type luna_QwertyKeyEvent as QwertyKeyEvent, luna_QwertyMidi as QwertyMidi, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, type luna_ReorderOptions as ReorderOptions, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SecretStorage as SecretStorage, luna_Secrets as Secrets, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_SendMidi as SendMidi, type luna_SendMidiTrackTarget as SendMidiTrackTarget, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_SessionStorage as SessionStorage, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, type luna_SocketConstructor as SocketConstructor, type luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, type luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_StorageContext as StorageContext, type luna_StorageEditOptions as StorageEditOptions, luna_Store as Store, type luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TRACK_PRESET_CATEGORIES as TRACK_PRESET_CATEGORIES, luna_Taper as Taper, type luna_TaperMarksOptions as TaperMarksOptions, type luna_TaperName as TaperName, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, type luna_TraceWaveformOptions as TraceWaveformOptions, luna_Track as Track, type luna_TrackPresetCategory as TrackPresetCategory, luna_TrackPresetSelection as TrackPresetSelection, type luna_TrackPresetSelectionOptions as TrackPresetSelectionOptions, type luna_TrackType as TrackType, type luna_TransactionMode as TransactionMode, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, type luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, type luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformPathTarget as WaveformPathTarget, type luna_WaveformRange as WaveformRange, type luna_WaveformScale as WaveformScale, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, type luna_WebSocketPortOptions as WebSocketPortOptions, type luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindClock as bindClock, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_canDropPaths as canDropPaths, luna_clients as clients, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_compiledClipAudio as compiledClipAudio, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_decodeMidiEvents as decodeMidiEvents, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_formatMinSec as formatMinSec, luna_formatTimeSignature as formatTimeSignature, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_normalizeChordName as normalizeChordName, luna_onPathDrop as onPathDrop, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_parseChord as parseChord, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_traceWaveform as traceWaveform, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_waveformPeak as waveformPeak, luna_writable as writable, luna_yieldTask as yieldTask };
+  export { luna_ADD_ON_CATEGORIES as ADD_ON_CATEGORIES, luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnCategory as AddOnCategory, type luna_AddOnCategoryInfo as AddOnCategoryInfo, type luna_AddOnInstalledFrom as AddOnInstalledFrom, luna_AddOnInstance as AddOnInstance, type luna_AddOnTarget as AddOnTarget, type luna_AlgType as AlgType, luna_Assistant as Assistant, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Chord as Chord, type luna_ChordSpec as ChordSpec, luna_Chords as Chords, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipNote as ClipNote, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, type luna_ClockOptions as ClockOptions, luna_Collection as Collection, type luna_CommandHandler as CommandHandler, luna_CompiledClip as CompiledClip, type luna_CompiledClipLike as CompiledClipLike, type luna_CompiledClipSnapshot as CompiledClipSnapshot, luna_CompiledClips as CompiledClips, type luna_CompiledFade as CompiledFade, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, type luna_CrossfadeAlign as CrossfadeAlign, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, luna_Drivers as Drivers, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, type Event$1 as Event, type luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, type luna_FadeShape as FadeShape, type luna_FileEntry as FileEntry, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, type luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_ImportPathOptions as ImportPathOptions, type luna_InsertClipOptions as InsertClipOptions, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, luna_LUNA_DEVICE_UID as LUNA_DEVICE_UID, type luna_LengthFollows as LengthFollows, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, type luna_LogFn as LogFn, type luna_LogLevel as LogLevel, luna_MAX_SECRET_BYTES as MAX_SECRET_BYTES, luna_MAX_SECRET_NAME_LENGTH as MAX_SECRET_NAME_LENGTH, luna_MAX_SYSEX_BYTES as MAX_SYSEX_BYTES, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, luna_MidiDevice as MidiDevice, luna_MidiDevices as MidiDevices, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, luna_MidiInput as MidiInput, type luna_MidiInputListenOptions as MidiInputListenOptions, type luna_MidiInputMessage as MidiInputMessage, type luna_MidiInputTarget as MidiInputTarget, type luna_MidiInputType as MidiInputType, type luna_MidiOutputTarget as MidiOutputTarget, luna_MidiPort as MidiPort, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, type luna_MockEngineOptions as MockEngineOptions, type luna_MockMidiRow as MockMidiRow, type luna_MockMidiSent as MockMidiSent, type luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, type luna_MoveToFolderOptions as MoveToFolderOptions, luna_Musical as Musical, type luna_NestedFileEntry as NestedFileEntry, type luna_NewBusOptions as NewBusOptions, type luna_NewFolderOptions as NewFolderOptions, type luna_NewNote as NewNote, type luna_NewTrackFromPresetOptions as NewTrackFromPresetOptions, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, type luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, type luna_ParsedChord as ParsedChord, type luna_PathDrop as PathDrop, type luna_PathDropHandlers as PathDropHandlers, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, type luna_PluginQueryOptions as PluginQueryOptions, type luna_PluginRequirement as PluginRequirement, type luna_PluginRow as PluginRow, type luna_PluginWindow as PluginWindow, luna_Plugins as Plugins, type luna_Port as Port, type luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_PresetQueryOptions as PresetQueryOptions, type luna_PresetRecommendation as PresetRecommendation, type luna_PresetRow as PresetRow, luna_PresetSelection as PresetSelection, type luna_PresetSelectionOptions as PresetSelectionOptions, type luna_PresetTagGroup as PresetTagGroup, luna_Presets as Presets, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, type luna_QwertyKeyEvent as QwertyKeyEvent, luna_QwertyMidi as QwertyMidi, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, type luna_ReorderOptions as ReorderOptions, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SecretStorage as SecretStorage, luna_Secrets as Secrets, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_SendMidi as SendMidi, type luna_SendMidiTrackTarget as SendMidiTrackTarget, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_SessionStorage as SessionStorage, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, type luna_SocketConstructor as SocketConstructor, type luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, type luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_StorageContext as StorageContext, type luna_StorageEditOptions as StorageEditOptions, luna_Store as Store, type luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TRACK_PRESET_CATEGORIES as TRACK_PRESET_CATEGORIES, luna_Taper as Taper, type luna_TaperMarksOptions as TaperMarksOptions, type luna_TaperName as TaperName, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, type luna_TraceWaveformOptions as TraceWaveformOptions, luna_Track as Track, type luna_TrackPresetCategory as TrackPresetCategory, luna_TrackPresetSelection as TrackPresetSelection, type luna_TrackPresetSelectionOptions as TrackPresetSelectionOptions, type luna_TrackType as TrackType, type luna_TransactionMode as TransactionMode, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, type luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, type luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformPathTarget as WaveformPathTarget, type luna_WaveformRange as WaveformRange, type luna_WaveformScale as WaveformScale, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, type luna_WebSocketPortOptions as WebSocketPortOptions, type luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_addOnTarget as addOnTarget, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindClock as bindClock, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_canDropPaths as canDropPaths, luna_clients as clients, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_compiledClipAudio as compiledClipAudio, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_decodeMidiEvents as decodeMidiEvents, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_formatMinSec as formatMinSec, luna_formatTimeSignature as formatTimeSignature, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isAddOnCategory as isAddOnCategory, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_normalizeChordName as normalizeChordName, luna_onPathDrop as onPathDrop, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_parseChord as parseChord, luna_pluginVersionMeets as pluginVersionMeets, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_suggestAddOnCategories as suggestAddOnCategories, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_traceWaveform as traceWaveform, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_waveformPeak as waveformPeak, luna_writable as writable, luna_yieldTask as yieldTask };
 }
 
 export { luna as Luna };

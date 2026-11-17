@@ -53,6 +53,8 @@ export interface LoadedPage {
   document: Document;
   window: Window & typeof globalThis;
   draws: DrawLog;
+  /** The clients the page opened through `Luna.connect`, in order, for a test that inspects what the page subscribed to. */
+  clients: Luna.Client[];
   /** Resolves when `predicate` holds, or throws naming what it was waiting for. */
   waitFor(predicate: () => boolean, what: string, timeoutMs?: number): Promise<void>;
   text(selector: string): string;
@@ -120,6 +122,7 @@ export async function loadExamplePage(name: string, engine: Luna.MockEngine, opt
     document: window.document,
     window,
     draws,
+    clients,
     async waitFor(predicate, what, timeoutMs = 4000) {
       const deadline = Date.now() + timeoutMs;
       while (!predicate()) {

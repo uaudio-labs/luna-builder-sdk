@@ -16,6 +16,9 @@
   .group h3 { margin: 0 0 4px; font-size: 14px; color: #acb9c8; font-weight: 600; }
   canvas { width: 100%; background: #101419; border: 1px solid #343d48; display: block; touch-action: none; cursor: default; }
   canvas:focus { outline: 2px solid #4b8bd6; }
+  /* The playhead is its own element over the canvas, moved by a transform, so following
+     playback never redraws the canvas (docs/DRAWING.md). */
+  .tlwrap { position: relative; } .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: #ff5a5a; pointer-events: none; will-change: transform; } .playhead[hidden] { display: none; }
   table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #343d48; }
   th { color: #acb9c8; } tbody tr { cursor: pointer; } tbody tr.selected td { background: #1f3550; }
   #status, #info { min-height: 22px; } #log { font: 13px ui-monospace, monospace; color: #acb9c8; max-height: 160px; overflow: auto; }
@@ -38,7 +41,7 @@ edit is one undo step in LUNA (fact 117), and the lanes follow edits made in LUN
   <label for="snap">Snap</label><select id="snap"><option value="0">Off</option><option value="4">Bar</option><option value="1" selected>Beat</option><option value="0.5">1/8</option><option value="0.25">1/16</option></select>
 </div>
 <p id="status" role="status">Connecting…</p>
-<canvas id="timeline" width="1100" height="300" tabindex="0" aria-label="Lanes of clips; drag to edit, click to select"></canvas>
+<div class="tlwrap"><canvas id="timeline" width="1100" height="300" tabindex="0" aria-label="Lanes of clips; drag to edit, click to select"></canvas><div id="playhead" class="playhead" hidden></div></div>
 <p id="info" role="status">Nothing selected.</p>
 
 <div class="group">
@@ -253,8 +256,22 @@ async function gather() {
   return true;
 }
 
+let playheadFrame = 0;
+function schedulePlayhead() {
+  if (playheadFrame) return;
+  playheadFrame = requestAnimationFrame(() => { playheadFrame = 0; placePlayhead(); });
+}
+/** Put the playhead over the canvas at the live location (canvas pixels scaled to CSS pixels). */
+function placePlayhead() {
+  const head = $('playhead'), tick = session?.transport.location.value?.tick;
+  const shown = scene !== undefined && tick !== undefined && tick >= scene.start && tick <= scene.end;
+  head.hidden = !shown;
+  if (shown) head.style.transform = `translateX(${(xOf(tick) / W) * canvas.clientWidth}px)`;
+}
+
 function paint() {
   ctx.clearRect(0, 0, W, canvas.height);
+  placePlayhead();
   if (!scene) return;
   const { t, start, end } = scene;
   ctx.font = '12px system-ui'; ctx.textBaseline = 'top'; ctx.lineWidth = 1;
@@ -289,11 +306,7 @@ function paint() {
     ctx.strokeStyle = '#4b8bd6'; ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); ctx.setLineDash([]);
   }
-  const tick = session?.transport.location.value?.tick;
-  if (tick !== undefined && tick >= start && tick <= end) {
-    ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(xOf(tick), 0); ctx.lineTo(xOf(tick), canvas.height); ctx.stroke(); ctx.lineWidth = 1;
-  }
+  placePlayhead();
   const count = scene.rows.reduce((n, r) => n + r.segments.length, 0);
   $('status').textContent = `${session.name.value} · ${scene.rows.length} lane${scene.rows.length === 1 ? '' : 's'} · ${count} segment${count === 1 ? '' : 's'}` +
     (noFades ? ' · this LUNA does not report fades, so fade editing is off' : '');
@@ -651,27 +664,89 @@ function renderTable() {
 }
 
 // ── connection ──────────────────────────────────────────────────────────────────────────
-function bindAll() {
+// Subscriptions are kept per member and diffed by id when a list changes: an edit that adds or
+// removes one clip subscribes or releases only that clip, and every other clip keeps its own.
+let laneSubs = new Map();     // lane -> { offs, clips: Map<id, { item, kind, offs }>, segs: Map<id, { item, kind, offs }> }
+
+function unbindAll() {
   for (const off of liveOffs) off();
   liveOffs = [];
-  const later = () => void gather();
-  liveOffs.push(session.playlists.onChange(() => { bindAll(); later(); }));
-  liveOffs.push(session.tracks.onChange(() => { void loadLanes().then(() => { bindAll(); later(); }); }));
-  for (const { track } of lanes()) liveOffs.push(track.color.onChange(() => paint()));
-  for (const { lane } of lanes()) {
-    liveOffs.push(lane.clips.onChange(() => { bindAll(); later(); }));
-    liveOffs.push(lane.compiledClips.onChange(() => { bindAll(); later(); }));
-    for (const clip of lane.clips.items) for (const p of [clip.name, clip.start, clip.stop, clip.sourceStart, clip.muted, clip.gain, clip.renderState]) liveOffs.push(p.onChange(later));
-    // A MIDI clip's notes, read once and followed as they are edited in LUNA.
-    for (const clip of lane.clips.items.filter((c) => c.clipType.value === 'midi')) {
-      void clip.midi.ready().then(later, () => {});
-      liveOffs.push(clip.midi.notes.onChange(later));
-    }
-    for (const seg of lane.compiledClips.items) for (const p of [seg.start, seg.stop, seg.sourceStart, seg.fadeIn, seg.fadeOut]) liveOffs.push(p.onChange(later));
+  for (const entry of laneSubs.values()) releaseLane(entry);
+  laneSubs = new Map();
+}
+
+function releaseLane(entry) {
+  for (const off of entry.offs) off();
+  for (const m of entry.clips.values()) for (const off of m.offs) off();
+  for (const m of entry.segs.values()) for (const off of m.offs) off();
+}
+
+// Bring a map of { item, kind, offs } in line with `items`: subscribe the new, release the
+// gone, and resubscribe a member whose kind changed (a clip whose type arrives as MIDI).
+function syncMembers(subs, items, subscribe, kindOf = () => '') {
+  const seen = new Set();
+  for (const item of items) {
+    seen.add(item.id);
+    const had = subs.get(item.id), kind = kindOf(item);
+    if (had?.item === item && had.kind === kind) continue;
+    if (had) for (const off of had.offs) off();
+    subs.set(item.id, { item, kind, offs: subscribe(item) });
   }
+  for (const [id, m] of subs) if (!seen.has(id)) { for (const off of m.offs) off(); subs.delete(id); }
+}
+
+const later = () => void gather();
+
+function clipSubs(lane, clip) {
+  const offs = [clip.name, clip.start, clip.stop, clip.sourceStart, clip.muted, clip.gain, clip.renderState].map((p) => p.onChange(later));
+  offs.push(clip.clipType.onChange(() => { syncLane(lane); later(); }));
+  // A MIDI clip's notes, read once and followed as they are edited in LUNA.
+  if (clip.clipType.value === 'midi') {
+    void clip.midi.ready().then(later, () => {});
+    offs.push(clip.midi.notes.onChange(later));
+  }
+  return offs;
+}
+
+function segSubs(seg) {
+  return [seg.start, seg.stop, seg.sourceStart, seg.fadeIn, seg.fadeOut].map((p) => p.onChange(later));
+}
+
+function syncLane(lane) {
+  const entry = laneSubs.get(lane);
+  if (!entry) return;
+  syncMembers(entry.clips, lane.clips.items, (clip) => clipSubs(lane, clip), (clip) => clip.clipType.value);
+  syncMembers(entry.segs, lane.compiledClips.items, segSubs);
+}
+
+// Bring the lane subscriptions in line with the visible tracks and their playlists.
+function syncLanes() {
+  const current = new Map(lanes().map(({ track, lane }) => [lane, track]));
+  for (const [lane, entry] of laneSubs) if (current.get(lane) !== entry.track) { releaseLane(entry); laneSubs.delete(lane); }
+  for (const [lane, track] of current) {
+    if (!laneSubs.has(lane)) {
+      laneSubs.set(lane, {
+        track, clips: new Map(), segs: new Map(),
+        offs: [
+          track.color.onChange(() => paint()),
+          lane.clips.onChange(() => { syncLane(lane); later(); }),
+          lane.compiledClips.onChange(() => { syncLane(lane); later(); }),
+        ],
+      });
+    }
+    syncLane(lane);
+  }
+}
+
+function bindAll() {
+  unbindAll();
+  liveOffs.push(session.playlists.onChange(() => { syncLanes(); later(); }));
+  liveOffs.push(session.tracks.onChange(() => { void loadLanes().then(() => { syncLanes(); later(); }); }));
   if (session.sources) liveOffs.push(session.sources.onChange(later));
   liveOffs.push(session.context.waveformZoom.onChange(later));
-  liveOffs.push(session.transport.location.onChange(() => { if (!drag) paint(); }));
+  // Location pushes arrive many times a second while playing: they move the playhead element only.
+  liveOffs.push(session.transport.location.onChange(schedulePlayhead));
+  syncLanes();
 }
 
 async function loadLanes() {
@@ -707,7 +782,7 @@ $('scroll').addEventListener('input', () => { scrollTo(Number($('scroll').value)
 $('zoom').onchange = () => { extent = 0; void gather(); };
 window.addEventListener('pagehide', () => {
   closed = true; ++generation;
-  for (const off of liveOffs) off();
+  unbindAll();
   for (const off of offs) off();
   void luna?.close();
 });

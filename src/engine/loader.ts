@@ -1,7 +1,7 @@
 /**
- * Boots the WebAssembly LUNA engine (`devicedwasm`) in the page.
+ * Boots the WebAssembly LUNA engine (hbsystem `wasm_engine`) in the page.
  *
- * The engine is an Emscripten module. Loading `devicedwasm.js` defines `createDevicedModule`;
+ * The engine is an Emscripten module. Loading `luna-engine.js` defines `createLunaEngineModule`;
  * calling it fetches the `.wasm`, starts the engine's main() on a worker (PROXY_TO_PTHREAD)
  * and brings the services up. Progress arrives through `globalThis.WasmDeviced.onState`.
  *
@@ -9,12 +9,17 @@
  * - served over http(s), not file://;
  * - `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`
  *   so SharedArrayBuffer (wasm threads) is available;
- * - `devicedwasm.js` and `.wasm` on the same origin as the page (workers cannot be cross-origin).
+ * - `luna-engine.js` and `.wasm` on the same origin as the page (workers cannot be cross-origin).
+ *
+ * Browsers start the engine's AudioContext suspended and honour a resume only from a user
+ * gesture, so the loader resumes audio on the page's clicks and key presses
+ * (`resumeOnGesture`). It listens from before the engine starts and replays a gesture made
+ * while it was booting, because a page is clickable seconds before the engine runs.
  *
  * @example
  * const engine = await Luna.bootWasmEngine({ engineUrl: '/__engine/' });
  * engine.state;               // 'running'
- * await engine.resumeAudio(); // after a user gesture, per browser autoplay policy
+ * engine.audio().contextState; // 1 once the user has clicked or pressed a key
  */
 import { UAError } from '../wire/errors';
 
@@ -53,7 +58,7 @@ export interface WasmHooks {
 export type ModuleFactory = (options: Record<string, unknown>) => Promise<WasmModule>;
 
 export interface BootOptions {
-  /** Directory URL holding `devicedwasm.js` and `devicedwasm.wasm`. Default `/__engine/`. */
+  /** Directory URL holding `luna-engine.js` and `luna-engine.wasm`. Default `/__engine/`. */
   engineUrl?: string;
   /** Persist the workspace to OPFS between page loads. Default true. */
   persist?: boolean;
@@ -63,6 +68,15 @@ export interface BootOptions {
   log?: (line: string, level: 'out' | 'err') => void;
   /** Boot timeout. Default 120 000 ms (the unstripped module is large). */
   timeoutMs?: number;
+  /** Resume audio on the page's clicks and key presses. Default true. */
+  resumeOnGesture?: boolean;
+  /**
+   * Ask for the microphone when a track or the session is record-armed, inside the click that
+   * armed it (or the next one). Default true. False leaves it to `requestAudioInput()`.
+   */
+  audioInputOnRecord?: boolean;
+  /** Listen for gestures on this target instead of `document` (tests). */
+  gestureTarget_?: EventTarget;
   /** Already-loaded module factory (tests, or a page that loaded the script itself). */
   factory_?: ModuleFactory;
   /** Install hooks on this object instead of `globalThis.WasmDeviced` (tests). */
@@ -94,6 +108,12 @@ export class WasmEngine {
   private readonly stateListeners = new Set<(state: WasmState, detail: string) => void>();
   private replyHandler: ((id: number, error: string, json: string) => void) | undefined;
   private updateHandler: ((path: string, json: string) => void) | undefined;
+  /** `Date.now()` of the last click or key press seen while running. */
+  private lastGestureAt = 0;
+  /** A microphone was wanted with no gesture to ask inside; the next one asks. */
+  private inputWanted = false;
+  /** @internal Ask for the microphone when a track or the session is record-armed. */
+  audioInputOnRecord = true;
 
   /** @internal */
   constructor(
@@ -144,16 +164,58 @@ export class WasmEngine {
 
   /**
    * Resume the AudioContext. Browsers only allow this after a user gesture, so call it from a
-   * click handler. Resolves true if the context is running afterwards.
+   * click handler; the loader already does on every click and key press. Resolves true once
+   * the context runs, or false if it is not running within `timeoutMs` (the browser resumes
+   * asynchronously, so the state lags the call).
    */
-  async resumeAudio(): Promise<boolean> {
-    const ok = Boolean(this.module.ccall('wasmd_resume_audio_export', 'number', [], []));
-    return ok && this.audio().contextState === 1;
+  async resumeAudio(timeoutMs = 1000): Promise<boolean> {
+    if (!this.module.ccall('wasmd_resume_audio_export', 'number', [], [])) return false;
+    const deadline = Date.now() + timeoutMs;
+    while (this.audio().contextState !== 1) {
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return true;
   }
 
   /** Ask for microphone input (getUserMedia). Needs a secure context and a user gesture. */
   requestAudioInput(): boolean {
     return Boolean(this.module.ccall('wasmd_request_audio_input_export', 'number', [], []));
+  }
+
+  /**
+   * @internal A click or key press while running: resume audio, and ask for a microphone that
+   * was wanted without a gesture to ask inside.
+   */
+  noteGesture(): void {
+    this.lastGestureAt = Date.now();
+    void this.resumeAudio();
+    if (this.inputWanted) this.askForInput();
+  }
+
+  /**
+   * @internal A track or the session was record-armed. Asks for the microphone inside the
+   * gesture that armed it when there is one, or else on the next click or key press. Does
+   * nothing while asking or connected, and asks again after a denial or a failure.
+   */
+  wantAudioInput(): void {
+    if (!this.audioInputOnRecord) return;
+    const state = this.inputState();
+    if (state === 1 || state === 2 || state === 4) return;
+    if (hasActivation(this.lastGestureAt)) this.askForInput();
+    else this.inputWanted = true;
+  }
+
+  private askForInput(): void {
+    this.inputWanted = false;
+    const state = this.inputState();
+    if (state === 1 || state === 2 || state === 4) return;
+    // The first request is one-shot per audio context; a denied or failed one needs the retry.
+    this.module.ccall(state === 3 || state === 5 ? 'wasmd_retry_audio_input_export' : 'wasmd_request_audio_input_export', 'number', [], []);
+  }
+
+  private inputState(): number {
+    return Number(this.module.ccall('wasmd_audio_input_state_export', 'number', [], []));
   }
 
   audio(): AudioHealth {
@@ -220,6 +282,16 @@ async function doBoot(options: BootOptions): Promise<WasmEngine> {
     },
   };
 
+  // Armed before the module exists and left armed for the page's lifetime: a resume is a no-op
+  // once audio runs, and the context can be suspended again (an iPhone call, a closed lid).
+  let sawGesture = false;
+  const onGesture = () => {
+    sawGesture = true;
+    if (engine?.isRunning) engine.noteGesture();
+  };
+  const gestureTarget = options.resumeOnGesture === false ? undefined : (options.gestureTarget_ ?? (globalThis as { document?: EventTarget }).document);
+  for (const type of GESTURE_EVENTS) gestureTarget?.addEventListener(type, onGesture, true);
+
   const timeoutMs = options.timeoutMs ?? 120_000;
   const timer = setTimeout(() => rejectRunning(new UAError('engine_boot', `wasm engine did not reach running within ${timeoutMs} ms`)), timeoutMs);
   try {
@@ -235,29 +307,50 @@ async function doBoot(options: BootOptions): Promise<WasmEngine> {
       UAPersistLog: (t: string) => log(`persist ${t}`, 'out'),
     });
     engine = new WasmEngine(module, engineUrl);
+    engine.audioInputOnRecord = options.audioInputOnRecord !== false;
     for (const p of pending) engine.setState(p.state as WasmState, p.detail);
     await running;
     if (engine.state !== 'running') engine.setState('running');
+    // Replay a click made while the engine booted. A gesture's activation lasts a few seconds,
+    // so this resume is honoured when the boot was quick; otherwise the next click resumes.
+    const activated = (globalThis as { navigator?: { userActivation?: { hasBeenActive?: boolean } } }).navigator?.userActivation?.hasBeenActive;
+    if (gestureTarget && (sawGesture || activated)) void engine.resumeAudio();
     return engine;
+  } catch (err) {
+    for (const type of GESTURE_EVENTS) gestureTarget?.removeEventListener(type, onGesture, true);
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Inject `<script src="<engineUrl>devicedwasm.js">` and return `createDevicedModule`. */
+/** The events that carry a user activation, on which audio is resumed. */
+const GESTURE_EVENTS = ['pointerdown', 'pointerup', 'keydown'] as const;
+
+/**
+ * Whether the page holds a user activation now, so a getUserMedia call is honoured. Browsers
+ * keep one for a few seconds after a click; without `navigator.userActivation` (older Safari,
+ * tests), a gesture in the last 4 s counts.
+ */
+function hasActivation(lastGestureAt: number): boolean {
+  const active = (globalThis as { navigator?: { userActivation?: { isActive?: boolean } } }).navigator?.userActivation?.isActive;
+  return active ?? Date.now() - lastGestureAt < 4000;
+}
+
+/** Inject `<script src="<engineUrl>luna-engine.js">` and return `createLunaEngineModule`. */
 async function loadFactory(engineUrl: string): Promise<ModuleFactory> {
-  const g = globalThis as { createDevicedModule?: ModuleFactory; document?: Document };
-  if (typeof g.createDevicedModule === 'function') return g.createDevicedModule;
+  const g = globalThis as { createLunaEngineModule?: ModuleFactory; document?: Document };
+  if (typeof g.createLunaEngineModule === 'function') return g.createLunaEngineModule;
   if (!g.document) throw new UAError('engine_boot', 'the wasm engine needs a browser page');
   await new Promise<void>((resolve, reject) => {
     const script = g.document!.createElement('script');
-    script.src = `${engineUrl}devicedwasm.js`;
+    script.src = `${engineUrl}luna-engine.js`;
     script.onload = () => resolve();
     script.onerror = () => reject(new UAError('engine_boot', `could not load ${script.src}; is the engine served at ${engineUrl}?`));
     g.document!.head.appendChild(script);
   });
-  if (typeof g.createDevicedModule !== 'function') throw new UAError('engine_boot', 'devicedwasm.js loaded but createDevicedModule is missing');
-  return g.createDevicedModule;
+  if (typeof g.createLunaEngineModule !== 'function') throw new UAError('engine_boot', 'luna-engine.js loaded but createLunaEngineModule is missing');
+  return g.createLunaEngineModule;
 }
 
 /** @internal Reset the once-per-page boot (tests). */

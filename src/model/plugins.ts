@@ -45,6 +45,46 @@ export interface PluginQueryOptions {
   limit?: number;
 }
 
+/**
+ * One entry of an Add On manifest's `requires_plugins`, as LUNA reports it on
+ * {@link AddOn.requiresPlugins} (fact 148). It is met when any of `plugin_id` is installed at
+ * `min_version` or later (any version when `''`). One plugin has a different id per format (AU,
+ * VST3, ...), so list each. `name` is what LUNA shows, since a plugin that is not installed has
+ * no name to look up. Unless `optional`, LUNA will not open the Add On while it is unmet.
+ */
+export interface PluginRequirement {
+  name: string;
+  plugin_id: string[];
+  min_version: string;
+  optional: boolean;
+}
+
+/**
+ * Whether plugin version `installed` meets `minVersion`, as LUNA compares them (fact 148):
+ * every dot-separated part as a number, missing parts as 0, so `'0.4.10'` meets `'0.4.3'` and
+ * `'0.4.3.1'` meets `'0.4.3'`. An empty `minVersion` is met by anything; an empty or malformed
+ * `installed` meets only that.
+ *
+ * @example
+ * Luna.pluginVersionMeets('0.4.10', '0.4.3'); // true
+ * Luna.pluginVersionMeets('0.4.2', '0.4.3');  // false
+ */
+export function pluginVersionMeets(installed: string | undefined, minVersion: string): boolean {
+  if (!minVersion) return true;
+  if (!installed || !VERSION.test(installed)) return false;
+  const a = installed.split('.').map(Number);
+  const b = minVersion.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+/** A version string as LUNA accepts one: dot-separated whole numbers. */
+const VERSION = /^\d+(\.\d+)*$/;
+
 /** One plugin {@link Plugins.query} returned. */
 export interface PluginRow {
   pluginId: string;
@@ -85,6 +125,17 @@ export class Plugin extends Node {
     return this.manifest.value?.manufacturer;
   }
 
+  /**
+   * Whether it is installed at `minVersion` or later, as LUNA checks an Add On's
+   * `requires_plugins` (fact 148). Reads the loaded {@link installed} and {@link version}.
+   *
+   * @example
+   * const ok = luna.plugins.byId('com.eventfield.vst3.clex')?.isAtLeast('0.4.3') ?? false;
+   */
+  isAtLeast(minVersion: string): boolean {
+    return this.installed.value === true && pluginVersionMeets(this.version.value, minVersion);
+  }
+
   get categories(): string[] {
     return this.manifest.value?.categories ?? [];
   }
@@ -112,6 +163,25 @@ export class Plugins extends Collection<Plugin> {
 
   byCategory(category: string): Plugin[] {
     return this.items.filter((p) => p.categories.includes(category));
+  }
+
+  /**
+   * The `requirements` the loaded catalog does not meet, as LUNA decides (fact 148): none of a
+   * requirement's `plugin_id` is installed at its `min_version` or later. Pass an Add On's
+   * {@link AddOn.requiresPlugins}; with `blockingOnly`, the ones not marked `optional`, which
+   * are what keeps LUNA from opening it. Load the catalog first.
+   *
+   * @example
+   * await luna.plugins.load();
+   * const me = luna.gui.addOns.byId('com.eventfield.clingy-ex-addon');
+   * for (const r of luna.plugins.unmetRequirements(me?.requiresPlugins.value ?? [])) {
+   *   console.warn(`needs ${r.name}${r.min_version ? ` ${r.min_version}` : ''}`);
+   * }
+   */
+  unmetRequirements(requirements: readonly PluginRequirement[], options: { blockingOnly?: boolean } = {}): PluginRequirement[] {
+    return requirements.filter(
+      (r) => !(options.blockingOnly && r.optional) && !r.plugin_id.some((id) => this.byId(id)?.isAtLeast(r.min_version) === true),
+    );
   }
 
   /** All categories in the catalog, sorted. */

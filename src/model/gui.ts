@@ -16,6 +16,7 @@
  * await luna.gui.showPlugin(track.id, 'effect_0');
  */
 import type { Client } from '../client/client';
+import type { PluginRequirement } from './plugins';
 import { derived, type Prop, type WritableProp } from '../store/prop';
 import { RequestTimeout, UAError, Unsupported } from '../wire/errors';
 import { Collection } from './collection';
@@ -31,7 +32,17 @@ export class AddOn extends Node {
   readonly addOnId: Prop<string>;
   /** The manifest's `name`: its menu item and panel header. */
   readonly name: Prop<string>;
-  readonly target: Prop<AddOnTarget>;
+  /**
+   * Every host the Add On can be shown in, default first (fact 144): the manifest's `targets`, such as
+   * `['window', 'browser']`, or a one-entry list from its single `target`. The user can swap an
+   * Add On with more than one between them from its header. The host a page is in now is its
+   * {@link AddOnInstance.target}. `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const canBePanel = addOn.targets.value?.includes('browser') ?? false;
+   * const defaultHost = addOn.targets.value?.[0];
+   */
+  readonly targets: Prop<AddOnTarget[]>;
   /** Absolute file path of the icon, or `''`. */
   readonly icon: Prop<string>;
   /** The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. */
@@ -59,11 +70,38 @@ export class AddOn extends Node {
   readonly manufacturer: Prop<string>;
   /** The manifest's `description`, an array of strings already concatenated, or `''` when it has none. */
   readonly description: Prop<string>;
+  /**
+   * The manifest's `categories`, such as `['MIDI', 'Utility']` (see {@link ADD_ON_CATEGORIES}),
+   * or `[]` when it has none. LUNA does not check the names, so one from a newer SDK can appear.
+   * `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const midi = luna.gui.addOns.items.filter((a) => a.categories.value?.includes('MIDI'));
+   */
+  readonly categories: Prop<string[]>;
+  /**
+   * Every server the Add On would connect to (fact 147): its manifest's `network` hosts,
+   * normalized (`'api.example.com'`, `'*.example.com'`, `'host:8443'`), plus a hosted page's own
+   * server. `[]` when none. `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const servers = addOn.network.value ?? [];
+   */
+  readonly network: Prop<string[]>;
+  /**
+   * Those of {@link AddOn.network} the user allowed (fact 147). Only LUNA's own prompts and
+   * Settings > Add Ons > SERVERS change it; nothing an Add On sends can. A page loads with the
+   * set fixed and is loaded again when it changes.
+   *
+   * @example
+   * const blocked = (addOn.network.value ?? []).filter((h) => !addOn.networkAllowed.value?.includes(h));
+   */
+  readonly networkAllowed: Prop<string[]>;
   /** The manifest's `version`, or `''` when it has none. Follows a replace (fact 131). */
   readonly version: Prop<string>;
   /**
    * Where it is installed (fact 131): `'folder'`, a folder in LUNA's Add Ons folder (from a
-   * `.lunaaddon`, the marketplace, or copied there); `'link'`, a symlink there, as
+   * `.lunaaddon`, the showcase, or copied there); `'link'`, a symlink there, as
    * `ua-builder install` makes on macOS; `'built_in'`, bundled with LUNA. {@link Gui.uninstallAddOn}
    * removes `'folder'` and `'link'` ones (a link loses only the link) and refuses `'built_in'`.
    * `undefined` on a LUNA older than the property.
@@ -72,13 +110,54 @@ export class AddOn extends Node {
    * const removable = addOn.installedFrom.value === 'folder' || addOn.installedFrom.value === 'link';
    */
   readonly installedFrom: Prop<AddOnInstalledFrom>;
+  /**
+   * The manifest's `min_width`, `min_height`, `max_width` and `max_height` (fact 143): the
+   * window's size limits in pixels, `null` when the manifest declares none. LUNA stops the
+   * user's resize at them and clamps {@link AddOnInstance.resize} to them. Meaningful for
+   * `'window'` only. `undefined` on a LUNA older than the properties.
+   *
+   * @example
+   * const tooNarrow = addOn.minWidth.value != null && innerWidth < addOn.minWidth.value;
+   */
+  readonly minWidth: Prop<number | null>;
+  readonly minHeight: Prop<number | null>;
+  readonly maxWidth: Prop<number | null>;
+  readonly maxHeight: Prop<number | null>;
+  /**
+   * The manifest's `requires_plugins` as LUNA read it (fact 148): the plugins the Add On needs,
+   * each with every `plugin_id` it accepts (always an array), its `min_version` (`''` for any)
+   * and whether it is `optional`; `[]` when it has none. Whether each is met is not here, since
+   * it changes with the installed plugins: ask {@link Plugins.unmetRequirements}. LUNA lists an
+   * Add On whose non-optional requirement is unmet disabled, with the plugin it needs, and
+   * will not open it. `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * await luna.plugins.load();
+   * const missing = luna.plugins.unmetRequirements(addOn.requiresPlugins.value ?? []);
+   * if (missing.length) banner.textContent = `Install ${missing.map((r) => r.name).join(', ')}`;
+   */
+  readonly requiresPlugins: Prop<PluginRequirement[]>;
+  /**
+   * Its pages open in LUNA right now, by `add_on_inst` (fact 143): one per window, browser
+   * panel, editor panel or app page showing it. Use {@link Gui.thisInstance} for your own page.
+   *
+   * @example
+   * await addOn.instances.load();
+   * addOn.instances.items.map((i) => `${i.target.value} ${i.width.value}x${i.height.value}`);
+   */
+  readonly instances: Collection<AddOnInstance>;
 
   /** @internal */
   constructor(client: Client, path: string) {
     super(client, path);
+    this.minWidth = this.prop<number | null>('min_width');
+    this.minHeight = this.prop<number | null>('min_height');
+    this.maxWidth = this.prop<number | null>('max_width');
+    this.maxHeight = this.prop<number | null>('max_height');
+    this.instances = new Collection<AddOnInstance>(client, `${path}/instances`, (p) => new AddOnInstance(client, p), { levels: 2, commands: false, flatvalue: true });
     this.addOnId = this.prop<string>('id');
     this.name = this.prop<string>('name');
-    this.target = this.prop<AddOnTarget>('target');
+    this.targets = this.prop<AddOnTarget[]>('targets');
     this.icon = this.prop<string>('icon');
     this.floating = this.prop<boolean>('floating');
     this.showWithSession = this.prop<boolean>('show_with_session');
@@ -87,15 +166,78 @@ export class AddOn extends Node {
     this.unloadOnClose = this.prop<boolean>('unload_on_close');
     this.manufacturer = this.prop<string>('manufacturer');
     this.description = this.prop<string>('description');
+    this.categories = this.prop<string[]>('categories');
+    this.network = this.prop<string[]>('network');
+    this.networkAllowed = this.prop<string[]>('network_allowed');
     this.version = this.prop<string>('version');
     this.installedFrom = this.prop<AddOnInstalledFrom>('installed_from');
+    this.requiresPlugins = this.prop<PluginRequirement[]>('requires_plugins');
   }
 
-  /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
-   *  menu item), show a `'browser'` in the secondary browser, or an `'editor'` in the Timeline's
-   *  editor panel (never toggling either closed). */
+  /** Show it in LUNA in the host it is in now (one of {@link targets}): navigate to an `'app'`,
+   *  open a `'window'` (toggling it like its menu item), show a `'browser'` in the secondary
+   *  browser, or an `'editor'` in the Timeline's editor panel (never toggling either closed). */
   show(): Promise<unknown> {
     return this.wire.post('/gui/show_add_on', { id: this.id });
+  }
+}
+
+/**
+ * One page of an installed Add On open in LUNA (fact 143): `/gui/add_ons/<id>/instances/<add_on_inst>`.
+ * LUNA gives every Add On page an `add_on_inst` in its URL; {@link Gui.thisInstance} finds the
+ * page's own. A window keeps its instance while it exists, and a `show_with_session` window
+ * keeps it in the session, so it is the same after the session is closed and opened again: a
+ * page can key its own `session.storage` records by it.
+ *
+ * @example
+ * const me = await luna.gui.thisInstance();
+ * if (me?.target.value === 'window') await me.resize(640, 480);
+ * me?.width.onChange(() => layout(me.width.value ?? 0));
+ */
+export class AddOnInstance extends Node {
+  /** The host the page is in: one of its Add On's {@link AddOn.targets}. */
+  readonly target: Prop<AddOnTarget>;
+  /** The page's width in points; follows the user's resize. `undefined` until loaded. */
+  readonly width: Prop<number>;
+  /** The page's height in points; follows the user's resize. `undefined` until loaded. */
+  readonly height: Prop<number>;
+
+  /** @internal */
+  constructor(client: Client, path: string) {
+    super(client, path);
+    this.target = this.prop<AddOnTarget>('target');
+    this.width = this.prop<number>('width');
+    this.height = this.prop<number>('height');
+  }
+
+  /** The `add_on_inst` LUNA gave the page. */
+  get instanceId(): string {
+    return this.id;
+  }
+
+  /** The manifest `id` of the Add On this page belongs to, in lowercase. */
+  get addOnId(): string {
+    const parent = this.path.slice(0, this.path.lastIndexOf('/instances/'));
+    return parent.slice(parent.lastIndexOf('/') + 1);
+  }
+
+  /**
+   * Ask LUNA to resize a `'window'` instance's window to this page size, in points. A size left
+   * out keeps the current one. LUNA clamps it to the manifest's `min_*`/`max_*`, leaves full
+   * screen first, keeps the window's top-left corner, and saves it as it would a user resize
+   * (with the session, for a `show_with_session` window). Resolves once the size LUNA applied is
+   * in {@link width} and {@link height}. Rejects with `uasrv.read_only` for another
+   * target or a `fixed_size` window, and `uasrv.invalid_value` for a size of 0 or less.
+   *
+   * @example
+   * await me.resize(800);          // width only
+   * await me.resize(undefined, 600); // height only
+   */
+  async resize(width?: number, height?: number): Promise<void> {
+    if (width !== undefined) await this.wire.set(`${this.path}/width`, Math.round(width));
+    if (height !== undefined) await this.wire.set(`${this.path}/height`, Math.round(height));
+    // LUNA clamps, and a write is not echoed to its writer (fact 6): read back what it applied.
+    await this.reload({ flatvalue: true, commands: false, children: false });
   }
 }
 
@@ -237,6 +379,32 @@ export class Gui extends Node {
   }
 
   /**
+   * This page's own instance (fact 143), from the `add_on_inst` LUNA puts in an Add On page's
+   * URL, watched so its size follows LUNA. `undefined` outside LUNA, on a LUNA older than
+   * instances, or when no live instance has that id. Pass an id to look up another page.
+   *
+   * @example
+   * const me = await luna.gui.thisInstance();
+   * if (me) console.log(me.addOnId, me.instanceId, me.width.value, me.height.value);
+   */
+  async thisInstance(instanceId: string | undefined = instanceIdFromUrl()): Promise<AddOnInstance | undefined> {
+    if (!instanceId || !(await this.available())) return undefined;
+    const reply = await this.client.raw.get('/gui/add_ons', { levels: 3, properties: false, commands: false });
+    for (const addOn of replyChildren(reply)) {
+      for (const folder of replyChildren(addOn)) {
+        if (childName(folder) !== 'instances') continue;
+        for (const instance of replyChildren(folder)) {
+          if (childName(instance) !== instanceId) continue;
+          const node = new AddOnInstance(this.client, `/gui/add_ons/${childName(addOn)}/instances/${instanceId}`);
+          await node.watch().ready;
+          return node;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * True when the engine has LUNA's `/gui` (fact 103). Read once per connection: the
    * root's children are listed, because a `get` of a missing `/gui` answers `{}` (fact 10).
    *
@@ -300,27 +468,27 @@ export class Gui extends Node {
   }
 
   /**
-   * Install Add Ons into LUNA, as Settings > Add Ons > MARKETPLACE does (fact 128). Give
-   * `{ id }`, a marketplace package id or the id of an Add On in one (its whole package
+   * Install Add Ons into LUNA, as LUNA's Add On Showcase does (fact 128). Give
+   * `{ id }`, a showcase package id or the id of an Add On in one (its whole package
    * installs), or `{ url }`: a public GitHub repo (`https://github.com/<owner>/<repo>`; the
    * scheme, `www.`, `.git` and a path inside the repo are tolerated), whose latest release
-   * LUNA lists in the marketplace and installs every `.lunaaddon` of; or a Google Drive share
+   * LUNA lists in the showcase and installs every `.lunaaddon` of; or a Google Drive share
    * link to a `.lunaaddon` (`https://drive.google.com/file/d/<id>/view?usp=sharing`), an
    * iCloud Drive one (`https://www.icloud.com/iclouddrive/<id>#<name>`) or a Dropbox one
    * (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=0`), which LUNA downloads
    * and installs. The file has to be shared with anyone who has the link: LUNA does not
    * sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
    * replace what is installed, so the user always confirms. A url that installs and is not
-   * one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
+   * one of the showcase's own repos is saved, and LUNA lists it in its showcase from
    * then on, to install again; {@link removeAddOn} forgets it.
    *
    * Resolves as LUNA starts, not once installed: watch {@link addOns} for the result. A
    * repo whose latest release has nothing LUNA can install, or a shared file that is not
    * shared with anyone, a folder, or not an Add On, is only found out after this resolves, and LUNA tells the user. Rejects with a `Luna.Error` whose `code` is
-   * `uasrv.invalid_value` for an id no marketplace package has, a url that is not a GitHub
+   * `uasrv.invalid_value` for an id no showcase package has, a url that is not a GitHub
    * repo or a Drive, iCloud Drive or Dropbox file link, or both given; `uasrv.missing_field` for neither; `uasrv.too_many_requests` while
    * that package is already installing. A LUNA without the command (an older one, or one
-   * without its Add On marketplace) rejects with `Luna.Unsupported`.
+   * without its Add On showcase) rejects with `Luna.Unsupported`.
    *
    * @example
    * await luna.gui.installAddOn({ url: 'https://github.com/uaudio-labs/video-window' });
@@ -335,11 +503,11 @@ export class Gui extends Node {
 
   /**
    * Forget a link {@link installAddOn} (or LUNA's IMPORT URL) saved, as Remove from
-   * Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
-   * `/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
-   * marketplace now and at the next launch; the installed Add On is not touched. Rejects with
-   * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
-   * has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
+   * Showcase in LUNA does (fact 128). `id` is the package's id under
+   * `/gui/showcase/packages`, or the id of an Add On in it. Its listing leaves LUNA's
+   * showcase now and at the next launch; the installed Add On is not touched. Rejects with
+   * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no showcase package
+   * has, `uasrv.not_permitted` for a package of the showcase's own repos, and
    * `uasrv.missing_field` with no id. A LUNA without the command rejects with
    * `Luna.Unsupported`.
    *
@@ -678,6 +846,25 @@ function randomUid(): string {
 }
 
 /** Child names of a `get /?children=1` reply, as plain names. */
+/** The page's `add_on_inst` query parameter, or `undefined` (not an Add On page, or no `location`). */
+function instanceIdFromUrl(): string | undefined {
+  const search = (globalThis as { location?: { search?: unknown } }).location?.search;
+  if (typeof search !== 'string') return undefined;
+  return new URLSearchParams(search).get('add_on_inst') ?? undefined;
+}
+
+/** The children of a `get` reply, as objects. */
+function replyChildren(reply: unknown): unknown[] {
+  const children = typeof reply === 'object' && reply !== null ? (reply as { children?: unknown }).children : undefined;
+  return Array.isArray(children) ? children.filter((c) => typeof c === 'object' && c !== null) : [];
+}
+
+/** The last path segment of a reply child. */
+function childName(child: unknown): string {
+  const raw = (child as { path?: unknown; name?: unknown }).path ?? (child as { name?: unknown }).name;
+  return typeof raw === 'string' ? raw.slice(raw.lastIndexOf('/') + 1) : '';
+}
+
 function rootChildNames(reply: unknown): string[] {
   const children = typeof reply === 'object' && reply !== null ? (reply as { children?: unknown }).children : undefined;
   if (!Array.isArray(children)) return [];

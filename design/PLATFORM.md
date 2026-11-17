@@ -51,7 +51,7 @@ connection, including LUNA UI actions through `luna.gui` (`/gui/...`).
 | Layer | Source | Public surface | Rule |
 |---|---|---|---|
 | Wire | `src/wire/` | `Luna.Port`, `WebSocketPort`, `WasmPort`, `MockPort`/`MockEngine`, codec, multi-update decoder, `Luna.Error` family | Normalises everything to `Event { path, data, operation? }`; transport quirks stay here (facts 6, 10, 13, 35) |
-| Wasm loader | `src/engine/loader.ts` | `Luna.bootWasmEngine`, `Luna.WasmEngine` (`luna.wasm`) | Injects `devicedwasm.js`, waits for `onState('running')` |
+| Wasm loader | `src/engine/loader.ts` | `Luna.bootWasmEngine`, `Luna.WasmEngine` (`luna.wasm`) | Injects `luna-engine.js`, waits for `onState('running')` |
 | Store | `src/store/` | `Luna.Prop`, `Cell`, `List`, `Store` | Versioned cells, refcounted subscriptions, optimistic writes with rollback, reload on reconnect |
 | Client | `src/client/` | `Luna.connect`, `Luna.Client`, host detection | `luna.raw` is the only raw-path escape hatch |
 | Model | `src/model/` | Everything else in the namespace | One idiom: `.value` / `.onChange` / `.set` |
@@ -164,7 +164,7 @@ through the scaffold and the `test-add-on` / `verify-add-on` skills.
 | Legacy LUNA SDK | `packages/sdk/luna/LUNA SDK` (`UANet` global) | Ideas only (reconnect, manifest spec); not a dependency |
 | LUNA GUI client lib | `packages/hbgui/next_gen/shared/uanet-clients` | Source of the ported domain objects; kept, no forced migration |
 | Native engine | `deviced` in `hbsystem`, inside LUNA.app | The thing `WebSocketPort` talks to |
-| Wasm engine | `packages/hbsystem/wasm_engine` | Builds `devicedwasm.{js,wasm}` (about 32 MB stripped); bridge is `WasmD_Bridge` |
+| Wasm engine | `packages/hbsystem/wasm_engine` | Builds `luna-engine.{js,wasm}` (about 22 MB stripped); bridge is `WasmD_Bridge` |
 | Protocol reference | `packages/hbsystem/networking/docs/` | UANet JSON dialect the wire layer implements |
 | Host side of Add Ons | LUNA app | Reads the Add Ons folder, builds the Add Ons menu, appends `?port=`, installs a `.lunaaddon` (unzips it into the Add Ons folder) |
 | External reference | `ua-client-sdk` (Apache-2.0) | Ideas only; no code copied |

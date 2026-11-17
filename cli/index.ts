@@ -1,16 +1,18 @@
 /**
  * ua-builder: scaffold, serve, test, install and pack LUNA Add Ons.
  *
- *   ua-builder new <name> [--id com.x.y] [--name "..."] [--manufacturer "..."] [--description "..."] [--target window|app] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]
+ *   ua-builder new <name> [--id com.x.y] [--name "..."] [--manufacturer "..."] [--description "..."] [--categories "MIDI,..."] [--target window|app] [--width N --height N] [--template add-on-basic|add-on-typescript] [--dir path]
  *   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]
  *   ua-builder test [dir] [--live]
  *   ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--luna-bridge] [--screenshot <file.png>] [--chrome <path>]
  *   ua-builder install [dir] [--name "Link Name"]
  *   ua-builder pack [dir] [--out Name.lunaaddon] [--source-maps]
+ *   ua-builder eject-wasm [dir] [--engine <dir>] [--out <folder>]   (hidden: not in usage() until wasm ships)
  *   ua-builder doctor
  *   ua-builder tree [path] [--levels N] [--out file.json]
  */
 import { doctor } from './doctor';
+import { ejectWasm } from './eject-wasm';
 import { install } from './install';
 import { newAddOn } from './new';
 import { pack } from './pack';
@@ -42,6 +44,8 @@ async function main(): Promise<number> {
       return install(args);
     case 'pack':
       return pack(args);
+    case 'eject-wasm':
+      return ejectWasm(args);
     case 'probe':
       return probe(args);
     case 'doctor':

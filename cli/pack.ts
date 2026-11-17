@@ -17,6 +17,14 @@ function isExcluded(name: string): boolean {
   );
 }
 
+/**
+ * True when `folder` is a `ua-builder eject-wasm` output (its `serve.py` and engine). It may sit
+ * in the Add On folder, so a pack or an eject leaves it out, as it does a `.lunaaddon`.
+ */
+export function isEjectOutput(folder: string): boolean {
+  return existsSync(join(folder, 'serve.py')) && existsSync(join(folder, '__engine', 'luna-engine.js'));
+}
+
 /** Top-level build configuration: TypeScript and bundler configs. Never loaded by the page. */
 const BUILD_CONFIG = /^(tsconfig(\..+)?\.json|(vite|rollup|webpack|esbuild|rspack)\.config\.[cm]?[jt]s)$/;
 
@@ -54,7 +62,7 @@ export function isJunk(name: string): boolean {
  * nothing to ship is left out. Returns how many junk entries were left out, and the paths of
  * the build-only ones (see {@link isBuildOnly}).
  */
-function collect(dir: string, top: string, keepMaps: boolean): { entries: ZipEntry[]; skipped: number; buildOnly: string[] } {
+export function collect(dir: string, top: string, keepMaps: boolean): { entries: ZipEntry[]; skipped: number; buildOnly: string[] } {
   const entries: ZipEntry[] = [];
   const buildOnly: string[] = [];
   const visited = new Set<string>();
@@ -68,7 +76,7 @@ function collect(dir: string, top: string, keepMaps: boolean): { entries: ZipEnt
     const at = entries.length;
     entries.push({ name: `${prefix}/`, mtime: stat.mtime, mode: 0o40755 });
     for (const name of readdirSync(folder).sort()) {
-      if (isRoot && isExcluded(name)) continue;
+      if (isRoot && (isExcluded(name) || isEjectOutput(join(folder, name)))) continue;
       if (isJunk(name)) {
         skipped++;
         continue;

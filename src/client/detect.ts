@@ -4,6 +4,7 @@
  * between "inside LUNA" and "a plain web page".
  */
 import { DEFAULT_LUNA_PORT } from '../wire/websocket-port';
+import type { AddOnTarget } from '../model/gui';
 import type { Engine } from './client';
 
 export interface LocationOptions {
@@ -20,12 +21,26 @@ function search(): string | undefined {
   return typeof loc?.search === 'string' ? loc.search : undefined;
 }
 
+/** The engine the page itself names in `<meta name="luna-engine" content="...">`, if any. */
+function pageEngine(): Engine | undefined {
+  type Doc = { querySelector?: (selector: string) => { getAttribute(name: string): string | null } | null };
+  const doc = (globalThis as { document?: Doc }).document;
+  const engine = doc?.querySelector?.('meta[name="luna-engine"]')?.getAttribute('content');
+  return engine === 'wasm' || engine === 'luna' || engine === 'mock' ? engine : undefined;
+}
+
 /** `host` and `port` from the page URL, if present. */
 export function locationOptions(): LocationOptions {
-  const s = search();
-  if (!s) return {};
-  const params = new URLSearchParams(s);
   const out: LocationOptions = {};
+  // `ua-builder eject-wasm` marks its pages with a meta tag: a hosted page gets no `?engine=`.
+  // The URL still wins, and LUNA opening the page (`?port=`) always means LUNA.
+  const s = search();
+  const params = new URLSearchParams(s ?? '');
+  if (!params.has('engine') && !params.has('port')) {
+    const engine = pageEngine();
+    if (engine) out.engine = engine;
+  }
+  if (!s) return out;
   const host = params.get('host');
   const port = params.get('port');
   if (host) out.host = host;
@@ -35,6 +50,21 @@ export function locationOptions(): LocationOptions {
   const engineUrl = params.get('engine_url');
   if (engineUrl) out.engineUrl = engineUrl;
   return out;
+}
+
+/**
+ * The host LUNA loaded this Add On page in, from the `?target=` it puts on the page URL (fact 144):
+ * `'window'`, `'browser'`, `'editor'` or `'app'`. `undefined` outside LUNA and on a LUNA older
+ * than the parameter. Synchronous, so a page that lists several manifest `targets` can lay
+ * itself out for its host before it connects. LUNA reloads the page when the user moves it to
+ * another host, so it never changes while the page runs.
+ *
+ * @example
+ * document.body.classList.add(`host-${Luna.addOnTarget() ?? 'window'}`);
+ */
+export function addOnTarget(): AddOnTarget | undefined {
+  const target = new URLSearchParams(search() ?? '').get('target');
+  return target === 'window' || target === 'browser' || target === 'editor' || target === 'app' ? target : undefined;
 }
 
 /** True when the page was opened by LUNA (a `?port=` is on the URL). */

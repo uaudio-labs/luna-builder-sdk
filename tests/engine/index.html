@@ -30,7 +30,7 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   });
   await step('status', async () => {
     const st = await luna.raw.get('/status', { flatvalue: true, children: false, commands: false });
-    assert(st.properties.name === 'devicedwasm', 'name ' + st.properties.name);
+    assert(st.properties.name === 'luna-engine', 'name ' + st.properties.name);
     return st.properties.name;
   });
   await step('no session yet', async () => {
@@ -120,12 +120,13 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
     const a = luna.wasm.audio();
     return JSON.stringify(a);
   });
-  await step('missing path is an error on wasm (fact 10)', async () => {
+  await step('missing path answers {} as on native (fact 10)', async () => {
     let code = '';
-    try { await luna.raw.get('/definitely/missing'); } catch (e) { code = e.code; }
-    assert(code === 'uasrv.invalid_object', 'code ' + code);
+    let got;
+    try { got = await luna.raw.get('/definitely/missing'); } catch (e) { code = e.code; }
+    assert(code === '' && JSON.stringify(got) === '{}', 'code ' + code + ', got ' + JSON.stringify(got));
     const empty = await luna.raw.get(session.path + '/markers', { properties: false, commands: false });
-    return 'missing -> ' + code + ', empty node -> ' + JSON.stringify(empty);
+    return 'missing -> ' + JSON.stringify(got) + ', empty node -> ' + JSON.stringify(empty);
   });
   globalThis.__done = true;
 })().catch((e) => { results.push({ name: 'fatal', ok: false, detail: String(e) }); globalThis.__done = true; });

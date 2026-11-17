@@ -1,6 +1,6 @@
 import { cpSync, existsSync, lstatSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { addOnClashes, addOnsFolder, flagString, installedAddOns, menuFor, prepareAddOnsFolder, readManifest, type Args } from './util';
+import { addOnClashes, addOnsFolder, entryTargets, flagString, installedAddOns, menuFor, prepareAddOnsFolder, readManifest, type Args } from './util';
 
 /**
  * Put an Add On folder where LUNA looks for it. macOS: a symlink, so edits are live.
@@ -62,6 +62,6 @@ function isDanglingLink(path: string): boolean {
 
 function report(entries: { id: string; name: string; target?: string }[]): number {
   console.log(`LUNA will list:`);
-  for (const e of entries) console.log(`  ${e.name}  (${e.id})  under ${menuFor(e.target)}`);
+  for (const e of entries) console.log(`  ${e.name}  (${e.id})  under ${menuFor(entryTargets(e)[0])}`);   // its default host's menu, until swapped
   return 0;
 }

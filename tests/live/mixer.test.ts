@@ -170,8 +170,7 @@ describe.skipIf(!live)('live: mixer', () => {
       // that edit's entry (fact 85), so leave a gap after the insert.
       await sleep(800);
       const row = await lastRow();
-      // A plugin re-inserted into a slot it held before comes back with its old settings, and
-      // writing the value already there makes no entry, so move it somewhere it is not.
+      // Writing the value already there makes no entry, so move it somewhere it is not.
       await param.normalized.set((param.normalized.value ?? 0) > 0.5 ? 0.2 : 0.8);
       expect(await entriesSince(row)).toEqual([`${param.name.value} Change`]); // touched, so undoable (fact 85)
       await slot.clear();
@@ -179,6 +178,31 @@ describe.skipIf(!live)('live: mixer', () => {
       await slot.controls.reload();
       expect(slot.params).toEqual([]); // the old parameters linger as ghosts
       await expect(slot.setPlugin('com.nope.nothing')).rejects.toMatchObject({ code: 'mixer.missing_plug-in' });
+    } finally {
+      await slot.clear().catch(() => undefined);
+    }
+  });
+
+  it('reloads a cleared plugin at its defaults and powered on (fact 146)', async () => {
+    await mono.effects.load();
+    const slot = mono.effectSlots.filter((e) => e.isEmpty).at(-1);
+    if (!slot) return console.log('fact 146 skipped: no empty insert slot on the mono track');
+    try {
+      await slot.setPlugin(PLUGIN);
+      await slot.controls.load();
+      const param = slot.params[0]!;
+      const id = param.id;
+      const fresh = param.normalized.value ?? 0;
+      await param.normalized.set(fresh > 0.5 ? 0.1 : 0.9);
+      await slot.property<boolean>('plugin_power').set(false);
+      await Luna.settle(() => slot.pluginPower.value === false, 'power off');
+      await slot.clear();
+      await Luna.settle(() => slot.isEmpty, 'clear the slot');
+      await slot.setPlugin(PLUGIN);
+      await slot.controls.reload();
+      await Luna.settle(() => slot.params.length > 0, 'reload the parameters');
+      expect(slot.controls.get(id).normalized.value).toBeCloseTo(fresh, 3);
+      expect(slot.pluginPower.value).toBe(true);
     } finally {
       await slot.clear().catch(() => undefined);
     }

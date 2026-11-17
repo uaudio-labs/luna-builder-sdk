@@ -28,7 +28,7 @@ Goals, in priority order:
 | Existing code | Role in builder |
 |---|---|
 | `sdk/luna/LUNA SDK` (plain JS, `UANet` global) | Ideas: reconnect loop, static Broadcaster, manifest spec, examples. Examples are re-implemented on builder. |
-| `hbgui/next_gen/shared/uanet-clients` | Source of the domain feature objects (`uaservices/` only). Copied and rewritten onto builder's store and property idiom. The `@uaudio/uanet-core` binding layer is **not** used. uanet-clients itself is kept and continues to serve the LUNA GUI; there is no forced migration. |
+| `hbgui/next_gen/shared/uanet-clients` | Source of the domain feature objects (tracks, sessions and the like) only. Copied and rewritten onto builder's store and property idiom. The `@uaudio/uanet-core` binding layer is **not** used. uanet-clients itself is kept and continues to serve the LUNA GUI; there is no forced migration. |
 | `/Users/dtissier/code/ua-client-sdk` (external, Apache-2.0) | **Reference only.** No code is copied. Ideas borrowed: `WirePort` seam, mock that reproduces daemon traps, version-stamped cells, optimistic writes with rollback, an evidence file of measured daemon facts, JSDoc examples everywhere. |
 | `hbsystem/wasm_engine` | The wasm engine builder drives. Its page-facing C API is the second transport. |
 | `hbsystem/networking/docs/*.md` | The UANet protocol builder implements (JSON dialect only). |
@@ -175,7 +175,7 @@ throws `Luna.NotRunning` with an actionable message.
 
 ### Layer 3: domain objects
 
-Ported from `uanet-clients/src/uaservices`, rewritten to the property idiom.
+Ported from uanet-clients' domain feature objects, rewritten to the property idiom.
 What survives and how:
 
 | Shape in uanet-clients | Port strategy |
@@ -244,11 +244,11 @@ can control LUNA.
 
 `Luna.connect({ engine: 'wasm' })` (or `?engine=wasm` on the page URL):
 
-1. Injects `<script src="<engineUrl>devicedwasm.js">`. `engineUrl` defaults to `/__engine/`,
+1. Injects `<script src="<engineUrl>luna-engine.js">`. `engineUrl` defaults to `/__engine/`,
    the mount `ua-builder serve --engine <dir>` provides. The engine must be same-origin with
    the page because its pthread workers load from its own URL, so a hosted engine has to be
    reverse-proxied onto the page's host (fact 38).
-2. `await createDevicedModule({ print, printErr, onAbort, locateFile })`.
+2. `await createLunaEngineModule({ print, printErr, onAbort, locateFile })`.
    Instantiating is the boot; the page never pumps.
 3. Installs `WasmDeviced` hooks and waits for `onState('running')`.
 4. Returns a `Luna.Client` over a `Luna.WasmPort`, with `luna.engine` for audio

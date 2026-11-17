@@ -170,16 +170,29 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Switch LUNA's page, open a URL and reveal a path in Finder or Explorer.
 - Show a task with progress in LUNA.
 - List installed Add Ons with their version and where each was installed from.
-- Install Add Ons from LUNA's marketplace, a GitHub repo or a share link, and ask the user to
+- Install Add Ons from LUNA's showcase, a GitHub repo or a share link, and ask the user to
   uninstall one.
 
 ## Add On types and manifest
 
 - Window, editor (docked under the Timeline), browser and app Add Ons.
+- Add Ons the user can move between window, browser and editor (`targets`), read back as
+  `Luna.AddOn.targets`, with `Luna.addOnTarget()` naming the host a page was loaded in.
 - Floating windows and windows that open with the session.
 - A manifest with name, description, size and the minimum LUNA version the Add On needs.
+- Plugins an Add On needs (`requires_plugins`, with a minimum version, optional or not): LUNA
+  will not open it without them and says what is missing; `Luna.AddOn.requiresPlugins` and
+  `luna.plugins.unmetRequirements()` let a page check the same.
+- Window size limits (`min_width`, `min_height`, `max_width`, `max_height`), and a page that
+  reads and sets its own window's size (`luna.gui.thisInstance()`, `resize()`).
+- `show_with_session` windows whose size and open state are saved with each session, and
+  app Add Ons a session keeps and reopens with.
 - Windows of a fixed size (`fixed_size`), pages that keep running while hidden
   (`run_hidden`), and pages unloaded when closed (`unload_on_close`).
+- Showcase categories (`categories`), checked against `Luna.ADD_ON_CATEGORIES`, with
+  `Luna.suggestAddOnCategories()` guessing them from a description.
+- Servers an Add On may reach (`network`), allowed by the user and read back as
+  `Luna.AddOn.network` and `Luna.AddOn.networkAllowed`; a page reaches nothing else.
 
 ## Escape hatch
 

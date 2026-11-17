@@ -34,6 +34,7 @@
 import type { Client } from '../client/client';
 import type { Prop, WritableProp } from '../store/prop';
 import { derived } from '../store/prop';
+import { float } from '../wire/codec';
 import { Automation } from './automation';
 import { Node } from './node';
 import { Taper } from './taper';
@@ -108,9 +109,10 @@ export class Control extends Node {
     readonly sessionUid: string = sessionUidFromPath(path),
   ) {
     super(client, path);
-    this.value = this.gated(this.writableProp<number>('value'));
-    this.normalized = this.gated(this.writableProp<number>('normalized_value'));
-    this.real = this.gated(this.writableProp<number | boolean>('real_value'));
+    const wire = <T>(v: T): unknown => this.wireNumber(v);
+    this.value = this.gated(this.writableProp<number>('value', wire));
+    this.normalized = this.gated(this.writableProp<number>('normalized_value', wire));
+    this.real = this.gated(this.writableProp<number | boolean>('real_value', wire));
     this.display = this.prop<string>('string_value');
     this.uid = this.prop<string>('uid');
     this.name = this.prop<string>('name');
@@ -141,6 +143,16 @@ export class Control extends Node {
   protected override release(): void {
     this.automationLane?.dispose();
     this.recordingLane?.dispose();
+  }
+
+  /**
+   * A number written to a continuous control goes as a float literal (fact 142): LUNA refuses a
+   * bare whole number for a plugin parameter's `real_value` and ignores one for its `value`, so
+   * `real.set(-3)` would fail where `real.set(-3.5)` works. A discrete control's step value
+   * stays a whole number, which is what it requires; so do booleans and anything else.
+   */
+  private wireNumber(v: unknown): unknown {
+    return typeof v === 'number' && Number.isFinite(v) && this.discrete.value === false ? float(v) : v;
   }
 
   /** True when `real` is boolean-like (mute, solo, switches). */

@@ -76,6 +76,25 @@ describe('ua-builder new', () => {
     expect(() => readManifest(withIt.dir)).not.toThrow();
   });
 
+  it('writes categories only when --categories is given, as the list spells them, and suggests some otherwise', async () => {
+    const without = await scaffold('--description', 'Quantize MIDI notes');
+    expect(without.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(without.dir, 'manifest.json'), 'utf8'))).not.toHaveProperty('categories');
+    expect(without.out).toMatch(/No --categories given[\s\S]*suggested from the name and description: "MIDI"/);
+
+    const withIt = await scaffold('--categories', 'midi, Mixing & Mastering,MIDI', '--target', 'app');
+    expect(withIt.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(withIt.dir, 'manifest.json'), 'utf8')).categories).toEqual(['MIDI', 'Mixing & Mastering']);
+    expect(withIt.out).not.toContain('No --categories given');
+    expect(() => readManifest(withIt.dir)).not.toThrow();
+  });
+
+  it('refuses an unknown category', async () => {
+    const { code, out } = await scaffold('--categories', 'Games');
+    expect(code).toBe(2);
+    expect(out).toMatch(/unknown category "Games"/);
+  });
+
   for (const [target, menu] of [['browser', 'Add Ons > Browsers'], ['editor', 'Add Ons > Editors'], ['app', 'Add Ons > Apps']] as const) {
     it(`leaves floating, show_with_session and the size out of a ${target} Add On`, async () => {
       const { dir, code, out } = await scaffold('--target', target);

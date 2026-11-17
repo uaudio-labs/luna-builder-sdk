@@ -88,6 +88,10 @@ const q = await luna.raw.get(`${session.path}/undo_queues`, { children: true, le
   `docs/QUICKSTART.md`). A control write outside a touch makes no entry at all (fact 85).
 - An edit whose entry is missing did not happen, whatever the reply said (fact 71).
 - Undo from LUNA (Cmd+Z) and check the page shows the value going back.
+- Open the page in LUNA on a large session and play it. Meters and the playhead should move
+  smoothly, and the `com.apple.WebKit.GPU` process should stay well below 100% CPU
+  (`ps -Ao pid,%cpu,comm | grep WebKit.GPU`). If it is pinned, something repaints at playback
+  rate: docs/DRAWING.md, "Measuring inside LUNA".
 
 ## Secrets
 
@@ -118,6 +122,8 @@ assert against an independent read, restore in `finally`.
 
 State the LUNA build (`get /status`), what was checked from the second client, the undo
 entries seen, and anything restored. A check you could not run is a gap, not a pass.
+If `manifest.json` has no `categories` (`ua-builder install` warns), suggest one or two from
+what the Add On now does (docs/MANIFEST.md, "Categories") and ask the user to confirm them.
 
 ## SDK feedback
 

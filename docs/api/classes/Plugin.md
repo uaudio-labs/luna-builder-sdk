@@ -122,6 +122,33 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### isAtLeast()
+
+```ts
+isAtLeast(minVersion): boolean;
+```
+
+Whether it is installed at `minVersion` or later, as LUNA checks an Add On's
+`requires_plugins` (fact 148). Reads the loaded [installed](#installed) and [version](#version).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `minVersion` | `string` |
+
+#### Returns
+
+`boolean`
+
+#### Example
+
+```ts
+const ok = luna.plugins.byId('com.eventfield.vst3.clex')?.isAtLeast('0.4.3') ?? false;
+```
+
+***
+
 ### load()
 
 ```ts

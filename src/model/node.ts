@@ -76,10 +76,13 @@ export abstract class Node {
     return this.post<R>(name, payload);
   }
 
-  /** Writable property view; `set` is optimistic with rollback, and refuses once disposed. */
-  protected writableProp<T>(name: string): WritableProp<T> {
+  /**
+   * Writable property view; `set` is optimistic with rollback, and refuses once disposed.
+   * `toWire` gives the form sent to the engine when it differs from the value the view holds.
+   */
+  protected writableProp<T>(name: string, toWire?: (value: T) => unknown): WritableProp<T> {
     const cell = this.client.store.cell<T>(this.path, name);
-    return writable(cell, (v) => (this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : this.client.store.set(this.path, name, v)));
+    return writable(cell, (v) => (this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : this.client.store.set(this.path, name, v, toWire ? toWire(v) : v)));
   }
 
   /** The cell holding this node's child names. */

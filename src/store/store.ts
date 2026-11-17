@@ -196,7 +196,11 @@ export class Store {
    * acknowledgement resolves the promise. On rejection the previous value is restored if the
    * cell still holds our write, then the error is rethrown.
    */
-  async set(nodePath: string, property: string, value: unknown): Promise<void> {
+  /**
+   * Write a property: the cell takes `value` at once, and `wire` (default `value`) is what is
+   * sent, for a value whose wire form differs, such as a number that must go as a float literal.
+   */
+  async set(nodePath: string, property: string, value: unknown, wire: unknown = value): Promise<void> {
     const key = `${nodePath}/${property}`;
     const cell = this.cell(nodePath, property);
     // Roll back to what the engine last confirmed, not to whatever the cell held: that may
@@ -205,7 +209,7 @@ export class Store {
     const ours = nextVersion();
     cell.update(value, ours);
     try {
-      await this.port.set(key, value);
+      await this.port.set(key, wire);
       // Native LUNA does not echo a write to its writer (fact 6), so the answer is the confirmation.
       if (cell.version === ours) this.confirmed.set(key, value);
     } catch (err) {

@@ -2,14 +2,90 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
-## Unreleased
+## 3.1.2 Beta 1
 
 Changed (breaking)
+- An Add On page inside LUNA reaches no server but LUNA on this computer unless its manifest
+  lists it in the new `network` field and the user allows it (fact 147). This covers `fetch`,
+  XHR, `WebSocket`, images, media, fonts, styles, frames, workers and scripts, so a CDN must be
+  listed too. Add `"network": ["api.example.com"]` to an Add On that calls a web API. A hosted
+  `url` page must be `https` (or on this computer), and LUNA asks for its server before loading
+  it. Needs a LUNA with the change; older LUNA releases ignore the field.
+- `Luna.AddOn.target` is gone; use `Luna.AddOn.targets`, every host the Add On can be shown in,
+  default first (`addOn.targets.value?.[0]` is the old single value for an Add On without
+  `targets`). LUNA no longer reports a single `target` on `/gui/add_ons/<id>`, because a user
+  can move an Add On between hosts. The host a page is in now is still
+  `Luna.AddOnInstance.target` (`luna.gui.thisInstance()`). `Luna.MockEngine` Add On nodes carry
+  `targets` instead of `target`, and `openAddOnInstance()` takes an optional `target`, one of
+  them. Needs a LUNA with the change.
 - `luna.gui.removeImportedAddOn(id)` is now `luna.gui.removeAddOn(id)`, and posts LUNA's
   renamed `/gui` `remove_add_on` command. It takes the same argument and behaves the same;
   rename your calls.
+- LUNA's Add On Marketplace is now the Add On Showcase. Its `/gui` paths moved from
+  `/gui/marketplace/add_ons` and `/gui/marketplace/packages` to `/gui/showcase/add_ons` and
+  `/gui/showcase/packages`, and its DEV feature key from `add_ons_marketplace` to
+  `add_ons_showcase`. `Luna.MockEngine.marketplace` is now `Luna.MockEngine.showcase`; rename
+  it in tests. `luna.gui.installAddOn` and `luna.gui.removeAddOn` are unchanged.
+
+Changed
+- `min_luna_version` in the templates and the examples is now `3.1.2`, so an Add On scaffolded
+  from now on will not open on an older LUNA. Add Ons already scaffolded keep the value in
+  their own manifest.
 
 Added
+- Manifest `network` (docs/MANIFEST.md, "Network"): `"api.example.com"`, `"*.example.com"` or
+  `"api.example.com:8443"`, over https and wss. `ua-builder` rejects a URL, a path, a bare or
+  single-label name, a wildcard over a whole suffix, loopback, a bad port or a repeat, mirroring
+  what LUNA drops, and rejects an `http` `url` off this computer.
+- `Luna.AddOn.network` and `Luna.AddOn.networkAllowed`: the servers an Add On asks for and
+  those the user allowed (fact 147).
+- Manifest `requires_plugins` (docs/MANIFEST.md, Required plugins; fact 148): the plugins an
+  Add On needs, each with `plugin_id` (one id or one per format), `name`, `min_version` and
+  `optional`, top level or per entry. LUNA lists an Add On whose non-optional requirement is
+  unmet disabled with "Requires <name> <version>", and will not open it; an optional one only
+  adds the note. `ua-builder` checks the entries and warns about one without a `name`.
+  `Luna.AddOn.requiresPlugins` reads them back, `luna.plugins.unmetRequirements(requirements,
+  { blockingOnly })` applies LUNA's rule to the catalog, `Luna.Plugin.isAtLeast(minVersion)`
+  checks one plugin, and `Luna.pluginVersionMeets(installed, min)` compares versions as LUNA
+  does. `Luna.MockEngine.addPlugin()` takes a `version`. Needs a LUNA with the change.
+- Manifest `targets`: every host, of `"window"`, `"browser"` and `"editor"`, a user can move the
+  Add On between from its header, with `target` (when listed) or the first as the default
+  (docs/MANIFEST.md, `targets`). `ua-builder` rejects an unknown name or `"app"` in it, warns
+  about a repeat or a `target` it does not list, requires `width` and `height` when it lists
+  `"window"`, and `install` names the default host's menu.
+- `Luna.addOnTarget()`: the host LUNA loaded the page in, from the `target` it now puts on an
+  Add On page's URL next to `port` and `add_on_inst`, read without connecting so a page can lay
+  itself out for its host first. LUNA reloads the page when the user moves it to another host.
+  `undefined` outside LUNA or on a LUNA without the parameter.
+- Manifest `min_width`, `min_height`, `max_width` and `max_height` (whole numbers above 0) for a
+  `"window"`: LUNA stops the user's resize at them (fact 143). `ua-builder` rejects a value that
+  is not a whole number above 0 and a min above its max, and warns that they do nothing for
+  another target. `Luna.AddOn.minWidth`, `minHeight`, `maxWidth` and `maxHeight` read what LUNA
+  reports, `null` when not declared.
+- `Luna.AddOnInstance` and `luna.gui.thisInstance()`: LUNA now gives every Add On page an
+  `add_on_inst` in its URL and lists it under `/gui/add_ons/<id>/instances` (fact 143).
+  `thisInstance()` finds the page's own, watched, with `target`, `width` and `height` following
+  LUNA; `resize(width?, height?)` asks LUNA to resize a window, clamped to the manifest limits,
+  and resolves with the size LUNA applied. `Luna.AddOn.instances` lists an Add On's open pages,
+  and `Luna.MockEngine.openAddOnInstance()` / `closeAddOnInstance()` open one in tests.
+- LUNA now saves a session's `"app"` Add On with it: the session reopens on the Add On when it
+  was showing, and otherwise keeps it on the toolbar and in the view toggle (docs/MANIFEST.md,
+  `target`). Needs a LUNA with the change.
+- A `show_with_session` window's size, position and open state are now saved with each session
+  rather than in LUNA's preferences (fact 143): reopening a session reopens the windows it had
+  open, as the same `add_on_inst`, and a new session opens none. Needs a LUNA with the change.
+- Manifest `categories`: one or more of `"AI Tools"`, `"Control"`, `"Create"`, `"MIDI"`,
+  `"Recording"`, `"Editing"`, `"Mixing & Mastering"`, `"Workflow"`, `"Session Management"`,
+  `"Import & Export"` and `"Utility"`, where the Showcase lists the Add On (docs/MANIFEST.md,
+  "Categories"). In the `add_ons` shape a top-level one is the default for every entry.
+  `ua-builder` rejects a name not on the list (suggesting the right spelling), a repeated one and
+  an empty array, and `install` and `pack` warn about an Add On with none, suggesting some from
+  its name and description. `ua-builder new --categories "MIDI,Workflow"` writes them, and
+  without the flag prints suggestions. `Luna.AddOn.categories` reads what LUNA reports, `[]`
+  when there are none and `undefined` on a LUNA older than the property.
+  `Luna.ADD_ON_CATEGORIES` lists the categories with what each is for, `Luna.isAddOnCategory()`
+  checks a name, and `Luna.suggestAddOnCategories(text)` guesses from a description. The
+  create-add-on skill now asks the user to confirm categories.
 - Manifest `unload_on_close` (boolean, default `false`) for `"window"`, `"browser"` and
   `"editor"` Add Ons: with `true` closing the Add On unloads its page, releasing a microphone,
   audio or timers it held, and opening it again loads the page fresh. Closing is the window's
@@ -32,6 +108,32 @@ Added
   id and bytes (fact 141). It refuses a note row, a row not in the clip, a fractional offset and
   a move before the clip's MIDI origin before sending anything. Needs a LUNA with the
   `move_midi_events` command; an older one answers with an error. `Luna.MockEngine` models it.
+
+Fixed
+- A plugin loaded with `slot.setPlugin()` into a slot that held it before came back with the
+  old plugin's parameter values and power state, after `slot.clear()` or after an undo past
+  the load, so a reload could print differently from a fresh load or not process at all.
+  LUNA now starts the slot over: a clear, or a load into an empty slot, resets power,
+  preset and parameters, and a swap to another plugin turns power on and clears the preset
+  (fact 146). Needs a LUNA with the change. `Luna.MockEngine` turns power on and clears the
+  preset the same way.
+- Writing a whole number to a plugin's continuous parameter, such as `eq.gain.real.set(-3)` or
+  `freq.real.set(400)`, was refused by LUNA (`uasrv.invalid_value`), and to its `value` was
+  silently ignored, while `-3.5` worked. `Luna.Control` now sends every number written to a
+  non-discrete control's `value`, `real` or `normalized` as a float literal; discrete controls
+  keep their whole step values (fact 142). `Luna.MockEngine` refuses a bare whole number for a
+  plugin parameter's `real_value`, as LUNA does.
+- The examples' meters and playheads stuttered inside LUNA while it played. `mixer.html` and
+  `sends.html` moved meter bars by `height`/`width`, and `arrangement.html`,
+  `clip-editor.html` and `ruler.html` redrew their whole canvas to move the playhead. LUNA's
+  macOS web view could not keep up (fact 145). Bars and peak lines now move by `transform`,
+  and the playhead is its own element over the canvas. The new `docs/DRAWING.md` covers the
+  rules, a meter and a playhead to copy, and how to measure in LUNA. The create-add-on,
+  edit-clips and verify-add-on skills point to it.
+- `clip-editor.html` dropped and remade every clip and segment subscription on every lane after
+  each edit, which is O(clips) work per edit and the pattern Add Ons should not copy. It now
+  keeps subscriptions per clip and per segment, diffed by id when a lane's list changes:
+  an edit subscribes only what it added and releases only what it removed.
 
 ## 3.1.1 Beta 2
 

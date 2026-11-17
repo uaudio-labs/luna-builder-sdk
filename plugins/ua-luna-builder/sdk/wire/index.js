@@ -1113,8 +1113,8 @@ var MockEngine = class _MockEngine {
             return null;
           }
           const id = body.id.toLowerCase();
-          const pkg = engine.marketplace[id] !== void 0 ? id : Object.keys(engine.marketplace).find((p) => engine.marketplace[p]?.includes(id));
-          if (pkg === void 0) throw fail("uasrv.invalid_value", `no marketplace package or Add On ${id}`);
+          const pkg = engine.showcase[id] !== void 0 ? id : Object.keys(engine.showcase).find((p) => engine.showcase[p]?.includes(id));
+          if (pkg === void 0) throw fail("uasrv.invalid_value", `no showcase package or Add On ${id}`);
           if (engine.installingPackages.includes(pkg)) throw fail("uasrv.too_many_requests", `${pkg} is already installing`);
           engine.addOnInstalls.push({ id: pkg });
           return null;
@@ -1125,11 +1125,11 @@ var MockEngine = class _MockEngine {
           const body = typeof data === "object" && data !== null ? data : {};
           if (typeof body.id !== "string") throw fail("uasrv.missing_field", "id is required");
           const id = body.id.toLowerCase();
-          const pkg = engine.marketplace[id] !== void 0 ? id : Object.keys(engine.marketplace).find((p) => engine.marketplace[p]?.includes(id));
-          if (pkg === void 0) throw fail("uasrv.invalid_value", `no marketplace package or Add On ${id}`);
-          if (!engine.importedPackages.includes(pkg)) throw fail("uasrv.not_permitted", `${pkg} is the marketplace's own`);
+          const pkg = engine.showcase[id] !== void 0 ? id : Object.keys(engine.showcase).find((p) => engine.showcase[p]?.includes(id));
+          if (pkg === void 0) throw fail("uasrv.invalid_value", `no showcase package or Add On ${id}`);
+          if (!engine.importedPackages.includes(pkg)) throw fail("uasrv.not_permitted", `${pkg} is the showcase's own`);
           engine.importedPackages = engine.importedPackages.filter((p) => p !== pkg);
-          delete engine.marketplace[pkg];
+          delete engine.showcase[pkg];
           return null;
         },
         // Fact 130: uninstall_add_on's checks and codes as LUNA's. LUNA's prompt is answered
@@ -1301,10 +1301,56 @@ var MockEngine = class _MockEngine {
     this.addNode("/gui/windows/main", { properties: { page: "timeline" } });
     this.addNode("/gui/transport", { properties: { arm_mode: false } });
     this.addNode("/gui/add_ons", { properties: { blessed_folders: [] }, readOnly: ["blessed_folders"] });
-    this.addNode("/gui/add_ons/com.example.demo", { properties: { id: "com.example.demo", name: "Demo", target: "window", icon: "", floating: true, show_with_session: false, fixed_size: false, run_hidden: false, unload_on_close: false, manufacturer: "Example Co", description: "A demo Add On.", version: "1.0.0", installed_from: "folder" } });
+    this.addNode("/gui/add_ons/com.example.demo", { properties: { id: "com.example.demo", name: "Demo", targets: ["window"], icon: "", floating: true, show_with_session: false, fixed_size: false, run_hidden: false, unload_on_close: false, manufacturer: "Example Co", description: "A demo Add On.", categories: ["Utility"], network: [], network_allowed: [], version: "1.0.0", installed_from: "folder", min_width: null, min_height: null, max_width: null, max_height: null, requires_plugins: [] } });
+    this.addNode("/gui/add_ons/com.example.demo/instances");
     this.addNode("/gui/file_chooser");
     this.addNode("/gui/plugin_windows", { properties: { open: [] }, readOnly: ["open"] });
     if (options.gui === false) this.removeNode("/gui");
+  }
+  /**
+   * Open a page of an installed Add On, as LUNA does when it shows one (fact 143): a node at
+   * `/gui/add_ons/<id>/instances/<add_on_inst>` with its `target` and size. The target is
+   * `options.target`, one of the Add On's `targets` (the host the user swapped it to), or else
+   * the first, its default. Width and height are writable for a `'window'` and clamped to the
+   * Add On's `min_*`/`max_*`. Returns the id.
+   *
+   * @example
+   * const inst = engine.openAddOnInstance('com.example.demo', { width: 400, height: 300 });
+   */
+  openAddOnInstance(addOnId, options = {}) {
+    const addOn = `/gui/add_ons/${addOnId.toLowerCase()}`;
+    if (!this.has(addOn)) throw new Error(`openAddOnInstance: no Add On ${addOnId}`);
+    const targets = this.value(addOn, "targets") ?? ["window"];
+    if (options.target !== void 0 && !targets.includes(options.target)) {
+      throw new Error(`openAddOnInstance: ${addOnId} does not list target ${options.target}`);
+    }
+    if (!this.has(`${addOn}/instances`)) this.addNode(`${addOn}/instances`);
+    const id = options.instanceId ?? `inst-${this.nextRow()}`;
+    const target = options.target ?? targets[0] ?? "window";
+    this.addNode(`${addOn}/instances/${id}`, {
+      properties: { target, width: options.width ?? 0, height: options.height ?? 0 },
+      readOnly: target === "window" && this.value(addOn, "fixed_size") !== true ? ["target"] : ["target", "width", "height"]
+    });
+    return id;
+  }
+  /** Close a page opened with {@link openAddOnInstance}. */
+  closeAddOnInstance(addOnId, instanceId) {
+    this.removeNode(`/gui/add_ons/${addOnId.toLowerCase()}/instances/${instanceId}`);
+  }
+  resizeAddOnInstance(nodePath, name, data, path) {
+    if (typeof data !== "number" || !Number.isFinite(data)) throw new UAError("uasrv.invalid_type", `set ${path}: uasrv.invalid_type`, { cmd: "set", path });
+    if (data <= 0) throw new UAError("uasrv.invalid_value", `set ${path}: uasrv.invalid_value`, { cmd: "set", path });
+    const addOn = nodePath.slice(0, nodePath.lastIndexOf("/instances/"));
+    const limit = (field) => {
+      const v = this.value(addOn, field);
+      return typeof v === "number" && v > 0 ? v : void 0;
+    };
+    let size = Math.trunc(data);
+    const max = limit(`max_${name}`);
+    const min = limit(`min_${name}`);
+    if (max !== void 0 && size > max) size = max;
+    if (min !== void 0 && size < min) size = min;
+    this.setValue(nodePath, name, size);
   }
   /** @internal The windows listed in `/gui/plugin_windows`. */
   pluginWindowsOpen() {
@@ -1340,19 +1386,19 @@ var MockEngine = class _MockEngine {
   /** Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. */
   mediaServed = [];
   /**
-   * The marketplace `/gui/install_add_on` installs from: each package id to the ids of the
+   * The showcase `/gui/install_add_on` installs from: each package id to the ids of the
    * Add Ons in it, all lowercase.
    *
    * @example
-   * engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
+   * engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
    */
-  marketplace = {};
+  showcase = {};
   /** Package ids `/gui/install_add_on` treats as already installing. */
   installingPackages = [];
   /**
-   * Package ids in {@link marketplace} that were imported from a link, which
-   * `/gui/remove_add_on` removes (from here and from `marketplace`); any other
-   * package is the marketplace's own and is refused.
+   * Package ids in {@link showcase} that were imported from a link, which
+   * `/gui/remove_add_on` removes (from here and from `showcase`); any other
+   * package is the showcase's own and is refused.
    */
   importedPackages = [];
   /**
@@ -1493,7 +1539,8 @@ var MockEngine = class _MockEngine {
   }
   /**
    * Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
-   * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
+   * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent);
+   * `version` its installed version (`1.0.0` when absent).
    */
   addPlugin(pluginId, options = {}) {
     const manifest = { manufacturer: options.manufacturer ?? "Mock", name: options.name ?? pluginId, plugin_id: pluginId, categories: options.categories ?? [], short_names: [] };
@@ -1503,7 +1550,7 @@ var MockEngine = class _MockEngine {
       properties: {
         plugin_id: pluginId,
         name: options.name ?? pluginId,
-        version: "1.0.0",
+        version: options.version ?? "1.0.0",
         description: "",
         installed: true,
         favorite: options.favorite ?? false,
@@ -2569,6 +2616,11 @@ var MockEngine = class _MockEngine {
           if (!engine.has(path)) throw new UAError("uasrv.invalid_object", `set_inserts: no slot ${slot}`, { cmd: "post", path: `${base}/set_inserts` });
           const empty = !ins.plugin_id;
           const known = !empty && engine.has(`/plugins/${ins.plugin_id}`);
+          if (empty || engine.value(path, "plugin_id") !== ins.plugin_id) {
+            engine.setValue(path, "plugin_power", true);
+            engine.setValue(path, "preset_name", null);
+            engine.setValue(path, "preset_uid", null);
+          }
           engine.setValue(path, "plugin_id", empty ? null : ins.plugin_id);
           engine.setValue(path, "plugin_name", null);
           if (!empty && ins.preset_name !== void 0) engine.setValue(path, "preset_name", ins.preset_name);
@@ -3631,6 +3683,7 @@ var MockEngine = class _MockEngine {
       case "get":
         return this.get(path, params);
       case "set":
+        if (this.ignoresBareWhole(path, data)) return null;
         return this.set(from, path, data instanceof FloatLiteral ? data.value : data);
       case "post":
         return this.post(path, data);
@@ -3709,6 +3762,22 @@ var MockEngine = class _MockEngine {
     if (params["commands"] !== "0" && node.commands.size > 0) out["commands"] = [...node.commands.keys()].map((name) => ({ path: name }));
     return out;
   }
+  /**
+   * A plugin parameter's `real_value` wants a float literal (fact 142): a bare whole number is
+   * refused with `uasrv.invalid_value`. (LUNA ignores one sent to `value`; the mock cannot
+   * address a control's `value` property, which it reads as the `/value` suffix.) The mock sees
+   * payload objects, so a `FloatLiteral` stands for the literal and a plain integer for the bare
+   * token. Throws for a write to refuse.
+   */
+  ignoresBareWhole(path, data) {
+    if (typeof data !== "number" || !Number.isInteger(data)) return false;
+    const { node: nodePath, name } = splitPath(path);
+    if (name !== "real_value") return false;
+    if (!/\/effects\/[^/]+\/controls\/[^/]+$/.test(nodePath)) return false;
+    const node = this.nodes.get(nodePath);
+    if (node?.properties.get("control_type") !== "parameter" || node.properties.get("discrete") !== false) return false;
+    throw new UAError("uasrv.invalid_value", `set ${path}: uasrv.invalid_value`, { cmd: "set", path });
+  }
   set(from, path, data) {
     if (this.nodes.has(path)) {
       throw new UAError("uasrv.invalid_property", `set ${path}: uasrv.invalid_property`, { cmd: "set", path });
@@ -3720,6 +3789,10 @@ var MockEngine = class _MockEngine {
       throw new UAError("uasrv.invalid_object", `set ${path}: uasrv.invalid_object`, { cmd: "set", path });
     }
     if (node.readOnly.has(name)) throw new UAError("uasrv.read_only", `set ${path}: uasrv.read_only`, { cmd: "set", path });
+    if ((name === "width" || name === "height") && /^\/gui\/add_ons\/[^/]+\/instances\/[^/]+$/.test(nodePath)) {
+      this.resizeAddOnInstance(nodePath, name, data, path);
+      return null;
+    }
     const isTrack = /^\/sessions\/[^/]+\/tracks\/[^/]+$/.test(nodePath);
     if (isTrack && name === "input_monitor" && data === true && this.value("/preferences", "record_mute") === true) {
       throw new UAError("uasrv.invalid_value", `set ${path}: uasrv.invalid_value`, { cmd: "set", path });

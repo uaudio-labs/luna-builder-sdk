@@ -8,7 +8,8 @@
  *   add is the node path with a `{ properties, ... }` object; a removal is the node path with
  *   `null`. A few boot-time announcements use a bare property path with a scalar.
  * - The engine does echo the writer's own `set` (unlike native LUNA); the Store dedupes.
- * - A missing path answers error `uasrv.invalid_object` (native LUNA answers `{}`).
+ * - A missing path answers `{}`, as on native LUNA; engines before November 2026 answered
+ *   error `uasrv.invalid_object` (fact 10).
  * - No reconnect: the engine boots once per page. `stopped`/`error` close the port.
  */
 import type { WasmEngine } from '../engine/loader';
@@ -30,6 +31,9 @@ import {
 import { appendParams, encodePayload } from './codec';
 
 const METHOD: Record<Verb, number> = { get: 0, set: 1, post: 2, subscribe: 3, unsubscribe: 4 };
+
+/** A track's or the session's record arm (`record_enabled`), with or without `/value`. */
+const RECORD_ENABLED = /\/record_enabled(\/value)?(\?|$)/;
 
 interface Pending {
   verb: Verb;
@@ -113,6 +117,8 @@ export class WasmPort implements Port {
   }
 
   async set(path: string, data: unknown): Promise<void> {
+    // In a browser the page owns the microphone: arming is the moment to ask for it.
+    if (data === true && RECORD_ENABLED.test(path)) this.engine.wantAudioInput();
     await this.request('set', path, encodePayload(data));
   }
 

@@ -29,7 +29,8 @@
   .db { font-variant-numeric: tabular-nums; opacity: .75; min-width: 52px; display: inline-block; }
   input[type=range] { width: 90px; vertical-align: middle; }
   .meter { display: inline-block; width: 60px; height: 8px; background: #23272c; border-radius: 2px; overflow: hidden; }
-  .meter i { display: block; height: 100%; width: 0; background: #3fae5a; }
+  /* One colour, so the bar can scale; scaled, not resized (docs/DRAWING.md). */
+  .meter i { display: block; height: 100%; background: #3fae5a; transform: scaleX(0); transform-origin: left; will-change: transform; }
 </style>
 <header>
   <h1>LUNA sends</h1>
@@ -148,7 +149,7 @@
       const bar = document.createElement('i');
       meter.append(bar);
       meterCell.append(meter);
-      offs.push(send.meter.onChange(() => { bar.style.width = `${send.meter.max * 100}%`; }));
+      offs.push(send.meter.onChange(() => { bar.style.transform = `scaleX(${Math.min(1, send.meter.max)})`; }));
 
       const actions = cell();
       const menu = busMenu();

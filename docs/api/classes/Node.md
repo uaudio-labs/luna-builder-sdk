@@ -20,6 +20,7 @@
 - [`BreakpointNode`](BreakpointNode.md)
 - [`Gui`](Gui.md)
 - [`AddOn`](AddOn.md)
+- [`AddOnInstance`](AddOnInstance.md)
 - [`GuiWindow`](GuiWindow.md)
 - [`MidiClip`](MidiClip.md)
 - [`Plugin`](Plugin.md)

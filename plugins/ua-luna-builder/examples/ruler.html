@@ -21,7 +21,12 @@
   #status { opacity: .65; }
   #agreement { padding: 6px 14px; font-variant-numeric: tabular-nums; font-size: 12px; opacity: .85; border-bottom: 1px solid #263039; }
   #agreement.differ { color: #ff8080; opacity: 1; }
-  canvas { display: block; width: 100%; max-width: 1000px; height: 120px; margin: 10px 14px; background: #191d21; border-radius: 6px; }
+  .rulerwrap { position: relative; max-width: 1000px; margin: 10px 14px; }
+  canvas { display: block; width: 100%; height: 120px; background: #191d21; border-radius: 6px; }
+  /* The playhead is its own element over the canvas, moved by a transform, so following
+     playback never redraws the canvas (docs/DRAWING.md). */
+  #playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: #ff5a5a; pointer-events: none; will-change: transform; }
+  #playhead[hidden] { display: none; }
   section { padding: 0 14px 16px; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; opacity: .55; margin: 14px 0 6px; }
   table { border-collapse: collapse; width: 100%; max-width: 1000px; }
@@ -34,7 +39,7 @@
   <span id="status">connecting…</span>
 </header>
 <div id="agreement"></div>
-<canvas id="ruler" width="1000" height="120"></canvas>
+<div class="rulerwrap"><canvas id="ruler" width="1000" height="120"></canvas><div id="playhead" hidden></div></div>
 <section>
   <h2>Markers — click to jump</h2>
   <table><tbody id="markers"></tbody></table>
@@ -108,12 +113,20 @@
       ctx.fillRect(x(tick), 84, 2, H - 84);
       ctx.fillText(m.name.value ?? '', x(tick) + 5, 86);
     }
-    const loc = session.transport.location.value;
-    if (loc) {
-      ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x(loc.tick), 0); ctx.lineTo(x(loc.tick), H); ctx.stroke();
-      ctx.lineWidth = 1;
-    }
+    placePlayhead();
+  }
+
+  /** Put the playhead over the canvas at the live location, in CSS pixels. */
+  function placePlayhead() {
+    const head = $('playhead'), loc = session.transport.location.value;
+    const { start, end } = extent();
+    head.hidden = !loc;
+    if (loc) head.style.transform = `translateX(${((loc.tick - start) / (end - start)) * $('ruler').clientWidth}px)`;
+  }
+  let playheadFrame = 0;
+  function schedulePlayhead() {
+    if (playheadFrame) return;
+    playheadFrame = requestAnimationFrame(() => { playheadFrame = 0; placePlayhead(); agreement(); });
   }
 
   /** LUNA's own annotation of the playhead beside the SDK's, from the tempo map. */
@@ -189,8 +202,9 @@
       ` · ${musical.timeSignatures.items.length} signature rows · ${session.markers.items.length} markers` +
       (percent !== undefined && percent !== 1 ? ` · playback ×${percent}` : '');
 
-    // Live: the playhead redraws the canvas; structural edits redraw the tables too.
-    session.transport.location.onChange(() => { draw(); agreement(); });
+    // Live: the playhead moves its own element and never redraws the canvas; structural edits
+    // redraw the canvas and the tables.
+    session.transport.location.onChange(schedulePlayhead);
     session.markers.onChange(redrawAll);
     musical.tempoMap.onChange(redrawAll);
     musical.timeSignatures.onChange(redrawAll);

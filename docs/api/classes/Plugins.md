@@ -270,6 +270,41 @@ Ask the engine to rescan installed plugins.
 
 ***
 
+### unmetRequirements()
+
+```ts
+unmetRequirements(requirements, options): PluginRequirement[];
+```
+
+The `requirements` the loaded catalog does not meet, as LUNA decides (fact 148): none of a
+requirement's `plugin_id` is installed at its `min_version` or later. Pass an Add On's
+[AddOn.requiresPlugins](AddOn.md#requiresplugins); with `blockingOnly`, the ones not marked `optional`, which
+are what keeps LUNA from opening it. Load the catalog first.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `requirements` | readonly [`PluginRequirement`](../interfaces/PluginRequirement.md)[] |
+| `options` | \{ `blockingOnly?`: `boolean`; \} |
+| `options.blockingOnly?` | `boolean` |
+
+#### Returns
+
+[`PluginRequirement`](../interfaces/PluginRequirement.md)[]
+
+#### Example
+
+```ts
+await luna.plugins.load();
+const me = luna.gui.addOns.byId('com.eventfield.clingy-ex-addon');
+for (const r of luna.plugins.unmetRequirements(me?.requiresPlugins.value ?? [])) {
+  console.warn(`needs ${r.name}${r.min_version ? ` ${r.min_version}` : ''}`);
+}
+```
+
+***
+
 ### watch()
 
 ```ts

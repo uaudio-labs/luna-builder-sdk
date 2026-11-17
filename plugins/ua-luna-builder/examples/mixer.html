@@ -34,8 +34,13 @@
   .fader { writing-mode: vertical-lr; direction: rtl; height: 180px; width: 28px; accent-color: #9ad; }
   .meter { display: flex; gap: 2px; padding: 2px; background: #111114; border-radius: 3px; }
   .meter .stream { position: relative; width: 6px; background: #26262c; border-radius: 2px; overflow: hidden; }
-  .meter .stream i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(to top, #3fae5a 0 70%, #e6c25a 70% 90%, #d44 90%); }
-  .meter .stream b { position: absolute; left: 0; right: 0; height: 1px; background: #eee; bottom: 0; }
+  /* Bars and peak lines move by transform only, never height or bottom (docs/DRAWING.md):
+     <i> slides down by the unlit share, its <u> back up by the same
+     so the colours stay put, and <b> carries the peak line on its top edge. */
+  .meter .stream i, .meter .stream u, .meter .stream b { position: absolute; inset: 0; transform: translateY(100%); will-change: transform; }
+  .meter .stream i { overflow: hidden; }
+  .meter .stream u { transform: translateY(-100%); background: linear-gradient(to top, #3fae5a 0 70%, #e6c25a 70% 90%, #d44 90%); }
+  .meter .stream b::after { content: ''; position: absolute; left: 0; right: 0; top: -1px; height: 1px; background: #eee; }
   .meter.clip .stream { box-shadow: inset 0 0 0 1px #d44; }
   .db { font-variant-numeric: tabular-nums; min-height: 1.2em; }
   .buttons { display: flex; gap: 4px; }
@@ -169,7 +174,7 @@
     renderDb();
     strips.on(ch.gain.display, renderDb);
 
-    // Meter: one bar per stream, height = level (1.0 is full scale), a peak line held by
+    // Meter: one bar per stream, level 1.0 is full scale, a peak line held by
     // the page (LUNA's own peak falls back to 0 a second after signal stops), a clip
     // outline. Listening opens the subscription; releasing the strip closes it. LUNA holds
     // the clip flag and the wire cannot reset it, so a click only hides the light until
@@ -177,17 +182,23 @@
     const meterEl = el.querySelector('.meter');
     const streamCount = Math.max(1, ch.meter.numStreams.value ?? 1);
     const streams = Array.from({ length: streamCount }, () => {
-      const s = document.createElement('div'); s.className = 'stream'; s.innerHTML = '<i></i><b></b>'; meterEl.append(s); return s;
+      const s = document.createElement('div'); s.className = 'stream'; s.innerHTML = '<i><u></u></i><b></b>'; meterEl.append(s); return s;
     });
     const held = streams.map(() => ({ value: 0, at: 0 }));
     const HOLD_MS = 1500;
-    const drawPeak = (i) => { streams[i].lastChild.style.bottom = `${Math.min(1, held[i].value) * 100}%`; };
+    const unlit = (l) => `${((1 - Math.min(1, l)) * 100).toFixed(1)}%`;
+    const drawPeak = (i) => { streams[i].lastChild.style.transform = `translateY(${unlit(held[i].value)})`; };
+    const drawBar = (s, l) => {
+      const off = unlit(l);
+      s.firstChild.style.transform = `translateY(${off})`;
+      s.firstChild.firstChild.style.transform = `translateY(-${off})`;
+    };
     strips.add(
-      ch.meter.level.onChange(() => {
+      ch.meter.onChange(() => {
         const levels = ch.meter.level.value ?? [];
         streams.forEach((s, i) => {
           const l = Math.min(1, levels[i] ?? 0);
-          s.firstChild.style.height = `${l * 100}%`;
+          drawBar(s, l);
           const h = held[i];
           if (l >= h.value || performance.now() - h.at > HOLD_MS) { h.value = l; h.at = performance.now(); drawPeak(i); }
         });

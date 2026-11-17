@@ -2,7 +2,7 @@
 // Engine lane: boots the real wasm engine in headless Chrome and runs tests/engine/index.html.
 //
 //   npm run test:engine                       # auto-detects Chrome and an engine build
-//   UA_WASM_ENGINE=<dir> npm run test:engine  # engine build dir holding devicedwasm.js
+//   UA_WASM_ENGINE=<dir> npm run test:engine  # engine build dir holding luna-engine.js
 //   UA_CHROME=<path> npm run test:engine      # browser binary
 //
 // No Playwright: Chrome is driven over its DevTools protocol with Node's WebSocket.
@@ -29,10 +29,10 @@ function findChrome() {
 }
 
 function findEngine() {
-  const candidates = [process.env.UA_WASM_ENGINE, resolve(root, '../../../hbsystem/wasm_engine/dist/Release'), resolve(root, '../../../hbsystem/wasm_engine/dist/Debug')].filter(Boolean);
+  const candidates = [process.env.UA_WASM_ENGINE, resolve(root, '../../../../hbsystem/wasm_engine/dist/Release'), resolve(root, '../../../../hbsystem/wasm_engine/dist/Debug')].filter(Boolean);
   for (const c of candidates) {
-    if (existsSync(join(c, 'devicedwasm.js'))) return c;
-    if (existsSync(join(c, 'Release', 'devicedwasm.js'))) return join(c, 'Release');
+    if (existsSync(join(c, 'luna-engine.js'))) return c;
+    if (existsSync(join(c, 'Release', 'luna-engine.js'))) return join(c, 'Release');
   }
   return undefined;
 }

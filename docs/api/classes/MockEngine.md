@@ -28,15 +28,15 @@ new MockEngine(options): MockEngine;
 | <a id="blessrequests"></a> `blessRequests` | `public` | `string`[] | `[]` | Every folder LUNA asked the user about (`/gui/add_blessed_folder`, `show_folder_dialog`), in order, whatever the answer. |
 | <a id="builtinaddons"></a> `builtInAddOns` | `public` | `string`[] | `[]` | Add On ids (lowercase) under `/gui/add_ons` that are built into LUNA, which `/gui/uninstall_add_on` refuses. |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
-| <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [marketplace](#marketplace) that were imported from a link, which `/gui/remove_add_on` removes (from here and from `marketplace`); any other package is the marketplace's own and is refused. |
+| <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [showcase](#showcase) that were imported from a link, which `/gui/remove_add_on` removes (from here and from `showcase`); any other package is the showcase's own and is refused. |
 | <a id="installingpackages"></a> `installingPackages` | `public` | `string`[] | `[]` | Package ids `/gui/install_add_on` treats as already installing. |
 | <a id="listlimit"></a> `listLimit` | `public` | `number` | `10000` | Entries a recursive `/gui/list_files` returns before it sets `truncated` (LUNA: 10,000). |
-| <a id="marketplace"></a> `marketplace` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The marketplace `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
 | <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio, video or MIDI file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
 | <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
 | <a id="midisent"></a> `midiSent` | `readonly` | [`MockMidiSent`](../interfaces/MockMidiSent.md)[] | `[]` | Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. |
 | <a id="nextdialogfiles"></a> `nextDialogFiles` | `public` | `string`[] | `[]` | What the next mock file dialog "selects"; empty means the user cancelled. |
 | <a id="requests"></a> `requests` | `readonly` | `object`[] | `[]` | Every request any port made, oldest first. Useful for asserting what a model did. |
+| <a id="showcase"></a> `showcase` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The showcase `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
 | <a id="touches"></a> `touches` | `readonly` | `string`[] | `[]` | `set_touch` calls, as `<control path>:on|off`, oldest first. |
 | <a id="transactions"></a> `transactions` | `readonly` | `string`[] | `[]` | Transaction commands seen: `begin`, `commit`, `abort`. |
 | <a id="uninstallanswer"></a> `uninstallAnswer` | `public` | `"remove"` \| `"cancel"` | `'remove'` | How the user answers LUNA's prompt for `/gui/uninstall_add_on`: `'remove'` (the default) takes the Add On out of `/gui/add_ons`, `'cancel'` leaves it. |
@@ -331,20 +331,22 @@ addPlugin(pluginId, options): void;
 ```
 
 Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
-when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
+when absent); `formats` the `[input, output]` stem formats it runs in (any when absent);
+`version` its installed version (`1.0.0` when absent).
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `pluginId` | `string` |
-| `options` | \{ `categories?`: `string`[]; `effectType?`: `string`; `favorite?`: `boolean`; `formats?`: \[`string`, `string`\][]; `manufacturer?`: `string`; `name?`: `string`; \} |
+| `options` | \{ `categories?`: `string`[]; `effectType?`: `string`; `favorite?`: `boolean`; `formats?`: \[`string`, `string`\][]; `manufacturer?`: `string`; `name?`: `string`; `version?`: `string`; \} |
 | `options.categories?` | `string`[] |
 | `options.effectType?` | `string` |
 | `options.favorite?` | `boolean` |
 | `options.formats?` | \[`string`, `string`\][] |
 | `options.manufacturer?` | `string` |
 | `options.name?` | `string` |
+| `options.version?` | `string` |
 
 #### Returns
 
@@ -569,6 +571,27 @@ children(nodePath): string[];
 #### Returns
 
 `string`[]
+
+***
+
+### closeAddOnInstance()
+
+```ts
+closeAddOnInstance(addOnId, instanceId): void;
+```
+
+Close a page opened with [openAddOnInstance](#openaddoninstance).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `addOnId` | `string` |
+| `instanceId` | `string` |
+
+#### Returns
+
+`void`
 
 ***
 
@@ -819,6 +842,41 @@ without a `rowid` get the next id free across the session's clips, as in LUNA. T
 ```ts
 engine.midiEdit(clipPath, 'added', [{ tick: 0, status: 0x90, data1: 60, data2: 100 }]);
 engine.midiEdit(clipPath, 'deleted', [{ rowid: 1 }]);
+```
+
+***
+
+### openAddOnInstance()
+
+```ts
+openAddOnInstance(addOnId, options): string;
+```
+
+Open a page of an installed Add On, as LUNA does when it shows one (fact 143): a node at
+`/gui/add_ons/<id>/instances/<add_on_inst>` with its `target` and size. The target is
+`options.target`, one of the Add On's `targets` (the host the user swapped it to), or else
+the first, its default. Width and height are writable for a `'window'` and clamped to the
+Add On's `min_*`/`max_*`. Returns the id.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `addOnId` | `string` |
+| `options` | \{ `height?`: `number`; `instanceId?`: `string`; `target?`: `string`; `width?`: `number`; \} |
+| `options.height?` | `number` |
+| `options.instanceId?` | `string` |
+| `options.target?` | `string` |
+| `options.width?` | `number` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+const inst = engine.openAddOnInstance('com.example.demo', { width: 400, height: 300 });
 ```
 
 ***

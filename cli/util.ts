@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ADD_ON_CATEGORIES, isAddOnCategory, suggestAddOnCategories } from '../src/model/add-on-categories';
 
 /**
  * Give `path` back its executable bit if it lost one (zip extractions and plain file copies
@@ -248,6 +249,12 @@ export interface Manifest {
   manufacturer?: string;
   /** In the `add_ons` shape, the default for every entry without its own `description`. */
   description?: string | string[];
+  /** In the `add_ons` shape, the default for every entry without its own `categories`. */
+  categories?: string[];
+  /** In the `add_ons` shape, the default for every entry without its own `network`. */
+  network?: string[];
+  /** In the `add_ons` shape, the default for every entry without its own `requires_plugins`. */
+  requires_plugins?: ManifestPluginRequirement[];
   add_ons?: ManifestEntry[];
   [k: string]: unknown;
 }
@@ -263,10 +270,13 @@ export interface ManifestEntry {
   title?: string;
   html?: string;
   url?: string;
-  /** Required for a `"window"`; LUNA sizes browser, app and editor Add Ons itself. */
+  /** Required when it can be a `"window"`; LUNA sizes browser, app and editor Add Ons itself. */
   width?: number;
   height?: number;
+  /** The one host, or the default among `targets`. */
   target?: string;
+  /** Every host the user can swap it between: `"window"`, `"browser"` and `"editor"`. */
+  targets?: string[];
   floating?: boolean;
   show_with_session?: boolean;
   /** `"window"` only: open at `width` x `height` and never resize. */
@@ -275,13 +285,75 @@ export interface ManifestEntry {
   run_hidden?: boolean;
   /** Unload the page when the Add On is closed; reopening loads it fresh. */
   unload_on_close?: boolean;
+  /** `"window"` only: the window's size limits in pixels; LUNA drops a bad one. */
+  min_width?: number;
+  min_height?: number;
+  max_width?: number;
+  max_height?: number;
   version?: string;
   /** Who makes the Add On; LUNA shows it in Settings > Add Ons. Overrides a top-level one. */
   manufacturer?: string;
   /** What the Add On does: a string, or an array of strings LUNA concatenates with no separator. */
   description?: string | string[];
+  /** One or more of `ADD_ON_CATEGORIES` by name, such as `["MIDI"]`. Overrides a top-level one. */
+  categories?: string[];
+  /**
+   * The servers the page may reach once the user allows them: `"api.example.com"`,
+   * `"*.example.com"` or `"api.example.com:8443"`, over https and wss only. Without it the page
+   * reaches no server but LUNA. Overrides a top-level one.
+   */
+  network?: string[];
+  /** The plugins it needs; LUNA will not open it while one is missing or too old. Overrides a top-level one. */
+  requires_plugins?: ManifestPluginRequirement[];
   engines?: string[];
   [k: string]: unknown;
+}
+
+/** One `requires_plugins` entry as a manifest writes it: `plugin_id` may be one id or several. */
+export interface ManifestPluginRequirement {
+  plugin_id: string | string[];
+  name?: string;
+  min_version?: string;
+  optional?: boolean;
+}
+
+/**
+ * Problems with a manifest `requires_plugins` value, `where` naming it. LUNA drops an entry it
+ * cannot use (no id, a `min_version` that is not dot-separated whole numbers) and keeps the
+ * Add On, so each is an error here rather than a surprise there.
+ */
+function requiresPluginsProblems(value: unknown, where: string): string[] {
+  if (!Array.isArray(value)) return [`${where}: "requires_plugins" must be an array`];
+  const problems: string[] = [];
+  for (const [i, r] of value.entries()) {
+    const at = `${where}: requires_plugins[${i}]`;
+    if (typeof r !== 'object' || r === null || Array.isArray(r)) {
+      problems.push(`${at} must be an object with "plugin_id"`);
+      continue;
+    }
+    const req = r as Record<string, unknown>;
+    const ids = Array.isArray(req['plugin_id']) ? req['plugin_id'] : [req['plugin_id']];
+    if (!ids.length || ids.some((id) => typeof id !== 'string' || !id.trim())) problems.push(`${at}: "plugin_id" must be a plugin id, or an array of them (one per format)`);
+    if (req['name'] !== undefined && typeof req['name'] !== 'string') problems.push(`${at}: "name" must be a string`);
+    if (req['min_version'] !== undefined && (typeof req['min_version'] !== 'string' || !/^\d+(\.\d+)*$/.test(req['min_version']))) {
+      problems.push(`${at}: "min_version" must be a version such as "0.4.3"`);
+    }
+    if (req['optional'] !== undefined && typeof req['optional'] !== 'boolean') problems.push(`${at}: "optional" must be true or false`);
+  }
+  return problems;
+}
+
+/**
+ * A note for each requirement without a `name`: LUNA shows the first plugin id instead, as in
+ * "Requires com.eventfield.vst3.clex".
+ */
+function unnamedRequirementNotes(value: unknown, where: string): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r, i) =>
+    typeof r === 'object' && r !== null && (r as Record<string, unknown>)['name'] === undefined
+      ? [`${where}: requires_plugins[${i}] has no "name"; LUNA will show its plugin id to the user. Add the plugin's name`]
+      : [],
+  );
 }
 
 /** A manifest `description` as LUNA reads it: a string, or an array of strings it concatenates. */
@@ -289,9 +361,137 @@ function isDescription(d: unknown): boolean {
   return typeof d === 'string' || (Array.isArray(d) && d.every((s) => typeof s === 'string'));
 }
 
+/**
+ * Problems with a manifest `categories` value, `where` naming it: it must be a non-empty array
+ * of names from `ADD_ON_CATEGORIES`, written exactly and each once.
+ */
+function categoryProblems(c: unknown, where: string): string[] {
+  if (!Array.isArray(c) || c.length === 0) return [`${where}: "categories" must be a non-empty array of category names`];
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const name of c) {
+    if (!isAddOnCategory(name)) {
+      const near = typeof name === 'string' ? ADD_ON_CATEGORIES.find((k) => k.name.toLowerCase() === name.trim().toLowerCase()) : undefined;
+      problems.push(`${where}: unknown category ${JSON.stringify(name)}${near ? `; did you mean "${near.name}"?` : `; use one of ${categoryList()}`}`);
+    } else if (seen.has(name)) problems.push(`${where}: category "${name}" is listed twice`);
+    else seen.add(name);
+  }
+  return problems;
+}
+
+/** Second-level labels under which a two-letter country code sells names to anyone, as LUNA has them. */
+const SECOND_LEVEL_SUFFIXES = new Set(['co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'or', 'ne', 'go', 'gob', 'nic']);
+
+/** Whether `host` (no port) names this computer, as LUNA reads it. */
+export function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return h === 'localhost' || h === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
+/**
+ * Why LUNA would drop a manifest `network` entry, or `undefined` when it keeps it. Mirrors
+ * LUNA's own reading: a host name, an optional leading `*.`, an optional `:port`; no scheme,
+ * path, single-label name, wildcard over a whole suffix, wildcard IP, or loopback.
+ */
+export function networkEntryProblem(entry: string): string | undefined {
+  const e = entry.trim().toLowerCase();
+  if (!e) return 'empty';
+  if (e.includes('://')) return 'a host name, not a URL: leave out the scheme (https is implied)';
+  if (/[/?#@\[\] \t]/.test(e)) return 'a host name only, with no path, query, user or IPv6 address';
+  let host = e;
+  const colon = e.lastIndexOf(':');
+  if (colon >= 0) {
+    const port = e.slice(colon + 1);
+    if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) return 'the port must be a number from 1 to 65535';
+    host = e.slice(0, colon);
+  }
+  const wildcard = host.startsWith('*.');
+  if (wildcard) host = host.slice(2);
+  if (host.includes('*')) return 'a wildcard is only allowed as a leading "*."';
+  if (!host || host.length > 253) return 'not a host name';
+  const labels = host.split('.');
+  if (labels.some((l) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) return 'not a host name';
+  if (isLoopbackHost(host)) return 'LUNA on this computer is always allowed, so it is not listed';
+  if (labels.length < 2) return 'a full host name, such as "api.example.com"';
+  const ip = labels.length === 4 && labels.every((l) => /^\d{1,3}$/.test(l) && Number(l) <= 255);
+  if (!ip && /^\d+$/.test(labels[labels.length - 1] ?? '')) return 'not a host name';
+  if (wildcard && ip) return 'a wildcard cannot cover IP addresses';
+  if (wildcard && labels.length === 2 && labels[1]!.length === 2 && SECOND_LEVEL_SUFFIXES.has(labels[0]!)) return 'a wildcard cannot cover a whole domain suffix';
+  return undefined;
+}
+
+/** Problems with a manifest `network` value, `where` naming it. */
+function networkProblems(n: unknown, where: string): string[] {
+  if (!Array.isArray(n) || !n.every((h) => typeof h === 'string')) return [`${where}: "network" must be an array of host names`];
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const h of n as string[]) {
+    const why = networkEntryProblem(h);
+    if (why) problems.push(`${where}: "network" entry ${JSON.stringify(h)}: ${why}`);
+    else if (seen.has(h.trim().toLowerCase())) problems.push(`${where}: "network" lists ${JSON.stringify(h)} twice`);
+    seen.add(h.trim().toLowerCase());
+  }
+  return problems;
+}
+
+/** Problems with a server-hosted entry's `url`: https, or http on this computer only. */
+function urlProblem(url: unknown, where: string): string | undefined {
+  if (typeof url !== 'string') return `${where}: "url" must be a string`;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `${where}: "url" must be an http or https URL`;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return `${where}: "url" must be an http or https URL`;
+  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) return `${where}: "url" must be https unless it is on this computer; LUNA does not load it`;
+  return undefined;
+}
+
+/** Every category name, quoted, for a message. */
+export function categoryList(): string {
+  return ADD_ON_CATEGORIES.map((c) => `"${c.name}"`).join(', ');
+}
+
+/**
+ * A note for each entry that has no `categories` (its own or the manifest's top-level one),
+ * with categories guessed from its name and description. Empty when every entry has some.
+ */
+export function missingCategoryNotes(manifest: Manifest, entries: ManifestEntry[]): string[] {
+  const notes: string[] = [];
+  for (const [i, e] of entries.entries()) {
+    if (e.categories !== undefined || (Array.isArray(manifest.add_ons) && manifest.categories !== undefined)) continue;
+    const text = [e.name, e.description, Array.isArray(manifest.add_ons) ? manifest.description : undefined]
+      .flat()
+      .filter((s): s is string => typeof s === 'string')
+      .join(' ');
+    const guess = suggestAddOnCategories(text);
+    notes.push(`entry ${i} (${e.id}) has no "categories". From its name and description it could be ${guess.map((g) => `"${g}"`).join(', ')}; add e.g. "categories": ${JSON.stringify(guess.slice(0, 1))} to manifest.json. See docs/MANIFEST.md for the list.`);
+  }
+  return notes;
+}
+
 /** True for a `"window"` Add On, which is also what a missing `target` means. */
 export function isWindow(target: string | undefined): boolean {
   return target === undefined || target === 'window';
+}
+
+/** The hosts `targets` may list together; `"app"` is always on its own. */
+export const SWAPPABLE_TARGETS = ['window', 'browser', 'editor'] as const;
+
+/**
+ * Every host an entry can be shown in, default first, as LUNA reads it: the usable names in
+ * `targets` (window, browser or editor; duplicates once), with `target` moved to the front when
+ * the list holds it; or just `target` (default `"window"`) when there is no usable list or
+ * `target` is `"app"`.
+ */
+export function entryTargets(e: { target?: unknown; targets?: unknown }): string[] {
+  const single = typeof e.target === 'string' ? (e.target === 'page' ? 'app' : e.target) : 'window';
+  const listed = Array.isArray(e.targets)
+    ? [...new Set(e.targets.filter((t): t is string => typeof t === 'string' && (SWAPPABLE_TARGETS as readonly string[]).includes(t)))]
+    : [];
+  if (!listed.length || single === 'app') return [single];
+  return listed.includes(single) && typeof e.target === 'string' ? [single, ...listed.filter((t) => t !== single)] : listed;
 }
 
 /** Where LUNA lists an Add On of `target`: a submenu of its Add Ons menu, one per target. */
@@ -395,6 +595,13 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
   if (Array.isArray(manifest.add_ons) && manifest.description !== undefined && !isDescription(manifest.description)) {
     problems.push('top level: "description" must be a string or an array of strings');
   }
+  if (Array.isArray(manifest.add_ons) && manifest.categories !== undefined) problems.push(...categoryProblems(manifest.categories, 'top level'));
+  if (Array.isArray(manifest.add_ons) && manifest.network !== undefined) problems.push(...networkProblems(manifest.network, 'top level'));
+  const notes: string[] = [];
+  if (Array.isArray(manifest.add_ons) && manifest.requires_plugins !== undefined) {
+    problems.push(...requiresPluginsProblems(manifest.requires_plugins, 'top level'));
+    notes.push(...unnamedRequirementNotes(manifest.requires_plugins, 'top level'));
+  }
   for (const [i, e] of entries.entries()) {
     const where = `entry ${i} (${e.id ?? 'no id'})`;
     if (typeof e.id !== 'string' || !e.id) problems.push(`${where}: "id" must be a non-empty string`);
@@ -406,24 +613,65 @@ export function readManifest(dir: string): { manifest: Manifest; entries: Manife
       console.warn(`manifest.json ${where}: "title" differs from "name"; LUNA shows "name" but older LUNA releases show "title". Make them match`);
     }
     if (typeof e.name !== 'string' || !e.name) problems.push(`${where}: "${nameKey}" must be a non-empty string`);
+    const hosts = entryTargets(e);
+    const canBeWindow = hosts.includes('window');
     for (const k of ['width', 'height'] as const) {
-      if (e[k] === undefined ? isWindow(e.target) : typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number${isWindow(e.target) ? '' : ' when present'}`);
+      if (e[k] === undefined ? canBeWindow : typeof e[k] !== 'number') problems.push(`${where}: "${k}" must be a number${canBeWindow ? '' : ' when present'}`);
     }
     if ((e.html ? 1 : 0) + (e.url ? 1 : 0) !== 1) problems.push(`${where}: exactly one of "html" or "url" is required`);
     if (e.html && !existsSync(join(dir, e.html))) problems.push(`${where}: html file not found: ${e.html}`);
     if (e.target !== undefined && !['window', 'app', 'page', 'browser', 'editor'].includes(e.target)) problems.push(`${where}: unknown target "${e.target}"`);
+    if (e.targets !== undefined) {
+      if (!Array.isArray(e.targets) || !e.targets.length) problems.push(`${where}: "targets" must be a non-empty array`);
+      else {
+        for (const t of e.targets) {
+          if (!(SWAPPABLE_TARGETS as readonly unknown[]).includes(t)) problems.push(`${where}: "targets" can only list ${SWAPPABLE_TARGETS.map((n) => `"${n}"`).join(', ')}, not ${JSON.stringify(t)}`);
+        }
+        if (new Set(e.targets).size !== e.targets.length) console.warn(`manifest.json ${where}: "targets" lists a target twice; LUNA keeps the first`);
+        if (e.target === 'app' || e.target === 'page') console.warn(`manifest.json ${where}: an "app" Add On is app only; LUNA ignores "targets"`);
+        else if (e.target !== undefined && !e.targets.includes(e.target)) {
+          console.warn(`manifest.json ${where}: "target" "${e.target}" is not in "targets"; LUNA opens it as "${hosts[0]}", the first of "targets"`);
+        }
+      }
+    }
     for (const k of ['floating', 'show_with_session', 'fixed_size', 'run_hidden', 'unload_on_close'] as const) if (e[k] !== undefined && typeof e[k] !== 'boolean') problems.push(`${where}: "${k}" must be true or false`);
+    // LUNA drops a limit that is not a positive integer, and both of a min above its max.
+    for (const k of ['min_width', 'min_height', 'max_width', 'max_height'] as const) {
+      const v = e[k];
+      if (v !== undefined && (typeof v !== 'number' || !Number.isInteger(v) || v <= 0)) problems.push(`${where}: "${k}" must be a whole number above 0`);
+    }
+    for (const axis of ['width', 'height'] as const) {
+      const min = e[`min_${axis}`];
+      const max = e[`max_${axis}`];
+      if (typeof min === 'number' && typeof max === 'number' && min > max) problems.push(`${where}: "min_${axis}" is above "max_${axis}"`);
+    }
+    if (!canBeWindow && ['min_width', 'min_height', 'max_width', 'max_height'].some((k) => e[k] !== undefined)) {
+      console.warn(`manifest.json ${where}: "min_*" and "max_*" apply to a "window" only; LUNA ignores them here`);
+    }
     if (e.manufacturer !== undefined && typeof e.manufacturer !== 'string') problems.push(`${where}: "manufacturer" must be a string`);
     if (e.description !== undefined && !isDescription(e.description)) problems.push(`${where}: "description" must be a string or an array of strings`);
+    if (e.categories !== undefined) problems.push(...categoryProblems(e.categories, where));
+    if (e.network !== undefined) problems.push(...networkProblems(e.network, where));
+    if (e.requires_plugins !== undefined) {
+      problems.push(...requiresPluginsProblems(e.requires_plugins, where));
+      notes.push(...unnamedRequirementNotes(e.requires_plugins, where));
+    }
+    if (e.url !== undefined) {
+      const why = urlProblem(e.url, where);
+      if (why) problems.push(why);
+    }
   }
   if (problems.length) throw new Error(`manifest.json problems:\n  - ${problems.join('\n  - ')}`);
+  for (const note of notes) console.warn(`manifest.json ${note}`);
+  for (const note of missingCategoryNotes(manifest, entries)) console.warn(`manifest.json ${note}`);
   return { manifest, entries };
 }
 
 export function usage(): string {
   return `ua-builder ${sdkVersion()} — build LUNA Add Ons
 
-  ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--description "Text"] [--target window|app|browser|editor]
+  ua-builder new <name> [--id com.x.y] [--name "Name"] [--manufacturer "Name"] [--description "Text"] [--categories "MIDI,Utility"]
+                        [--target window|app|browser|editor]
                         [--no-floating] [--show-with-session] [--width 900 --height 600]
                         [--template add-on-basic|add-on-typescript] [--dir path]
   ua-builder serve [dir] [--port 8790] [--host 0.0.0.0] [--luna [--forward-port 4719]]

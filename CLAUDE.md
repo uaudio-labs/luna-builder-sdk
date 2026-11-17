@@ -44,7 +44,8 @@ not re-open decided questions (reactive idiom, naming, test runner, scope).
   `templates/`, `examples/`, `plugins/`. Keep
   tree paths, pac, Jira and planning out of them. Internal material goes in `design/`
   (DESIGN.md, PLAN.md, PLATFORM.md), `DEVELOPING.md` or here.
-- Wasm engine support (`WasmPort`, `src/engine/`, `engine: 'wasm'`, the `serve` engine mount)
+- Wasm engine support (`WasmPort`, `src/engine/`, `engine: 'wasm'`, the `serve` engine mount,
+  `ua-builder eject-wasm` and the `luna-engine` meta tag it adds)
   stays in the code but is not released yet: keep it out of everything that ships, and tag
   its public declarations `@hidden` so `docs/api/` leaves them out.
 - `docs/QUICKSTART.md` is the user-facing entry point; keep it under 300 lines and keep every

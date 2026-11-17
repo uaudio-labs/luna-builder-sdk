@@ -5,6 +5,30 @@ Build, test and install LUNA Add Ons. Everything needed is in this folder: the
 examples and the consumer docs. No npm install, no network, no MCP server. LUNA must be
 running on the same machine.
 
+## Install
+
+The plugin is published in the
+[luna-builder-sdk](https://github.com/uaudio-labs/luna-builder-sdk) marketplace. In Claude
+Code (2.1.275 or later):
+
+```
+/plugin install ua-luna-builder --marketplace uaudio-labs/luna-builder-sdk
+```
+
+or from a shell, on any version:
+
+```bash
+claude plugin marketplace add uaudio-labs/luna-builder-sdk
+claude plugin install ua-luna-builder@luna-builder-sdk
+```
+
+In Codex:
+
+```bash
+codex plugin marketplace add uaudio-labs/luna-builder-sdk
+codex plugin add ua-luna-builder@luna-builder-sdk
+```
+
 ## Skills
 
 | Skill | For |

@@ -7,8 +7,10 @@ var __export = (target, all) => {
 // src/luna.ts
 var luna_exports = {};
 __export(luna_exports, {
+  ADD_ON_CATEGORIES: () => ADD_ON_CATEGORIES,
   AUTOMATION_MODES: () => AUTOMATION_MODES,
   AddOn: () => AddOn,
+  AddOnInstance: () => AddOnInstance,
   Assistant: () => Assistant,
   AudioSource: () => AudioSource,
   Automation: () => Automation,
@@ -105,7 +107,7 @@ __export(luna_exports, {
   TrackPresetSelection: () => TrackPresetSelection,
   Transport: () => Transport,
   Unsupported: () => Unsupported,
-  VERSION: () => VERSION,
+  VERSION: () => VERSION2,
   WAVEFORM_PAGE: () => WAVEFORM_PAGE,
   WHOLE_NOTE: () => WHOLE_NOTE,
   WasmEngine: () => WasmEngine,
@@ -113,6 +115,7 @@ __export(luna_exports, {
   Waveforms: () => Waveforms,
   WebSocketPort: () => WebSocketPort,
   Workspace: () => Workspace,
+  addOnTarget: () => addOnTarget,
   audioNsAtTick: () => audioNsAtTick,
   automationModeOrdinal: () => automationModeOrdinal,
   beatsToTicks: () => beatsToTicks,
@@ -144,6 +147,7 @@ __export(luna_exports, {
   formatTimeSignature: () => formatTimeSignature,
   getOptionsToParams: () => getOptionsToParams,
   hasNativeBridge: () => hasNativeBridge,
+  isAddOnCategory: () => isAddOnCategory,
   isEmbeddedInLuna: () => isEmbeddedInLuna,
   isLunaEnginePort: () => isLunaEnginePort,
   joinPath: () => joinPath,
@@ -157,6 +161,7 @@ __export(luna_exports, {
   pairNs: () => pairNs,
   pairRange: () => pairRange,
   parseChord: () => parseChord,
+  pluginVersionMeets: () => pluginVersionMeets,
   propertyValue: () => propertyValue,
   requireTick: () => requireTick,
   secondsToTicks: () => secondsToTicks,
@@ -165,6 +170,7 @@ __export(luna_exports, {
   shallowEquals: () => shallowEquals,
   splitPath: () => splitPath,
   stripValueSuffix: () => stripValueSuffix,
+  suggestAddOnCategories: () => suggestAddOnCategories,
   ticksToBeats: () => ticksToBeats,
   ticksToSeconds: () => ticksToSeconds,
   toEvent: () => toEvent,
@@ -1292,8 +1298,8 @@ var MockEngine = class _MockEngine {
             return null;
           }
           const id = body.id.toLowerCase();
-          const pkg = engine.marketplace[id] !== void 0 ? id : Object.keys(engine.marketplace).find((p) => engine.marketplace[p]?.includes(id));
-          if (pkg === void 0) throw fail("uasrv.invalid_value", `no marketplace package or Add On ${id}`);
+          const pkg = engine.showcase[id] !== void 0 ? id : Object.keys(engine.showcase).find((p) => engine.showcase[p]?.includes(id));
+          if (pkg === void 0) throw fail("uasrv.invalid_value", `no showcase package or Add On ${id}`);
           if (engine.installingPackages.includes(pkg)) throw fail("uasrv.too_many_requests", `${pkg} is already installing`);
           engine.addOnInstalls.push({ id: pkg });
           return null;
@@ -1304,11 +1310,11 @@ var MockEngine = class _MockEngine {
           const body = typeof data === "object" && data !== null ? data : {};
           if (typeof body.id !== "string") throw fail("uasrv.missing_field", "id is required");
           const id = body.id.toLowerCase();
-          const pkg = engine.marketplace[id] !== void 0 ? id : Object.keys(engine.marketplace).find((p) => engine.marketplace[p]?.includes(id));
-          if (pkg === void 0) throw fail("uasrv.invalid_value", `no marketplace package or Add On ${id}`);
-          if (!engine.importedPackages.includes(pkg)) throw fail("uasrv.not_permitted", `${pkg} is the marketplace's own`);
+          const pkg = engine.showcase[id] !== void 0 ? id : Object.keys(engine.showcase).find((p) => engine.showcase[p]?.includes(id));
+          if (pkg === void 0) throw fail("uasrv.invalid_value", `no showcase package or Add On ${id}`);
+          if (!engine.importedPackages.includes(pkg)) throw fail("uasrv.not_permitted", `${pkg} is the showcase's own`);
           engine.importedPackages = engine.importedPackages.filter((p) => p !== pkg);
-          delete engine.marketplace[pkg];
+          delete engine.showcase[pkg];
           return null;
         },
         // Fact 130: uninstall_add_on's checks and codes as LUNA's. LUNA's prompt is answered
@@ -1480,10 +1486,56 @@ var MockEngine = class _MockEngine {
     this.addNode("/gui/windows/main", { properties: { page: "timeline" } });
     this.addNode("/gui/transport", { properties: { arm_mode: false } });
     this.addNode("/gui/add_ons", { properties: { blessed_folders: [] }, readOnly: ["blessed_folders"] });
-    this.addNode("/gui/add_ons/com.example.demo", { properties: { id: "com.example.demo", name: "Demo", target: "window", icon: "", floating: true, show_with_session: false, fixed_size: false, run_hidden: false, unload_on_close: false, manufacturer: "Example Co", description: "A demo Add On.", version: "1.0.0", installed_from: "folder" } });
+    this.addNode("/gui/add_ons/com.example.demo", { properties: { id: "com.example.demo", name: "Demo", targets: ["window"], icon: "", floating: true, show_with_session: false, fixed_size: false, run_hidden: false, unload_on_close: false, manufacturer: "Example Co", description: "A demo Add On.", categories: ["Utility"], network: [], network_allowed: [], version: "1.0.0", installed_from: "folder", min_width: null, min_height: null, max_width: null, max_height: null, requires_plugins: [] } });
+    this.addNode("/gui/add_ons/com.example.demo/instances");
     this.addNode("/gui/file_chooser");
     this.addNode("/gui/plugin_windows", { properties: { open: [] }, readOnly: ["open"] });
     if (options.gui === false) this.removeNode("/gui");
+  }
+  /**
+   * Open a page of an installed Add On, as LUNA does when it shows one (fact 143): a node at
+   * `/gui/add_ons/<id>/instances/<add_on_inst>` with its `target` and size. The target is
+   * `options.target`, one of the Add On's `targets` (the host the user swapped it to), or else
+   * the first, its default. Width and height are writable for a `'window'` and clamped to the
+   * Add On's `min_*`/`max_*`. Returns the id.
+   *
+   * @example
+   * const inst = engine.openAddOnInstance('com.example.demo', { width: 400, height: 300 });
+   */
+  openAddOnInstance(addOnId, options = {}) {
+    const addOn = `/gui/add_ons/${addOnId.toLowerCase()}`;
+    if (!this.has(addOn)) throw new Error(`openAddOnInstance: no Add On ${addOnId}`);
+    const targets = this.value(addOn, "targets") ?? ["window"];
+    if (options.target !== void 0 && !targets.includes(options.target)) {
+      throw new Error(`openAddOnInstance: ${addOnId} does not list target ${options.target}`);
+    }
+    if (!this.has(`${addOn}/instances`)) this.addNode(`${addOn}/instances`);
+    const id = options.instanceId ?? `inst-${this.nextRow()}`;
+    const target = options.target ?? targets[0] ?? "window";
+    this.addNode(`${addOn}/instances/${id}`, {
+      properties: { target, width: options.width ?? 0, height: options.height ?? 0 },
+      readOnly: target === "window" && this.value(addOn, "fixed_size") !== true ? ["target"] : ["target", "width", "height"]
+    });
+    return id;
+  }
+  /** Close a page opened with {@link openAddOnInstance}. */
+  closeAddOnInstance(addOnId, instanceId) {
+    this.removeNode(`/gui/add_ons/${addOnId.toLowerCase()}/instances/${instanceId}`);
+  }
+  resizeAddOnInstance(nodePath, name, data, path) {
+    if (typeof data !== "number" || !Number.isFinite(data)) throw new UAError("uasrv.invalid_type", `set ${path}: uasrv.invalid_type`, { cmd: "set", path });
+    if (data <= 0) throw new UAError("uasrv.invalid_value", `set ${path}: uasrv.invalid_value`, { cmd: "set", path });
+    const addOn = nodePath.slice(0, nodePath.lastIndexOf("/instances/"));
+    const limit = (field) => {
+      const v = this.value(addOn, field);
+      return typeof v === "number" && v > 0 ? v : void 0;
+    };
+    let size = Math.trunc(data);
+    const max = limit(`max_${name}`);
+    const min = limit(`min_${name}`);
+    if (max !== void 0 && size > max) size = max;
+    if (min !== void 0 && size < min) size = min;
+    this.setValue(nodePath, name, size);
   }
   /** @internal The windows listed in `/gui/plugin_windows`. */
   pluginWindowsOpen() {
@@ -1519,19 +1571,19 @@ var MockEngine = class _MockEngine {
   /** Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. */
   mediaServed = [];
   /**
-   * The marketplace `/gui/install_add_on` installs from: each package id to the ids of the
+   * The showcase `/gui/install_add_on` installs from: each package id to the ids of the
    * Add Ons in it, all lowercase.
    *
    * @example
-   * engine.marketplace['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
+   * engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];
    */
-  marketplace = {};
+  showcase = {};
   /** Package ids `/gui/install_add_on` treats as already installing. */
   installingPackages = [];
   /**
-   * Package ids in {@link marketplace} that were imported from a link, which
-   * `/gui/remove_add_on` removes (from here and from `marketplace`); any other
-   * package is the marketplace's own and is refused.
+   * Package ids in {@link showcase} that were imported from a link, which
+   * `/gui/remove_add_on` removes (from here and from `showcase`); any other
+   * package is the showcase's own and is refused.
    */
   importedPackages = [];
   /**
@@ -1672,7 +1724,8 @@ var MockEngine = class _MockEngine {
   }
   /**
    * Add a plugin to the catalog. `effectType` is the manifest's (comma separated, `effect`
-   * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent).
+   * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent);
+   * `version` its installed version (`1.0.0` when absent).
    */
   addPlugin(pluginId, options = {}) {
     const manifest = { manufacturer: options.manufacturer ?? "Mock", name: options.name ?? pluginId, plugin_id: pluginId, categories: options.categories ?? [], short_names: [] };
@@ -1682,7 +1735,7 @@ var MockEngine = class _MockEngine {
       properties: {
         plugin_id: pluginId,
         name: options.name ?? pluginId,
-        version: "1.0.0",
+        version: options.version ?? "1.0.0",
         description: "",
         installed: true,
         favorite: options.favorite ?? false,
@@ -2748,6 +2801,11 @@ var MockEngine = class _MockEngine {
           if (!engine.has(path)) throw new UAError("uasrv.invalid_object", `set_inserts: no slot ${slot}`, { cmd: "post", path: `${base}/set_inserts` });
           const empty = !ins.plugin_id;
           const known = !empty && engine.has(`/plugins/${ins.plugin_id}`);
+          if (empty || engine.value(path, "plugin_id") !== ins.plugin_id) {
+            engine.setValue(path, "plugin_power", true);
+            engine.setValue(path, "preset_name", null);
+            engine.setValue(path, "preset_uid", null);
+          }
           engine.setValue(path, "plugin_id", empty ? null : ins.plugin_id);
           engine.setValue(path, "plugin_name", null);
           if (!empty && ins.preset_name !== void 0) engine.setValue(path, "preset_name", ins.preset_name);
@@ -3810,6 +3868,7 @@ var MockEngine = class _MockEngine {
       case "get":
         return this.get(path, params);
       case "set":
+        if (this.ignoresBareWhole(path, data)) return null;
         return this.set(from, path, data instanceof FloatLiteral ? data.value : data);
       case "post":
         return this.post(path, data);
@@ -3888,6 +3947,22 @@ var MockEngine = class _MockEngine {
     if (params["commands"] !== "0" && node.commands.size > 0) out["commands"] = [...node.commands.keys()].map((name) => ({ path: name }));
     return out;
   }
+  /**
+   * A plugin parameter's `real_value` wants a float literal (fact 142): a bare whole number is
+   * refused with `uasrv.invalid_value`. (LUNA ignores one sent to `value`; the mock cannot
+   * address a control's `value` property, which it reads as the `/value` suffix.) The mock sees
+   * payload objects, so a `FloatLiteral` stands for the literal and a plain integer for the bare
+   * token. Throws for a write to refuse.
+   */
+  ignoresBareWhole(path, data) {
+    if (typeof data !== "number" || !Number.isInteger(data)) return false;
+    const { node: nodePath, name } = splitPath(path);
+    if (name !== "real_value") return false;
+    if (!/\/effects\/[^/]+\/controls\/[^/]+$/.test(nodePath)) return false;
+    const node = this.nodes.get(nodePath);
+    if (node?.properties.get("control_type") !== "parameter" || node.properties.get("discrete") !== false) return false;
+    throw new UAError("uasrv.invalid_value", `set ${path}: uasrv.invalid_value`, { cmd: "set", path });
+  }
   set(from, path, data) {
     if (this.nodes.has(path)) {
       throw new UAError("uasrv.invalid_property", `set ${path}: uasrv.invalid_property`, { cmd: "set", path });
@@ -3899,6 +3974,10 @@ var MockEngine = class _MockEngine {
       throw new UAError("uasrv.invalid_object", `set ${path}: uasrv.invalid_object`, { cmd: "set", path });
     }
     if (node.readOnly.has(name)) throw new UAError("uasrv.read_only", `set ${path}: uasrv.read_only`, { cmd: "set", path });
+    if ((name === "width" || name === "height") && /^\/gui\/add_ons\/[^/]+\/instances\/[^/]+$/.test(nodePath)) {
+      this.resizeAddOnInstance(nodePath, name, data, path);
+      return null;
+    }
     const isTrack = /^\/sessions\/[^/]+\/tracks\/[^/]+$/.test(nodePath);
     if (isTrack && name === "input_monitor" && data === true && this.value("/preferences", "record_mute") === true) {
       throw new UAError("uasrv.invalid_value", `set ${path}: uasrv.invalid_value`, { cmd: "set", path });
@@ -4323,6 +4402,7 @@ function sameWindow(a, b) {
 
 // src/wire/wasm-port.ts
 var METHOD = { get: 0, set: 1, post: 2, subscribe: 3, unsubscribe: 4 };
+var RECORD_ENABLED = /\/record_enabled(\/value)?(\?|$)/;
 function wasmUpdateToEvent(path, json) {
   let data = void 0;
   if (json !== "") {
@@ -4378,6 +4458,7 @@ var WasmPort = class {
     return this.request("get", appendParams(path, params), "");
   }
   async set(path, data) {
+    if (data === true && RECORD_ENABLED.test(path)) this.engine.wantAudioInput();
     await this.request("set", path, encodePayload(data));
   }
   post(path, data) {
@@ -4501,6 +4582,12 @@ var WasmEngine = class {
   stateListeners = /* @__PURE__ */ new Set();
   replyHandler;
   updateHandler;
+  /** `Date.now()` of the last click or key press seen while running. */
+  lastGestureAt = 0;
+  /** A microphone was wanted with no gesture to ask inside; the next one asks. */
+  inputWanted = false;
+  /** @internal Ask for the microphone when a track or the session is record-armed. */
+  audioInputOnRecord = true;
   get state() {
     return this.currentState;
   }
@@ -4537,15 +4624,52 @@ var WasmEngine = class {
   }
   /**
    * Resume the AudioContext. Browsers only allow this after a user gesture, so call it from a
-   * click handler. Resolves true if the context is running afterwards.
+   * click handler; the loader already does on every click and key press. Resolves true once
+   * the context runs, or false if it is not running within `timeoutMs` (the browser resumes
+   * asynchronously, so the state lags the call).
    */
-  async resumeAudio() {
-    const ok = Boolean(this.module.ccall("wasmd_resume_audio_export", "number", [], []));
-    return ok && this.audio().contextState === 1;
+  async resumeAudio(timeoutMs = 1e3) {
+    if (!this.module.ccall("wasmd_resume_audio_export", "number", [], [])) return false;
+    const deadline = Date.now() + timeoutMs;
+    while (this.audio().contextState !== 1) {
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return true;
   }
   /** Ask for microphone input (getUserMedia). Needs a secure context and a user gesture. */
   requestAudioInput() {
     return Boolean(this.module.ccall("wasmd_request_audio_input_export", "number", [], []));
+  }
+  /**
+   * @internal A click or key press while running: resume audio, and ask for a microphone that
+   * was wanted without a gesture to ask inside.
+   */
+  noteGesture() {
+    this.lastGestureAt = Date.now();
+    void this.resumeAudio();
+    if (this.inputWanted) this.askForInput();
+  }
+  /**
+   * @internal A track or the session was record-armed. Asks for the microphone inside the
+   * gesture that armed it when there is one, or else on the next click or key press. Does
+   * nothing while asking or connected, and asks again after a denial or a failure.
+   */
+  wantAudioInput() {
+    if (!this.audioInputOnRecord) return;
+    const state = this.inputState();
+    if (state === 1 || state === 2 || state === 4) return;
+    if (hasActivation(this.lastGestureAt)) this.askForInput();
+    else this.inputWanted = true;
+  }
+  askForInput() {
+    this.inputWanted = false;
+    const state = this.inputState();
+    if (state === 1 || state === 2 || state === 4) return;
+    this.module.ccall(state === 3 || state === 5 ? "wasmd_retry_audio_input_export" : "wasmd_request_audio_input_export", "number", [], []);
+  }
+  inputState() {
+    return Number(this.module.ccall("wasmd_audio_input_state_export", "number", [], []));
   }
   audio() {
     const n = (name) => Number(this.module.ccall(name, "number", [], []));
@@ -4599,6 +4723,13 @@ async function doBoot(options) {
       if (state === "error" || state === "stopped") rejectRunning(new UAError("engine_boot", `wasm engine ${state}${detail ? ": " + detail : ""}`));
     }
   };
+  let sawGesture = false;
+  const onGesture = () => {
+    sawGesture = true;
+    if (engine?.isRunning) engine.noteGesture();
+  };
+  const gestureTarget = options.resumeOnGesture === false ? void 0 : options.gestureTarget_ ?? globalThis.document;
+  for (const type of GESTURE_EVENTS) gestureTarget?.addEventListener(type, onGesture, true);
   const timeoutMs = options.timeoutMs ?? 12e4;
   const timer = setTimeout(() => rejectRunning(new UAError("engine_boot", `wasm engine did not reach running within ${timeoutMs} ms`)), timeoutMs);
   try {
@@ -4614,27 +4745,38 @@ async function doBoot(options) {
       UAPersistLog: (t) => log(`persist ${t}`, "out")
     });
     engine = new WasmEngine(module, engineUrl);
+    engine.audioInputOnRecord = options.audioInputOnRecord !== false;
     for (const p of pending2) engine.setState(p.state, p.detail);
     await running;
     if (engine.state !== "running") engine.setState("running");
+    const activated = globalThis.navigator?.userActivation?.hasBeenActive;
+    if (gestureTarget && (sawGesture || activated)) void engine.resumeAudio();
     return engine;
+  } catch (err) {
+    for (const type of GESTURE_EVENTS) gestureTarget?.removeEventListener(type, onGesture, true);
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
+var GESTURE_EVENTS = ["pointerdown", "pointerup", "keydown"];
+function hasActivation(lastGestureAt) {
+  const active = globalThis.navigator?.userActivation?.isActive;
+  return active ?? Date.now() - lastGestureAt < 4e3;
+}
 async function loadFactory(engineUrl) {
   const g = globalThis;
-  if (typeof g.createDevicedModule === "function") return g.createDevicedModule;
+  if (typeof g.createLunaEngineModule === "function") return g.createLunaEngineModule;
   if (!g.document) throw new UAError("engine_boot", "the wasm engine needs a browser page");
   await new Promise((resolve, reject) => {
     const script = g.document.createElement("script");
-    script.src = `${engineUrl}devicedwasm.js`;
+    script.src = `${engineUrl}luna-engine.js`;
     script.onload = () => resolve();
     script.onerror = () => reject(new UAError("engine_boot", `could not load ${script.src}; is the engine served at ${engineUrl}?`));
     g.document.head.appendChild(script);
   });
-  if (typeof g.createDevicedModule !== "function") throw new UAError("engine_boot", "devicedwasm.js loaded but createDevicedModule is missing");
-  return g.createDevicedModule;
+  if (typeof g.createLunaEngineModule !== "function") throw new UAError("engine_boot", "luna-engine.js loaded but createLunaEngineModule is missing");
+  return g.createLunaEngineModule;
 }
 
 // src/store/prop.ts
@@ -4953,14 +5095,18 @@ var Store = class {
    * acknowledgement resolves the promise. On rejection the previous value is restored if the
    * cell still holds our write, then the error is rethrown.
    */
-  async set(nodePath, property, value) {
+  /**
+   * Write a property: the cell takes `value` at once, and `wire` (default `value`) is what is
+   * sent, for a value whose wire form differs, such as a number that must go as a float literal.
+   */
+  async set(nodePath, property, value, wire = value) {
     const key = `${nodePath}/${property}`;
     const cell = this.cell(nodePath, property);
     const fallback = this.confirmed.has(key) ? this.confirmed.get(key) : cell.value;
     const ours = nextVersion();
     cell.update(value, ours);
     try {
-      await this.port.set(key, value);
+      await this.port.set(key, wire);
       if (cell.version === ours) this.confirmed.set(key, value);
     } catch (err) {
       if (cell.version === ours) cell.update(fallback);
@@ -5175,10 +5321,13 @@ var Node = class {
   command(name, payload) {
     return this.post(name, payload);
   }
-  /** Writable property view; `set` is optimistic with rollback, and refuses once disposed. */
-  writableProp(name) {
+  /**
+   * Writable property view; `set` is optimistic with rollback, and refuses once disposed.
+   * `toWire` gives the form sent to the engine when it differs from the value the view holds.
+   */
+  writableProp(name, toWire) {
     const cell = this.client.store.cell(this.path, name);
-    return writable(cell, (v) => this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : this.client.store.set(this.path, name, v));
+    return writable(cell, (v) => this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : this.client.store.set(this.path, name, v, toWire ? toWire(v) : v));
   }
   /** The cell holding this node's child names. */
   childNames() {
@@ -5614,9 +5763,10 @@ var Control = class extends Node {
   constructor(client, path, sessionUid = sessionUidFromPath(path)) {
     super(client, path);
     this.sessionUid = sessionUid;
-    this.value = this.gated(this.writableProp("value"));
-    this.normalized = this.gated(this.writableProp("normalized_value"));
-    this.real = this.gated(this.writableProp("real_value"));
+    const wire = (v) => this.wireNumber(v);
+    this.value = this.gated(this.writableProp("value", wire));
+    this.normalized = this.gated(this.writableProp("normalized_value", wire));
+    this.real = this.gated(this.writableProp("real_value", wire));
     this.display = this.prop("string_value");
     this.uid = this.prop("uid");
     this.name = this.prop("name");
@@ -5687,6 +5837,15 @@ var Control = class extends Node {
   release() {
     this.automationLane?.dispose();
     this.recordingLane?.dispose();
+  }
+  /**
+   * A number written to a continuous control goes as a float literal (fact 142): LUNA refuses a
+   * bare whole number for a plugin parameter's `real_value` and ignores one for its `value`, so
+   * `real.set(-3)` would fail where `real.set(-3.5)` works. A discrete control's step value
+   * stays a whole number, which is what it requires; so do booleans and anything else.
+   */
+  wireNumber(v) {
+    return typeof v === "number" && Number.isFinite(v) && this.discrete.value === false ? float(v) : v;
   }
   /** True when `real` is boolean-like (mute, solo, switches). */
   get isSwitch() {
@@ -6203,11 +6362,20 @@ function search() {
   const loc = globalThis.location;
   return typeof loc?.search === "string" ? loc.search : void 0;
 }
+function pageEngine() {
+  const doc = globalThis.document;
+  const engine = doc?.querySelector?.('meta[name="luna-engine"]')?.getAttribute("content");
+  return engine === "wasm" || engine === "luna" || engine === "mock" ? engine : void 0;
+}
 function locationOptions() {
-  const s = search();
-  if (!s) return {};
-  const params = new URLSearchParams(s);
   const out = {};
+  const s = search();
+  const params = new URLSearchParams(s ?? "");
+  if (!params.has("engine") && !params.has("port")) {
+    const engine2 = pageEngine();
+    if (engine2) out.engine = engine2;
+  }
+  if (!s) return out;
   const host = params.get("host");
   const port = params.get("port");
   if (host) out.host = host;
@@ -6217,6 +6385,10 @@ function locationOptions() {
   const engineUrl = params.get("engine_url");
   if (engineUrl) out.engineUrl = engineUrl;
   return out;
+}
+function addOnTarget() {
+  const target = new URLSearchParams(search() ?? "").get("target");
+  return target === "window" || target === "browser" || target === "editor" || target === "app" ? target : void 0;
 }
 function isEmbeddedInLuna() {
   return locationOptions().port !== void 0;
@@ -9728,7 +9900,17 @@ var AddOn = class extends Node {
   addOnId;
   /** The manifest's `name`: its menu item and panel header. */
   name;
-  target;
+  /**
+   * Every host the Add On can be shown in, default first (fact 144): the manifest's `targets`, such as
+   * `['window', 'browser']`, or a one-entry list from its single `target`. The user can swap an
+   * Add On with more than one between them from its header. The host a page is in now is its
+   * {@link AddOnInstance.target}. `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const canBePanel = addOn.targets.value?.includes('browser') ?? false;
+   * const defaultHost = addOn.targets.value?.[0];
+   */
+  targets;
   /** Absolute file path of the icon, or `''`. */
   icon;
   /** The manifest's `floating`: `true` unless it says `false`. Meaningful for `'window'` only. */
@@ -9756,11 +9938,38 @@ var AddOn = class extends Node {
   manufacturer;
   /** The manifest's `description`, an array of strings already concatenated, or `''` when it has none. */
   description;
+  /**
+   * The manifest's `categories`, such as `['MIDI', 'Utility']` (see {@link ADD_ON_CATEGORIES}),
+   * or `[]` when it has none. LUNA does not check the names, so one from a newer SDK can appear.
+   * `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const midi = luna.gui.addOns.items.filter((a) => a.categories.value?.includes('MIDI'));
+   */
+  categories;
+  /**
+   * Every server the Add On would connect to (fact 147): its manifest's `network` hosts,
+   * normalized (`'api.example.com'`, `'*.example.com'`, `'host:8443'`), plus a hosted page's own
+   * server. `[]` when none. `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * const servers = addOn.network.value ?? [];
+   */
+  network;
+  /**
+   * Those of {@link AddOn.network} the user allowed (fact 147). Only LUNA's own prompts and
+   * Settings > Add Ons > SERVERS change it; nothing an Add On sends can. A page loads with the
+   * set fixed and is loaded again when it changes.
+   *
+   * @example
+   * const blocked = (addOn.network.value ?? []).filter((h) => !addOn.networkAllowed.value?.includes(h));
+   */
+  networkAllowed;
   /** The manifest's `version`, or `''` when it has none. Follows a replace (fact 131). */
   version;
   /**
    * Where it is installed (fact 131): `'folder'`, a folder in LUNA's Add Ons folder (from a
-   * `.lunaaddon`, the marketplace, or copied there); `'link'`, a symlink there, as
+   * `.lunaaddon`, the showcase, or copied there); `'link'`, a symlink there, as
    * `ua-builder install` makes on macOS; `'built_in'`, bundled with LUNA. {@link Gui.uninstallAddOn}
    * removes `'folder'` and `'link'` ones (a link loses only the link) and refuses `'built_in'`.
    * `undefined` on a LUNA older than the property.
@@ -9769,12 +9978,53 @@ var AddOn = class extends Node {
    * const removable = addOn.installedFrom.value === 'folder' || addOn.installedFrom.value === 'link';
    */
   installedFrom;
+  /**
+   * The manifest's `min_width`, `min_height`, `max_width` and `max_height` (fact 143): the
+   * window's size limits in pixels, `null` when the manifest declares none. LUNA stops the
+   * user's resize at them and clamps {@link AddOnInstance.resize} to them. Meaningful for
+   * `'window'` only. `undefined` on a LUNA older than the properties.
+   *
+   * @example
+   * const tooNarrow = addOn.minWidth.value != null && innerWidth < addOn.minWidth.value;
+   */
+  minWidth;
+  minHeight;
+  maxWidth;
+  maxHeight;
+  /**
+   * The manifest's `requires_plugins` as LUNA read it (fact 148): the plugins the Add On needs,
+   * each with every `plugin_id` it accepts (always an array), its `min_version` (`''` for any)
+   * and whether it is `optional`; `[]` when it has none. Whether each is met is not here, since
+   * it changes with the installed plugins: ask {@link Plugins.unmetRequirements}. LUNA lists an
+   * Add On whose non-optional requirement is unmet disabled, with the plugin it needs, and
+   * will not open it. `undefined` on a LUNA older than the property.
+   *
+   * @example
+   * await luna.plugins.load();
+   * const missing = luna.plugins.unmetRequirements(addOn.requiresPlugins.value ?? []);
+   * if (missing.length) banner.textContent = `Install ${missing.map((r) => r.name).join(', ')}`;
+   */
+  requiresPlugins;
+  /**
+   * Its pages open in LUNA right now, by `add_on_inst` (fact 143): one per window, browser
+   * panel, editor panel or app page showing it. Use {@link Gui.thisInstance} for your own page.
+   *
+   * @example
+   * await addOn.instances.load();
+   * addOn.instances.items.map((i) => `${i.target.value} ${i.width.value}x${i.height.value}`);
+   */
+  instances;
   /** @internal */
   constructor(client, path) {
     super(client, path);
+    this.minWidth = this.prop("min_width");
+    this.minHeight = this.prop("min_height");
+    this.maxWidth = this.prop("max_width");
+    this.maxHeight = this.prop("max_height");
+    this.instances = new Collection(client, `${path}/instances`, (p) => new AddOnInstance(client, p), { levels: 2, commands: false, flatvalue: true });
     this.addOnId = this.prop("id");
     this.name = this.prop("name");
-    this.target = this.prop("target");
+    this.targets = this.prop("targets");
     this.icon = this.prop("icon");
     this.floating = this.prop("floating");
     this.showWithSession = this.prop("show_with_session");
@@ -9783,14 +10033,59 @@ var AddOn = class extends Node {
     this.unloadOnClose = this.prop("unload_on_close");
     this.manufacturer = this.prop("manufacturer");
     this.description = this.prop("description");
+    this.categories = this.prop("categories");
+    this.network = this.prop("network");
+    this.networkAllowed = this.prop("network_allowed");
     this.version = this.prop("version");
     this.installedFrom = this.prop("installed_from");
+    this.requiresPlugins = this.prop("requires_plugins");
   }
-  /** Show it in LUNA by target: navigate to an `'app'`, open a `'window'` (toggling it like its
-   *  menu item), show a `'browser'` in the secondary browser, or an `'editor'` in the Timeline's
-   *  editor panel (never toggling either closed). */
+  /** Show it in LUNA in the host it is in now (one of {@link targets}): navigate to an `'app'`,
+   *  open a `'window'` (toggling it like its menu item), show a `'browser'` in the secondary
+   *  browser, or an `'editor'` in the Timeline's editor panel (never toggling either closed). */
   show() {
     return this.wire.post("/gui/show_add_on", { id: this.id });
+  }
+};
+var AddOnInstance = class extends Node {
+  /** The host the page is in: one of its Add On's {@link AddOn.targets}. */
+  target;
+  /** The page's width in points; follows the user's resize. `undefined` until loaded. */
+  width;
+  /** The page's height in points; follows the user's resize. `undefined` until loaded. */
+  height;
+  /** @internal */
+  constructor(client, path) {
+    super(client, path);
+    this.target = this.prop("target");
+    this.width = this.prop("width");
+    this.height = this.prop("height");
+  }
+  /** The `add_on_inst` LUNA gave the page. */
+  get instanceId() {
+    return this.id;
+  }
+  /** The manifest `id` of the Add On this page belongs to, in lowercase. */
+  get addOnId() {
+    const parent = this.path.slice(0, this.path.lastIndexOf("/instances/"));
+    return parent.slice(parent.lastIndexOf("/") + 1);
+  }
+  /**
+   * Ask LUNA to resize a `'window'` instance's window to this page size, in points. A size left
+   * out keeps the current one. LUNA clamps it to the manifest's `min_*`/`max_*`, leaves full
+   * screen first, keeps the window's top-left corner, and saves it as it would a user resize
+   * (with the session, for a `show_with_session` window). Resolves once the size LUNA applied is
+   * in {@link width} and {@link height}. Rejects with `uasrv.read_only` for another
+   * target or a `fixed_size` window, and `uasrv.invalid_value` for a size of 0 or less.
+   *
+   * @example
+   * await me.resize(800);          // width only
+   * await me.resize(undefined, 600); // height only
+   */
+  async resize(width, height) {
+    if (width !== void 0) await this.wire.set(`${this.path}/width`, Math.round(width));
+    if (height !== void 0) await this.wire.set(`${this.path}/height`, Math.round(height));
+    await this.reload({ flatvalue: true, commands: false, children: false });
   }
 };
 var GuiWindow = class extends Node {
@@ -9887,6 +10182,31 @@ var Gui = class extends Node {
     return list.some((w) => w.slot === slot && sameUid(w.channelUid, channelUid) && (sessionUid === void 0 || sameUid(w.sessionUid, sessionUid)));
   }
   /**
+   * This page's own instance (fact 143), from the `add_on_inst` LUNA puts in an Add On page's
+   * URL, watched so its size follows LUNA. `undefined` outside LUNA, on a LUNA older than
+   * instances, or when no live instance has that id. Pass an id to look up another page.
+   *
+   * @example
+   * const me = await luna.gui.thisInstance();
+   * if (me) console.log(me.addOnId, me.instanceId, me.width.value, me.height.value);
+   */
+  async thisInstance(instanceId = instanceIdFromUrl()) {
+    if (!instanceId || !await this.available()) return void 0;
+    const reply = await this.client.raw.get("/gui/add_ons", { levels: 3, properties: false, commands: false });
+    for (const addOn of replyChildren(reply)) {
+      for (const folder of replyChildren(addOn)) {
+        if (childName(folder) !== "instances") continue;
+        for (const instance of replyChildren(folder)) {
+          if (childName(instance) !== instanceId) continue;
+          const node = new AddOnInstance(this.client, `/gui/add_ons/${childName(addOn)}/instances/${instanceId}`);
+          await node.watch().ready;
+          return node;
+        }
+      }
+    }
+    return void 0;
+  }
+  /**
    * True when the engine has LUNA's `/gui` (fact 103). Read once per connection: the
    * root's children are listed, because a `get` of a missing `/gui` answers `{}` (fact 10).
    *
@@ -9936,27 +10256,27 @@ var Gui = class extends Node {
     return this.post("show_add_on", { id });
   }
   /**
-   * Install Add Ons into LUNA, as Settings > Add Ons > MARKETPLACE does (fact 128). Give
-   * `{ id }`, a marketplace package id or the id of an Add On in one (its whole package
+   * Install Add Ons into LUNA, as LUNA's Add On Showcase does (fact 128). Give
+   * `{ id }`, a showcase package id or the id of an Add On in one (its whole package
    * installs), or `{ url }`: a public GitHub repo (`https://github.com/<owner>/<repo>`; the
    * scheme, `www.`, `.git` and a path inside the repo are tolerated), whose latest release
-   * LUNA lists in the marketplace and installs every `.lunaaddon` of; or a Google Drive share
+   * LUNA lists in the showcase and installs every `.lunaaddon` of; or a Google Drive share
    * link to a `.lunaaddon` (`https://drive.google.com/file/d/<id>/view?usp=sharing`), an
    * iCloud Drive one (`https://www.icloud.com/iclouddrive/<id>#<name>`) or a Dropbox one
    * (`https://www.dropbox.com/scl/fi/<id>/<name>?rlkey=<key>&dl=0`), which LUNA downloads
    * and installs. The file has to be shared with anyone who has the link: LUNA does not
    * sign in to Google, iCloud or Dropbox. Either way LUNA asks the user to add the Add Ons, or
    * replace what is installed, so the user always confirms. A url that installs and is not
-   * one of the marketplace's own repos is saved, and LUNA lists it in its marketplace from
+   * one of the showcase's own repos is saved, and LUNA lists it in its showcase from
    * then on, to install again; {@link removeAddOn} forgets it.
    *
    * Resolves as LUNA starts, not once installed: watch {@link addOns} for the result. A
    * repo whose latest release has nothing LUNA can install, or a shared file that is not
    * shared with anyone, a folder, or not an Add On, is only found out after this resolves, and LUNA tells the user. Rejects with a `Luna.Error` whose `code` is
-   * `uasrv.invalid_value` for an id no marketplace package has, a url that is not a GitHub
+   * `uasrv.invalid_value` for an id no showcase package has, a url that is not a GitHub
    * repo or a Drive, iCloud Drive or Dropbox file link, or both given; `uasrv.missing_field` for neither; `uasrv.too_many_requests` while
    * that package is already installing. A LUNA without the command (an older one, or one
-   * without its Add On marketplace) rejects with `Luna.Unsupported`.
+   * without its Add On showcase) rejects with `Luna.Unsupported`.
    *
    * @example
    * await luna.gui.installAddOn({ url: 'https://github.com/uaudio-labs/video-window' });
@@ -9970,11 +10290,11 @@ var Gui = class extends Node {
   }
   /**
    * Forget a link {@link installAddOn} (or LUNA's IMPORT URL) saved, as Remove from
-   * Marketplace in LUNA's Settings does (fact 128). `id` is the package's id under
-   * `/gui/marketplace/packages`, or the id of an Add On in it. Its listing leaves LUNA's
-   * marketplace now and at the next launch; the installed Add On is not touched. Rejects with
-   * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no marketplace package
-   * has, `uasrv.not_permitted` for a package of the marketplace's own repos, and
+   * Showcase in LUNA does (fact 128). `id` is the package's id under
+   * `/gui/showcase/packages`, or the id of an Add On in it. Its listing leaves LUNA's
+   * showcase now and at the next launch; the installed Add On is not touched. Rejects with
+   * a `Luna.Error` whose `code` is `uasrv.invalid_value` for an id no showcase package
+   * has, `uasrv.not_permitted` for a package of the showcase's own repos, and
    * `uasrv.missing_field` with no id. A LUNA without the command rejects with
    * `Luna.Unsupported`.
    *
@@ -10287,6 +10607,19 @@ function randomUid() {
   const raw = g.crypto?.randomUUID?.() ?? `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
   return raw.replaceAll("-", "");
 }
+function instanceIdFromUrl() {
+  const search2 = globalThis.location?.search;
+  if (typeof search2 !== "string") return void 0;
+  return new URLSearchParams(search2).get("add_on_inst") ?? void 0;
+}
+function replyChildren(reply) {
+  const children = typeof reply === "object" && reply !== null ? reply.children : void 0;
+  return Array.isArray(children) ? children.filter((c) => typeof c === "object" && c !== null) : [];
+}
+function childName(child) {
+  const raw = child.path ?? child.name;
+  return typeof raw === "string" ? raw.slice(raw.lastIndexOf("/") + 1) : "";
+}
 function rootChildNames(reply) {
   const children = typeof reply === "object" && reply !== null ? reply.children : void 0;
   if (!Array.isArray(children)) return [];
@@ -10296,6 +10629,56 @@ function rootChildNames(reply) {
     if (typeof raw === "string") out.push(raw.slice(raw.lastIndexOf("/") + 1));
   }
   return out;
+}
+
+// src/model/add-on-categories.ts
+var ADD_ON_CATEGORIES = [
+  { name: "AI Tools", description: "Add Ons that use an AI model or agent as the core feature: assistants that answer questions about your session, generate or transform material from a prompt, or carry out tasks on your behalf." },
+  { name: "Control", description: "Add Ons that control something (LUNA, plugins, other) from a custom interface: Add On UI, hardware controllers and surfaces, and control surface protocols." },
+  { name: "Create", description: "Add Ons for starting something new: idea generators, chord and melody helpers, beat and pattern makers, lyric and arrangement prompts, and other sketching tools." },
+  { name: "MIDI", description: "Add Ons that generate, process, route or edit MIDI data: arpeggiators, quantizers, humanizers and MIDI mapping tools." },
+  { name: "Recording", description: "Add Ons that support capturing audio and MIDI: take management, punch and comp helpers, input and monitoring setup, and count-in or click tools." },
+  { name: "Editing", description: "Add Ons that change existing material on the timeline: clip slicing, rearranging, fades, time and pitch adjustments, and batch edits across clips and tracks." },
+  { name: "Mixing & Mastering", description: "Add Ons that shape the sound of a mix or master: level and pan balancing, EQ and dynamics helpers, reference and loudness tools, and metering built for mix decisions." },
+  { name: "Workflow", description: "Add Ons that save steps: automation of repeated tasks, session setup and templates, track naming and organizing, shortcuts and macros, and other session tools." },
+  { name: "Session Management", description: "Add Ons that show what is in a session and help keep it in order: session stats, track and plugin summaries, version and project notes, and audits of what a session contains." },
+  { name: "Import & Export", description: "Add Ons that move material in and out of LUNA: file and stem export, format conversion, sample library and web source import, and exchange with other apps." },
+  { name: "Utility", description: "Small single-purpose Add Ons and everything that does not fit above: custom displays and panels, and other general helpers." }
+];
+function isAddOnCategory(name) {
+  return typeof name === "string" && ADD_ON_CATEGORIES.some((c) => c.name === name);
+}
+var KEYWORDS = {
+  "AI Tools": [["ai", 2], ["agent", 2], ["assistant", 2], ["llm", 2], ["gpt", 2], ["claude", 2], ["chatbot", 2], ["prompt", 1], ["generative", 1], ["machine learning", 2], ["model", 1], ["natural language", 2]],
+  Control: [["control surface", 2], ["controller", 2], ["hardware", 1], ["fader", 1], ["knob", 1], ["remote", 1], ["osc", 2], ["mackie", 2], ["hui", 2], ["console", 1], ["channel strip", 1], ["phone", 1], ["tablet", 1], ["plugin parameter", 1], ["control", 1]],
+  Create: [["idea", 1], ["chord", 2], ["melody", 2], ["beat", 1], ["drum pattern", 2], ["pattern", 1], ["lyric", 2], ["songwriting", 2], ["sketch", 1], ["progression", 2], ["compos*", 1], ["generator", 1], ["inspiration", 2]],
+  MIDI: [["midi", 2], ["arpeggiat*", 2], ["quantiz*", 2], ["humaniz*", 2], ["velocity", 1], ["note", 1], ["sysex", 2], ["cc", 1], ["piano roll", 1], ["notation", 1]],
+  Recording: [["record", 2], ["take", 1], ["punch", 2], ["comp", 1], ["input", 1], ["monitor", 1], ["count-in", 2], ["count in", 2], ["click", 1], ["metronome", 2], ["arm", 1], ["capture", 1]],
+  Editing: [["edit", 1], ["clip", 1], ["slice", 2], ["split", 1], ["trim", 1], ["fade", 2], ["crossfade", 2], ["rearrang*", 1], ["timeline", 1], ["time stretch", 2], ["pitch", 1], ["nudge", 1], ["batch", 1]],
+  "Mixing & Mastering": [["mix", 2], ["master", 2], ["eq", 2], ["compressor", 1], ["dynamics", 1], ["loudness", 2], ["lufs", 2], ["meter", 1], ["metering", 2], ["pan", 1], ["level", 1], ["gain", 1], ["reference", 1], ["send", 1], ["bus", 1], ["reverb", 1]],
+  Workflow: [["workflow", 2], ["automat*", 1], ["macro", 2], ["shortcut", 2], ["template", 2], ["rename", 1], ["naming", 1], ["organiz*", 1], ["color", 1], ["setup", 1], ["batch", 1], ["repeat", 1], ["hotkey", 2]],
+  "Session Management": [["session", 1], ["stats", 2], ["statistic*", 2], ["summary", 1], ["audit", 2], ["inventory", 2], ["version", 1], ["notes", 1], ["project", 1], ["overview", 1], ["report", 1]],
+  "Import & Export": [["import", 2], ["export", 2], ["stem", 2], ["bounce", 2], ["render", 1], ["convert", 2], ["format", 1], ["sample", 1], ["library", 1], ["download", 1], ["upload", 1], ["file", 1], ["share", 1]],
+  Utility: [["utility", 2], ["display", 1], ["panel", 1], ["clock", 1], ["timer", 1], ["helper", 1], ["viewer", 1], ["video", 1], ["notepad", 1], ["calculator", 2], ["tuner", 1]]
+};
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function suggestAddOnCategories(text, max = 3) {
+  const lower = text.toLowerCase();
+  const scored = [];
+  ADD_ON_CATEGORIES.forEach(({ name }, order) => {
+    let score = 0;
+    for (const [word, weight] of KEYWORDS[name]) {
+      const pattern = word.endsWith("*") ? escapeRegExp(word.slice(0, -1)) : `${escapeRegExp(word)}(?:s|es|d|ed|ing|r|er|ers|rs)?(?![a-z0-9])`;
+      const matches = lower.match(new RegExp(`(?<![a-z0-9])${pattern}`, "g"));
+      if (matches) score += weight * matches.length;
+    }
+    if (score > 0) scored.push({ name, score, order });
+  });
+  scored.sort((a, b) => b.score - a.score || a.order - b.order);
+  const best = scored.slice(0, Math.max(1, max)).map((s) => s.name);
+  return best.length ? best : ["Utility"];
 }
 
 // src/model/system.ts
@@ -11174,6 +11557,19 @@ function warn2(error) {
 }
 
 // src/model/plugins.ts
+function pluginVersionMeets(installed2, minVersion) {
+  if (!minVersion) return true;
+  if (!installed2 || !VERSION.test(installed2)) return false;
+  const a = installed2.split(".").map(Number);
+  const b = minVersion.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+var VERSION = /^\d+(\.\d+)*$/;
 var Plugin = class extends Node {
   pluginId;
   name;
@@ -11201,6 +11597,16 @@ var Plugin = class extends Node {
   get manufacturer() {
     return this.manifest.value?.manufacturer;
   }
+  /**
+   * Whether it is installed at `minVersion` or later, as LUNA checks an Add On's
+   * `requires_plugins` (fact 148). Reads the loaded {@link installed} and {@link version}.
+   *
+   * @example
+   * const ok = luna.plugins.byId('com.eventfield.vst3.clex')?.isAtLeast('0.4.3') ?? false;
+   */
+  isAtLeast(minVersion) {
+    return this.installed.value === true && pluginVersionMeets(this.version.value, minVersion);
+  }
   get categories() {
     return this.manifest.value?.categories ?? [];
   }
@@ -11220,6 +11626,24 @@ var Plugins = class extends Collection {
   }
   byCategory(category) {
     return this.items.filter((p) => p.categories.includes(category));
+  }
+  /**
+   * The `requirements` the loaded catalog does not meet, as LUNA decides (fact 148): none of a
+   * requirement's `plugin_id` is installed at its `min_version` or later. Pass an Add On's
+   * {@link AddOn.requiresPlugins}; with `blockingOnly`, the ones not marked `optional`, which
+   * are what keeps LUNA from opening it. Load the catalog first.
+   *
+   * @example
+   * await luna.plugins.load();
+   * const me = luna.gui.addOns.byId('com.eventfield.clingy-ex-addon');
+   * for (const r of luna.plugins.unmetRequirements(me?.requiresPlugins.value ?? [])) {
+   *   console.warn(`needs ${r.name}${r.min_version ? ` ${r.min_version}` : ''}`);
+   * }
+   */
+  unmetRequirements(requirements, options = {}) {
+    return requirements.filter(
+      (r) => !(options.blockingOnly && r.optional) && !r.plugin_id.some((id) => this.byId(id)?.isAtLeast(r.min_version) === true)
+    );
   }
   /** All categories in the catalog, sorted. */
   get categories() {
@@ -13903,7 +14327,7 @@ function toDrop(info) {
 }
 
 // src/luna.ts
-var VERSION = "3.1.1";
+var VERSION2 = "3.1.2";
 export {
   luna_exports as Luna
 };

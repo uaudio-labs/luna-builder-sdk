@@ -5,6 +5,7 @@
 | Class | Description |
 | ------ | ------ |
 | [AddOn](classes/AddOn.md) | - |
+| [AddOnInstance](classes/AddOnInstance.md) | One page of an installed Add On open in LUNA (fact 143): `/gui/add_ons/<id>/instances/<add_on_inst>`. LUNA gives every Add On page an `add_on_inst` in its URL; [Gui.thisInstance](classes/Gui.md#thisinstance) finds the page's own. A window keeps its instance while it exists, and a `show_with_session` window keeps it in the session, so it is the same after the session is closed and opened again: a page can key its own `session.storage` records by it. |
 | [Assistant](classes/Assistant.md) | `/assistant`: whether UA Assistant is connected to LUNA. Preset recommendations need it (fact 121). Call `watch()` to follow it. |
 | [AudioSource](classes/AudioSource.md) | - |
 | [Automation](classes/Automation.md) | An observable ordered collection with id lookup. |
@@ -87,6 +88,7 @@
 
 | Interface | Description |
 | ------ | ------ |
+| [AddOnCategoryInfo](interfaces/AddOnCategoryInfo.md) | One Add On category: its `name`, as a manifest writes it, and what belongs in it. |
 | [AudioDeviceInfo](interfaces/AudioDeviceInfo.md) | - |
 | [AudioHealth](interfaces/AudioHealth.md) | Audio-path health as the engine reports it. |
 | [AudioInput](interfaces/AudioInput.md) | A device input a track can record from, as [Client.audioInputs](classes/Client.md#audioinputs) lists it. |
@@ -146,6 +148,7 @@
 | [PathDropHandlers](interfaces/PathDropHandlers.md) | - |
 | [PluginManifest](interfaces/PluginManifest.md) | - |
 | [PluginQueryOptions](interfaces/PluginQueryOptions.md) | - |
+| [PluginRequirement](interfaces/PluginRequirement.md) | One entry of an Add On manifest's `requires_plugins`, as LUNA reports it on [AddOn.requiresPlugins](classes/AddOn.md#requiresplugins) (fact 148). It is met when any of `plugin_id` is installed at `min_version` or later (any version when `''`). One plugin has a different id per format (AU, VST3, ...), so list each. `name` is what LUNA shows, since a plugin that is not installed has no name to look up. Unless `optional`, LUNA will not open the Add On while it is unmet. |
 | [PluginRow](interfaces/PluginRow.md) | One plugin [Plugins.query](classes/Plugins.md#query) returned. |
 | [PluginWindow](interfaces/PluginWindow.md) | One plugin editor window open in LUNA, from [Gui.pluginWindows](classes/Gui.md#pluginwindows). |
 | [Port](interfaces/Port.md) | A connection to one engine. |
@@ -191,6 +194,7 @@
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AddOnCategory](type-aliases/AddOnCategory.md) | A category name a manifest's `categories` can hold. |
 | [AddOnInstalledFrom](type-aliases/AddOnInstalledFrom.md) | Where an installed Add On lives: see [AddOn.installedFrom](classes/AddOn.md#installedfrom). |
 | [AddOnTarget](type-aliases/AddOnTarget.md) | - |
 | [AlgType](type-aliases/AlgType.md) | LUNA's time-stretch algorithm for an audio clip (`alg_type`), passed verbatim. |
@@ -242,6 +246,7 @@
 
 | Variable | Description |
 | ------ | ------ |
+| [ADD\_ON\_CATEGORIES](variables/ADD_ON_CATEGORIES.md) | Every Add On category, in the order the showcase lists them. |
 | [AUTOMATION\_MODES](variables/AUTOMATION_MODES.md) | - |
 | [COARSE\_PAIR\_NS](variables/COARSE_PAIR_NS.md) | Nanoseconds per coarse overview pair: 31.25 ms. |
 | [COARSE\_PAIRS\_PER\_FINE](variables/COARSE_PAIRS_PER_FINE.md) | Fine pairs per coarse pair. |
@@ -274,6 +279,7 @@
 
 | Function | Description |
 | ------ | ------ |
+| [addOnTarget](functions/addOnTarget.md) | The host LUNA loaded this Add On page in, from the `?target=` it puts on the page URL (fact 144): `'window'`, `'browser'`, `'editor'` or `'app'`. `undefined` outside LUNA and on a LUNA older than the parameter. Synchronous, so a page that lists several manifest `targets` can lay itself out for its host before it connects. LUNA reloads the page when the user moves it to another host, so it never changes while the page runs. |
 | [audioNsAtTick](functions/audioNsAtTick.md) | The file offset (ns) that plays at a timeline tick inside a clip: the clip's audio start plus the tempo-map seconds between the clip start and the tick. Linear in seconds, not in ticks, so a tempo change inside the clip bends the mapping exactly as the engine does. |
 | [automationModeOrdinal](functions/automationModeOrdinal.md) | Commands take the mode as an integer ordinal; the track property reports it as a string. |
 | [beatsToTicks](functions/beatsToTicks.md) | Beats to ticks. |
@@ -303,6 +309,7 @@
 | [formatTimeSignature](functions/formatTimeSignature.md) | Format a time signature as `4/4`; `undefined` (an unloaded prop) gives a placeholder, like [formatBarBeat](functions/formatBarBeat.md). Pairs with `transport.timeSignature`. |
 | [getOptionsToParams](functions/getOptionsToParams.md) | Convert [GetOptions](interfaces/GetOptions.md) to wire query parameters. |
 | [hasNativeBridge](functions/hasNativeBridge.md) | True when LUNA's native webview bridge is present. |
+| [isAddOnCategory](functions/isAddOnCategory.md) | True when `name` is one of [ADD\_ON\_CATEGORIES](variables/ADD_ON_CATEGORIES.md), written exactly (case included). |
 | [isEmbeddedInLuna](functions/isEmbeddedInLuna.md) | True when the page was opened by LUNA (a `?port=` is on the URL). |
 | [isLunaEnginePort](functions/isLunaEnginePort.md) | True when the page is talking to LUNA's own engine on its default port. |
 | [joinPath](functions/joinPath.md) | Join path segments with single slashes. |
@@ -316,6 +323,7 @@
 | [pairNs](functions/pairNs.md) | Nanoseconds one pair of this analysis covers. |
 | [pairRange](functions/pairRange.md) | The overview pairs covering `[startNs, stopNs)` of a source. Both are file offsets, never timeline ticks. |
 | [parseChord](functions/parseChord.md) | Split a chord name into root, type and bass. `undefined` when it does not start with a note letter, since the ruler accepts any text (`N.C.`, `riff`). A lowercase root or bass is read as the note (`am7` is A minor 7, `bb` is B flat) and returned upper-cased, but only when what follows the root is empty or starts like a chord quality, so `bridge` and `chorus` stay text. Spaces around the slash are ignored. |
+| [pluginVersionMeets](functions/pluginVersionMeets.md) | Whether plugin version `installed` meets `minVersion`, as LUNA compares them (fact 148): every dot-separated part as a number, missing parts as 0, so `'0.4.10'` meets `'0.4.3'` and `'0.4.3.1'` meets `'0.4.3'`. An empty `minVersion` is met by anything; an empty or malformed `installed` meets only that. |
 | [propertyValue](functions/propertyValue.md) | Unwrap a property reply. A `get` on a property answers `{ value: X }` unless `flatvalue` was requested, in which case it answers `X` directly. |
 | [requireTick](functions/requireTick.md) | Reject a non-integer tick before it reaches the wire: LUNA stores whatever it is given (fact 12). |
 | [secondsToTicks](functions/secondsToTicks.md) | Seconds to ticks at a constant tempo. |
@@ -324,6 +332,7 @@
 | [shallowEquals](functions/shallowEquals.md) | Equality used by cells: `===` for primitives, JSON shape for plain objects and arrays. |
 | [splitPath](functions/splitPath.md) | Split `<node>/<prop>` into its node path and property name. |
 | [stripValueSuffix](functions/stripValueSuffix.md) | Property updates arrive on `<node>/<prop>/value`; the model addresses `<node>/<prop>`. |
+| [suggestAddOnCategories](functions/suggestAddOnCategories.md) | Categories that suit an Add On, best first, guessed from what it says about itself (its name, description, a prompt that asked for it). At most `max` (default 3); when nothing in the text points anywhere, `['Utility']`. A guess to confirm with the author, never to write into a manifest unasked. |
 | [ticksToBeats](functions/ticksToBeats.md) | Ticks to beats (floating). |
 | [ticksToSeconds](functions/ticksToSeconds.md) | Ticks to seconds at a constant tempo. |
 | [toEvent](functions/toEvent.md) | Turn a decoded wire message into the normalised event the Store consumes. |

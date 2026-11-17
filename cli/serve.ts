@@ -84,7 +84,7 @@ export async function serve(args: Args): Promise<number> {
   if (port !== wantedPort) console.error(`port ${wantedPort} is busy (a stale 'ua-builder serve'?); using ${port} instead`);
 
   const lines = [`Serving ${dir}`, `  http://localhost:${port}/`];
-  if (engineDir) lines.push(`  http://localhost:${port}/__engine/devicedwasm.js   (wasm engine from ${engineDir})`);
+  if (engineDir) lines.push(`  http://localhost:${port}/__engine/luna-engine.js   (wasm engine from ${engineDir})`);
   if (args.flags['luna']) {
     const forwardPort = flagNumber(args, 'forward-port', 4719);
     const lunaPort = flagNumber(args, 'luna-port', 4718);
@@ -153,16 +153,17 @@ function lanAddress(): string {
   return 'localhost';
 }
 
-/** Where a wasm engine build lives: flag, env, or a sibling tree checkout. */
+/** Where a wasm engine build lives: flag, env, one shipped in the SDK, or a sibling tree checkout. */
 export function resolveEngineDir(flag: string | undefined): string | undefined {
   const candidates = [flag, process.env['UA_WASM_ENGINE']].filter((x): x is string => typeof x === 'string' && x.length > 0);
   const root = packageRoot();
-  // builder lives at <tree>/packages/sdk/luna/ua-builder-sdk; the engine at <tree>/packages/hbsystem/wasm_engine/dist
-  for (const rel of ['../../../hbsystem/wasm_engine/dist/Release', '../../../hbsystem/wasm_engine/dist/Debug']) candidates.push(resolve(root, rel));
+  candidates.push(join(root, 'engine'));
+  // builder lives at <tree>/packages/sdk/luna/builder/sdk; the engine at <tree>/packages/hbsystem/wasm_engine/dist
+  for (const rel of ['../../../../hbsystem/wasm_engine/dist/Release', '../../../../hbsystem/wasm_engine/dist/Debug']) candidates.push(resolve(root, rel));
   for (const c of candidates) {
     const dir = resolve(c);
-    if (existsSync(join(dir, 'devicedwasm.js'))) return dir;
-    if (existsSync(join(dir, 'Release', 'devicedwasm.js'))) return join(dir, 'Release');
+    if (existsSync(join(dir, 'luna-engine.js'))) return dir;
+    if (existsSync(join(dir, 'Release', 'luna-engine.js'))) return join(dir, 'Release');
   }
   return undefined;
 }
