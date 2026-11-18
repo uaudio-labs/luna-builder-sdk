@@ -4,6 +4,11 @@ SDK for building LUNA Add Ons that run inside LUNA or, unchanged, in a browser
 page talking to LUNA on the same machine. TypeScript, zero runtime dependencies,
 everything under one `Luna` namespace.
 
+**License and terms.** Your use of the LUNA Builder SDK is governed by two documents: the
+[Apache License, Version 2.0](LICENSE) and the
+[Supplemental Terms for LUNA Builder SDK](SUPPLEMENTAL-TERMS.md). By downloading or using the
+LUNA Builder SDK, you agree to these terms.
+
 Status: alpha. Sessions, transport, tracks, controls, buses, playlists, clips, MIDI,
 automation, renders and recording are implemented and tested against a live LUNA. See
 [CHANGELOG.md](CHANGELOG.md).
@@ -182,4 +187,5 @@ to work on the SDK itself.
 Behaviour the SDK relies on that the protocol docs do not state is recorded, numbered, in
 `docs/EVIDENCE.md`.
 
-Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
+Licensed under the [Apache License, Version 2.0](LICENSE) and the
+[Supplemental Terms for LUNA Builder SDK](SUPPLEMENTAL-TERMS.md). See [NOTICE](NOTICE).
