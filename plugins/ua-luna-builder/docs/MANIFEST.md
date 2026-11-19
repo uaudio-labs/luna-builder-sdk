@@ -436,6 +436,7 @@ nowhere else. `Luna.ADD_ON_CATEGORIES` holds this list in the SDK, and
 | `Workflow` | Add Ons that save steps: automation of repeated tasks, session setup and templates, track naming and organizing, shortcuts and macros, and other session tools. |
 | `Session Management` | Add Ons that show what is in a session and help keep it in order: session stats, track and plugin summaries, version and project notes, and audits of what a session contains. |
 | `Import & Export` | Add Ons that move material in and out of LUNA: file and stem export, format conversion, sample library and web source import, and exchange with other apps. |
+| `Education` | Add Ons for learning and teaching music and LUNA: lessons and tutorials, ear training, theory and practice tools, and visual guides that show what is playing. |
 | `Utility` | Small single-purpose Add Ons and everything that does not fit above: custom displays and panels, and other general helpers. |
 
 ## How LUNA loads the page

@@ -2,6 +2,15 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## 3.1.2 Beta 3
+
+Added
+- An `"Education"` Add On category, for Add Ons that teach music or LUNA: lessons and
+  tutorials, ear training, theory and practice tools, and visual guides that show what is
+  playing (docs/MANIFEST.md, "Categories"). `ua-builder` accepts it and
+  `Luna.suggestAddOnCategories()` can suggest it. LUNA builds without it in their list show it
+  after the others.
+
 ## 3.1.2 Beta 2
 
 Changed

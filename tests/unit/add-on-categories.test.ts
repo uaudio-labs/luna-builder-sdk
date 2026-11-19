@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { Luna } from '../../src/index';
 
 describe('Add On categories', () => {
-  it('lists the eleven showcase categories, each with a description', () => {
+  it('lists the twelve showcase categories, each with a description', () => {
     expect(Luna.ADD_ON_CATEGORIES.map((c) => c.name)).toEqual([
-      'AI Tools', 'Control', 'Create', 'MIDI', 'Recording', 'Editing', 'Mixing & Mastering', 'Workflow', 'Session Management', 'Import & Export', 'Utility',
+      'AI Tools', 'Control', 'Create', 'MIDI', 'Recording', 'Editing', 'Mixing & Mastering', 'Workflow', 'Session Management', 'Import & Export', 'Education', 'Utility',
     ]);
     for (const c of Luna.ADD_ON_CATEGORIES) expect(c.description.length).toBeGreaterThan(20);
   });
@@ -26,6 +26,7 @@ describe('Add On categories', () => {
     ['Macros and keyboard shortcuts that rename tracks', 'Workflow'],
     ['Session stats and an audit of plugins in use', 'Session Management'],
     ['Drive LUNA from a hardware control surface over OSC', 'Control'],
+    ['Ear training lessons for students learning to play', 'Education'],
   ])('suggests %j as %s first', (text, best) => {
     expect(Luna.suggestAddOnCategories(text)[0]).toBe(best);
   });

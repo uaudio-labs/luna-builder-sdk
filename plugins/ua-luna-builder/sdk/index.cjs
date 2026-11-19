@@ -11135,6 +11135,7 @@ var ADD_ON_CATEGORIES = [
   { name: "Workflow", description: "Add Ons that save steps: automation of repeated tasks, session setup and templates, track naming and organizing, shortcuts and macros, and other session tools." },
   { name: "Session Management", description: "Add Ons that show what is in a session and help keep it in order: session stats, track and plugin summaries, version and project notes, and audits of what a session contains." },
   { name: "Import & Export", description: "Add Ons that move material in and out of LUNA: file and stem export, format conversion, sample library and web source import, and exchange with other apps." },
+  { name: "Education", description: "Add Ons for learning and teaching music and LUNA: lessons and tutorials, ear training, theory and practice tools, and visual guides that show what is playing." },
   { name: "Utility", description: "Small single-purpose Add Ons and everything that does not fit above: custom displays and panels, and other general helpers." }
 ];
 function isAddOnCategory(name) {
@@ -11151,6 +11152,7 @@ var KEYWORDS = {
   Workflow: [["workflow", 2], ["automat*", 1], ["macro", 2], ["shortcut", 2], ["template", 2], ["rename", 1], ["naming", 1], ["organiz*", 1], ["color", 1], ["setup", 1], ["batch", 1], ["repeat", 1], ["hotkey", 2]],
   "Session Management": [["session", 1], ["stats", 2], ["statistic*", 2], ["summary", 1], ["audit", 2], ["inventory", 2], ["version", 1], ["notes", 1], ["project", 1], ["overview", 1], ["report", 1]],
   "Import & Export": [["import", 2], ["export", 2], ["stem", 2], ["bounce", 2], ["render", 1], ["convert", 2], ["format", 1], ["sample", 1], ["library", 1], ["download", 1], ["upload", 1], ["file", 1], ["share", 1]],
+  Education: [["education", 2], ["educational", 2], ["learn*", 2], ["lesson", 2], ["teach*", 2], ["tutorial", 2], ["ear training", 2], ["student", 2], ["course", 1], ["quiz", 2], ["practice", 1], ["theory", 1], ["exercise", 1]],
   Utility: [["utility", 2], ["display", 1], ["panel", 1], ["clock", 1], ["timer", 1], ["helper", 1], ["viewer", 1], ["video", 1], ["notepad", 1], ["calculator", 2], ["tuner", 1]]
 };
 function escapeRegExp(s) {

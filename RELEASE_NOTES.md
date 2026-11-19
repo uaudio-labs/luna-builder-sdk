@@ -3,6 +3,11 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 3.1.2 Beta 3 — 2026-11-19
+
+- A new `"Education"` Add On category, for Add Ons that teach music or LUNA; `ua-builder` accepts
+  it and `Luna.suggestAddOnCategories()` can suggest it.
+
 ## 3.1.2 Beta 2 — 2026-11-18
 
 - `session.recordTakes` follows the takes LUNA is recording before they become clips: an audio

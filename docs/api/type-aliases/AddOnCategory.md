@@ -12,6 +12,7 @@ type AddOnCategory =
   | "Workflow"
   | "Session Management"
   | "Import & Export"
+  | "Education"
   | "Utility";
 ```
 

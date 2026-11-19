@@ -6784,7 +6784,7 @@ interface AddOnCategoryInfo {
     readonly description: string;
 }
 /** A category name a manifest's `categories` can hold. */
-type AddOnCategory = 'AI Tools' | 'Control' | 'Create' | 'MIDI' | 'Recording' | 'Editing' | 'Mixing & Mastering' | 'Workflow' | 'Session Management' | 'Import & Export' | 'Utility';
+type AddOnCategory = 'AI Tools' | 'Control' | 'Create' | 'MIDI' | 'Recording' | 'Editing' | 'Mixing & Mastering' | 'Workflow' | 'Session Management' | 'Import & Export' | 'Education' | 'Utility';
 /** Every Add On category, in the order the showcase lists them. */
 declare const ADD_ON_CATEGORIES: readonly AddOnCategoryInfo[];
 /** True when `name` is one of {@link ADD_ON_CATEGORIES}, written exactly (case included). */
