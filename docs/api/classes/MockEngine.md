@@ -1034,6 +1034,72 @@ engine.receiveMidi('volt', [[0x90, 60, 100], [0x80, 60, 0], [0xf0, 0x7e, 0x7f, 0
 
 ***
 
+### recordMidi()
+
+```ts
+recordMidi(
+   sessionUid, 
+   trackUid, 
+   events): number[];
+```
+
+Record MIDI messages into the take in progress on a track, as LUNA publishes them while
+recording: one `midi/<rowid>` node each, its `tick` a session tick (fact 149). Returns the
+row ids.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `sessionUid` | `string` |
+| `trackUid` | `string` |
+| `events` | readonly `object`[] |
+
+#### Returns
+
+`number`[]
+
+#### Example
+
+```ts
+engine.recordMidi('abc', 'keys', [
+  { tick: 0, status: 0x90, data1: 60, data2: 100 },
+  { tick: Luna.QUARTER_NOTE, status: 0x80, data1: 60, data2: 0 },
+]);
+```
+
+***
+
+### recordProgress()
+
+```ts
+recordProgress(sessionUid, stopTick): void;
+```
+
+Move every take in progress in a session on to `stopTick`, as LUNA does while recording:
+`stop` and `length` grow, and an audio take's `source_stop`, file length and overview grow
+with them (fact 149). The mock runs at 120 BPM: a beat is 0.5 s.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `sessionUid` | `string` |
+| `stopTick` | `number` |
+
+#### Returns
+
+`void`
+
+#### Example
+
+```ts
+await session.transport.recordEnabled.set(true);
+engine.recordProgress('abc', Luna.WHOLE_NOTE);
+```
+
+***
+
 ### removeNode()
 
 ```ts

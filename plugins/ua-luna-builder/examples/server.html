@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA · Server</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #15191e; color: #e4eaf1; }
+  body { max-width: 900px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 26px; } h2 { margin: 0 0 6px; font-size: 17px; }
+  p { color: #acb9c8; line-height: 1.6; margin: 6px 0; }
+  code { color: #f0c674; }
+  button, input { font: inherit; padding: 7px 11px; margin: 4px 8px 4px 0; }
+  input { background: #0f1216; color: #e4eaf1; border: 1px solid #343d48; border-radius: 6px; }
+  .panel { border: 1px solid #343d48; border-radius: 10px; padding: 14px; margin-top: 14px; }
+  #servers { list-style: none; padding: 0; margin: 6px 0; }
+  #servers li { margin: 2px 0; }
+  .allowed { color: #8fd18f; } .blocked { color: #ff8a80; } .unknown { color: #f0c674; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  td, th { text-align: left; padding: 5px 8px; border-top: 1px solid #262d36; vertical-align: top; }
+  th { color: #8a98a8; font-weight: 500; font-size: 13px; }
+  td.len { font-variant-numeric: tabular-nums; color: #acb9c8; }
+  td button { margin: 0 6px 0 0; padding: 3px 8px; }
+  #log { width: 100%; height: 180px; font: 12px ui-monospace, monospace; background: #0f1216; color: #e4eaf1; border: 1px solid #343d48; border-radius: 8px; padding: 8px; box-sizing: border-box; }
+</style>
+<h1>Server</h1>
+<p>An Add On reaches no server but LUNA on this computer unless its manifest lists the
+server in <code>network</code> and the user allows it (docs/MANIFEST.md, "Network"). This
+page's entry lists <code>musicbrainz.org</code>, a public music database with no API key,
+and looks songs up there. LUNA asks the first time it opens; allow or remove it later in
+<b>Settings &gt; Add Ons &gt; SERVERS</b>, which reloads the page.</p>
+<p id="status" role="status">Connecting…</p>
+
+<section class="panel">
+  <h2>This Add On's servers</h2>
+  <p>From <code>luna.gui.addOns</code>: <code>network</code> is what the manifest asks for,
+  <code>networkAllowed</code> what the user allowed.</p>
+  <ul id="servers"><li class="unknown">…</li></ul>
+</section>
+
+<section class="panel">
+  <h2>Look up a song</h2>
+  <form id="search">
+    <input id="query" placeholder="title or artist" aria-label="Song" size="36">
+    <button id="go">Search MusicBrainz</button>
+  </form>
+  <p id="found"></p>
+  <table id="results" hidden>
+    <thead><tr><th>Title</th><th>Artist</th><th>Length</th><th>First release</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p><b>Marker</b> adds one at the playhead named after the song, with its MusicBrainz page in
+  the marker's comments.</p>
+</section>
+
+<section class="panel">
+  <h2>A server not in the manifest</h2>
+  <p>Inside LUNA a request to <code>example.com</code> is refused before it leaves the
+  computer, and the page gets a <code>securitypolicyviolation</code> event. In a browser no
+  policy applies, so it reaches the server (and fails there on CORS).</p>
+  <button id="probe">Fetch https://example.com/</button>
+</section>
+
+<p><textarea id="log" readonly aria-label="Log"></textarea></p>
+
+<script src="../sdk/luna.global.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (line) => { $('log').value += `${new Date().toLocaleTimeString()} ${line}\n`; };
+const API = 'https://musicbrainz.org/ws/2';
+const HOST = 'musicbrainz.org';
+let luna, session, addOn;
+
+// Every request LUNA's policy blocks fires this, whatever made it (fetch, an image, a script).
+document.addEventListener('securitypolicyviolation', (e) => {
+  log(`blocked by LUNA: ${e.blockedURI} (${e.effectiveDirective ?? e.violatedDirective})`);
+});
+
+/** True, false, or undefined when unknown (outside LUNA, or an older LUNA). */
+function allowed(host) {
+  const list = addOn?.networkAllowed.value;
+  return list === undefined ? undefined : list.includes(host);
+}
+
+function renderServers() {
+  const ul = $('servers');
+  ul.replaceChildren();
+  const asked = addOn?.network.value;
+  if (asked === undefined) {
+    const li = document.createElement('li');
+    li.className = 'unknown';
+    li.textContent = addOn ? 'This LUNA does not report network access (before 3.1.2): requests go out unchecked.' : 'Not opened as an Add On: no policy applies, so every server is reachable.';
+    ul.append(li);
+    return;
+  }
+  if (asked.length === 0) {
+    const li = document.createElement('li');
+    li.textContent = 'None: this Add On reaches only LUNA on this computer.';
+    ul.append(li);
+  }
+  for (const host of asked) {
+    const li = document.createElement('li');
+    const ok = allowed(host);
+    li.className = ok ? 'allowed' : 'blocked';
+    li.textContent = `${host}: ${ok ? 'allowed' : 'not allowed, allow it in Settings > Add Ons > SERVERS'}`;
+    ul.append(li);
+  }
+}
+
+const duration = (ms) => (typeof ms === 'number' ? `${Math.floor(ms / 60000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}` : '');
+const artistOf = (r) => (r['artist-credit'] ?? []).map((c) => c.name + (c.joinphrase ?? '')).join('');
+function firstRelease(r) {
+  const dated = (r.releases ?? []).filter((x) => x.date).sort((a, b) => a.date.localeCompare(b.date));
+  const first = dated[0] ?? r.releases?.[0];
+  return first ? `${first.title}${first.date ? ` (${first.date.slice(0, 4)})` : ''}` : '';
+}
+
+$('search').onsubmit = async (e) => {
+  e.preventDefault();
+  const query = $('query').value.trim();
+  if (!query) return;
+  if (allowed(HOST) === false) {
+    $('found').textContent = `${HOST} is not allowed: requests to it fail. Allow it in Settings > Add Ons > SERVERS.`;
+    return;
+  }
+  $('go').disabled = true;
+  $('found').textContent = 'Searching…';
+  try {
+    const url = `${API}/recording?fmt=json&limit=10&query=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    // MusicBrainz answers 503 when asked more than about once a second.
+    if (res.status === 503) throw new Error('MusicBrainz is busy (it takes about one search a second): try again');
+    if (!res.ok) throw new Error(`MusicBrainz answered ${res.status}`);
+    const body = await res.json();
+    showResults(body.recordings ?? [], body.count ?? 0);
+    log(`GET ${url} → ${res.status}, ${body.count ?? 0} matches`);
+  } catch (err) {
+    // A blocked request is a plain network error (TypeError); the reason is the
+    // securitypolicyviolation event above, not anything on the error itself.
+    $('found').textContent = `Search failed: ${err.message}`;
+    log(`search: ${err.name} ${err.message}`);
+  } finally {
+    $('go').disabled = false;
+  }
+};
+
+function showResults(recordings, count) {
+  $('found').textContent = recordings.length ? `${count} matches, the first ${recordings.length}:` : 'No matches.';
+  const tbody = $('results').querySelector('tbody');
+  tbody.replaceChildren();
+  for (const r of recordings) {
+    const tr = document.createElement('tr');
+    tr.className = 'song';
+    for (const [cls, text] of [['title', r.title], ['artist', artistOf(r)], ['len', duration(r.length)], ['release', firstRelease(r)]]) {
+      const td = document.createElement('td');
+      td.className = cls;
+      td.textContent = text;
+      tr.append(td);
+    }
+    const td = document.createElement('td');
+    const marker = document.createElement('button');
+    marker.className = 'marker';
+    marker.textContent = 'Marker';
+    marker.disabled = !session;
+    marker.onclick = () => void addMarker(r);
+    const open = document.createElement('button');
+    open.textContent = 'Open';
+    open.title = 'Open the MusicBrainz page in your browser';
+    open.onclick = () => void openPage(r);
+    td.append(marker, open);
+    tr.append(td);
+    tbody.append(tr);
+  }
+  $('results').hidden = recordings.length === 0;
+}
+
+const pageOf = (r) => `https://${HOST}/recording/${r.id}`;
+
+async function addMarker(r) {
+  try {
+    const name = `${r.title} – ${artistOf(r)}`;
+    await session.addMarker(session.transport.playStart.value ?? 0, name, { comments: pageOf(r) });
+    log(`marker: "${name}"`);
+  } catch (err) { log(`marker: ${err.code ?? ''} ${err.message}`); }
+}
+
+// The page's own frame cannot leave for another site inside LUNA: openUrl hands the link
+// to the user's browser instead.
+async function openPage(r) {
+  try {
+    if (await luna.gui.available()) await luna.gui.openUrl(pageOf(r));
+    else window.open(pageOf(r), '_blank', 'noopener');
+  } catch (err) { log(`open: ${err.code ?? ''} ${err.message}`); }
+}
+
+$('probe').onclick = async () => {
+  try {
+    const res = await fetch('https://example.com/', { mode: 'cors' });
+    log(`example.com: answered ${res.status}`);
+  } catch (err) { log(`example.com: ${err.name} ${err.message}`); }
+};
+
+let binding = 0;
+async function bindSession() {
+  const mine = ++binding;
+  const next = luna.sessions.current();
+  if (next) await next.ready();
+  if (mine !== binding) return; // a later change won
+  session = next;
+  for (const b of document.querySelectorAll('button.marker')) b.disabled = !session;
+  if (session && !$('query').value) $('query').value = session.name.value ?? '';
+  $('status').textContent = session ? `Session "${session.name.value ?? session.id}"` : 'No session open in LUNA: Marker is off.';
+}
+
+async function start() {
+  try {
+    luna = await Luna.connect();
+    Luna.bindShortcuts(luna); // LUNA's undo, redo, play and record keys
+    // Which Add On is this page? LUNA puts add_on_inst in its URL; outside LUNA there is none.
+    const me = await luna.gui.thisInstance();
+    if (me) {
+      await luna.gui.addOns.watch().ready;
+      addOn = luna.gui.addOns.byId(me.addOnId);
+      addOn?.network.onChange(renderServers);
+      addOn?.networkAllowed.onChange(renderServers);
+    }
+    renderServers();
+    log(`add on: ${me ? me.addOnId : 'none (not opened by LUNA)'}, network ${JSON.stringify(addOn?.network.value)}, allowed ${JSON.stringify(addOn?.networkAllowed.value)}`);
+    await luna.sessions.ready();
+    // Follow the session: one opened, closed or focused after the page loaded is picked up.
+    const rebind = () => void bindSession().catch((e) => { $('status').textContent = `${e.code ?? ''} ${e.message}`; });
+    luna.sessions.focused.onChange(rebind);
+    luna.sessions.items.onChange(rebind);
+    await bindSession();
+  } catch (e) { $('status').textContent = `${e.code ?? ''} ${e.message}`; }
+}
+
+void start();
+</script>

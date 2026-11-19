@@ -435,9 +435,19 @@ await ctx.select({ startTick: 0, stopTick: Luna.WHOLE_NOTE, playlistUids: [lane.
 selectAll(): Promise<unknown>;
 ```
 
+Widen the selected range to everything on the selected tracks' playlists (clips, notes,
+automation), keeping the tracks (fact 150). No undo entry.
+
 #### Returns
 
 `Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+await session.selectTimeline({ tracks: [track] });
+await session.context.selectAll();
+```
 
 ***
 

@@ -28,7 +28,7 @@ import { hasNativeBridge } from '../client/detect';
 import type { Session } from './session';
 
 /** The commands the standard shortcuts cover. */
-export type ShortcutCommand = 'undo' | 'redo' | 'togglePlayback' | 'toggleRecord';
+export type ShortcutCommand = 'undo' | 'redo' | 'togglePlayback' | 'toggleRecord' | 'selectAll' | 'cut' | 'copy' | 'paste' | 'clear' | 'duplicate';
 
 export type ShortcutPlatform = 'mac' | 'other';
 
@@ -51,6 +51,36 @@ export const DEFAULT_SHORTCUTS: Readonly<ShortcutBindings> = Object.freeze({
   redo: ['Mod+Shift+Z'],
   togglePlayback: ['Space', 'Numpad0'],
   toggleRecord: ['Mod+Space', 'Numpad3'],
+  // The edit commands are off unless a page asks for them (EDIT_SHORTCUTS): on by default they
+  // would take Cmd+C and Backspace from every page that copies text or deletes in its own UI.
+  selectAll: [],
+  cut: [],
+  copy: [],
+  paste: [],
+  clear: [],
+  duplicate: [],
+});
+
+/**
+ * LUNA's default keys for its edit commands (fact 150): Cmd+A to select all, Cmd+X, Cmd+C,
+ * Cmd+V (Ctrl off the Mac), Backspace or Delete to clear, and Cmd+D for Duplicate Selection. Pass them as
+ * `bindings` to have {@link Shortcuts} run them; each acts on LUNA's edit selection, which
+ * `options.prepare` can point at what the page shows first (`session.selectTimeline`).
+ *
+ * @example
+ * const keys = new Luna.Shortcuts(luna, {
+ *   bindings: Luna.EDIT_SHORTCUTS,
+ *   prepare: (command, session) => session.selectTimeline({ tracks: [shownTrack] }),
+ * });
+ * document.addEventListener('keydown', (e) => keys.handle(e));
+ */
+export const EDIT_SHORTCUTS: Readonly<Pick<ShortcutBindings, 'selectAll' | 'cut' | 'copy' | 'paste' | 'clear' | 'duplicate'>> = Object.freeze({
+  selectAll: ['Mod+A'],
+  cut: ['Mod+X'],
+  copy: ['Mod+C'],
+  paste: ['Mod+V'],
+  clear: ['Backspace', 'Delete'],
+  duplicate: ['Mod+D'],
 });
 
 export interface ShortcutsOptions {
@@ -64,6 +94,12 @@ export interface ShortcutsOptions {
   onError?: (error: unknown, command: ShortcutCommand) => void;
   /** Called after a key was matched and its command started. */
   onCommand?: (command: ShortcutCommand, event: KeyboardEvent) => void;
+  /**
+   * Called before an edit command (`selectAll`, `cut`, `copy`, `paste`, `clear`, `duplicate`) runs, and
+   * awaited: point LUNA's edit selection at what the page shows here, for example with
+   * `session.selectTimeline`. A rejection stops the command and goes to `onError`.
+   */
+  prepare?: (command: ShortcutCommand, session: Session) => void | Promise<void>;
 }
 
 /** The parts of a `KeyboardEvent` a binding matches on. */
@@ -77,9 +113,9 @@ interface ParsedCombo {
   shift: boolean;
 }
 
-const COMMANDS: readonly ShortcutCommand[] = ['undo', 'redo', 'togglePlayback', 'toggleRecord'];
+const COMMANDS: readonly ShortcutCommand[] = ['undo', 'redo', 'togglePlayback', 'toggleRecord', 'selectAll', 'cut', 'copy', 'paste', 'clear', 'duplicate'];
 /** Held-down Space must not flap the transport; undo and redo repeat like LUNA's. */
-const NO_REPEAT: ReadonlySet<ShortcutCommand> = new Set(['togglePlayback', 'toggleRecord']);
+const NO_REPEAT: ReadonlySet<ShortcutCommand> = new Set(['togglePlayback', 'toggleRecord', 'selectAll', 'cut', 'copy', 'paste', 'clear', 'duplicate']);
 
 function detectPlatform(): ShortcutPlatform {
   const nav = (globalThis as { navigator?: { platform?: string; userAgentData?: { platform?: string }; userAgent?: string } }).navigator;
@@ -218,6 +254,16 @@ export class Shortcuts {
         // does not have yet. ready() is idempotent, so this costs nothing afterwards.
         await session.ready();
         await (command === 'togglePlayback' ? session.transport.toggle() : session.transport.toggleRecord());
+        return;
+      }
+      case 'selectAll':
+      case 'cut':
+      case 'copy':
+      case 'paste':
+      case 'clear':
+      case 'duplicate': {
+        await this.options.prepare?.(command, session);
+        await session.context[command]();
         return;
       }
     }

@@ -11,6 +11,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Tell whether a page runs inside LUNA (`Luna.isEmbeddedInLuna()`) and whether LUNA's UI is
   there (`luna.gui.available()`).
 - Make LUNA's undo, redo, play and record shortcuts work outside LUNA with `Luna.bindShortcuts`.
+- Opt in to LUNA's edit keys (Cmd+A, Cmd+X/C/V, Backspace or Delete, Cmd+D) with `Luna.EDIT_SHORTCUTS`,
+  pointing the selection at what the page shows first.
 
 ## Props and collections
 
@@ -73,6 +75,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - Fades and crossfades on audio clips, with fade shapes and curves.
 - Take lanes: make new playlists and switch the active one.
 - Select a range across tracks, then duplicate, nudge, move or copy what is selected.
+- Point LUNA's selection at a range of tracks on the timeline (`session.selectTimeline`) and
+  select all of it, cut, copy, paste, clear or duplicate it as LUNA's own keys do.
 
 ## Waveforms
 
@@ -109,6 +113,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 
 - List audio device inputs.
 - Record a whole pass on a track in one call and get the finished take back.
+- Follow the takes being recorded on every armed track (`session.recordTakes`): an audio take's
+  growing waveform, a MIDI take's notes as they are played.
 
 ## Effects and plugins
 

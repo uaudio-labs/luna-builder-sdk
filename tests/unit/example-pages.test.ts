@@ -1414,6 +1414,102 @@ describe('examples/secrets.html', () => {
   });
 });
 
+describe('examples/server.html', () => {
+  const logText = (page: Awaited<ReturnType<typeof loadExamplePage>>) => (page.document.querySelector('#log') as HTMLTextAreaElement).value;
+  const ANSWER = {
+    count: 1,
+    recordings: [{
+      id: 'rec-1', title: 'Yesterday', length: 125000,
+      'artist-credit': [{ name: 'The Beatles' }],
+      releases: [{ title: 'Help!', date: '1965-08-06' }, { title: 'Later', date: '1976' }],
+    }],
+  };
+  /** A fetch that answers MusicBrainz and records every URL it was asked for. */
+  function fakeFetch() {
+    const urls: string[] = [];
+    const fetch = async (url: string) => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => ANSWER };
+    };
+    return { urls, fetch };
+  }
+
+  /** The page opened by LUNA as Add On `com.example.demo`, whose manifest asks for `network`. */
+  async function asAddOn(network: string[], allowed: string[]) {
+    const engine = engineWithSession();
+    engine.setValue('/gui/add_ons/com.example.demo', 'network', network);
+    engine.setValue('/gui/add_ons/com.example.demo', 'network_allowed', allowed);
+    const inst = engine.openAddOnInstance('com.example.demo');
+    await engine.settled();
+    // thisInstance() reads add_on_inst from the URL; the SDK runs in the test's own window.
+    window.history.replaceState(null, '', `?add_on_inst=${inst}`);
+    return engine;
+  }
+
+  it('searches MusicBrainz and adds a marker named after a result', async () => {
+    const engine = engineWithSession();
+    const { urls, fetch } = fakeFetch();
+    const page = await loadExamplePage('server.html', engine, { globals: { fetch } });
+    await page.waitFor(() => page.text('#status').startsWith('Session'), 'the page to connect');
+    expect(page.text('#servers')).toContain('Not opened as an Add On');
+    expect((page.document.querySelector('#query') as HTMLInputElement).value).toBe('Demo');
+
+    (page.document.querySelector('#go') as HTMLButtonElement).click();
+    await page.waitFor(() => page.all('tr.song').length === 1, 'the results');
+    expect(urls[0]).toBe('https://musicbrainz.org/ws/2/recording?fmt=json&limit=10&query=Demo');
+    expect(page.text('tr.song .title')).toBe('Yesterday');
+    expect(page.text('tr.song .artist')).toBe('The Beatles');
+    expect(page.text('tr.song .len')).toBe('2:05');
+    expect(page.text('tr.song .release')).toBe('Help! (1965)');
+
+    (page.document.querySelector('tr.song button.marker') as HTMLButtonElement).click();
+    await page.waitFor(() => logText(page).includes('marker: "Yesterday – The Beatles"'), 'the marker');
+    const markers = engine.children('/sessions/abc/markers');
+    expect(markers.map((m) => engine.value(`/sessions/abc/markers/${m}`, 'name'))).toContain('Yesterday – The Beatles');
+    expect(markers.map((m) => engine.value(`/sessions/abc/markers/${m}`, 'comments'))).toContain('https://musicbrainz.org/recording/rec-1');
+    page.close();
+  });
+
+  it('inside LUNA lists the servers it asked for and does not search one the user has not allowed', async () => {
+    const engine = await asAddOn(['musicbrainz.org'], []);
+    const { urls, fetch } = fakeFetch();
+    try {
+      const page = await loadExamplePage('server.html', engine, { globals: { fetch } });
+      await page.waitFor(() => page.text('#servers').includes('musicbrainz.org'), 'the server list');
+      expect(page.text('#servers')).toContain('musicbrainz.org: not allowed');
+      await page.waitFor(() => page.text('#status').startsWith('Session'), 'the session');
+      (page.document.querySelector('#go') as HTMLButtonElement).click();
+      await page.waitFor(() => page.text('#found').includes('not allowed'), 'the refusal');
+      expect(urls).toHaveLength(0);
+      page.close();
+    } finally { window.history.replaceState(null, '', '/'); }
+  });
+
+  it('inside LUNA shows an allowed server as allowed', async () => {
+    const engine = await asAddOn(['musicbrainz.org'], ['musicbrainz.org']);
+    try {
+      const page = await loadExamplePage('server.html', engine, { globals: { fetch: fakeFetch().fetch } });
+      await page.waitFor(() => page.text('#servers').includes('musicbrainz.org: allowed'), 'the allowed server');
+      page.close();
+    } finally { window.history.replaceState(null, '', '/'); }
+  });
+
+  it('logs the securitypolicyviolation LUNA raises for a server the manifest does not list', async () => {
+    const fetch = async () => {
+      throw new TypeError('Load failed');
+    };
+    const page = await loadExamplePage('server.html', engineWithSession(), { globals: { fetch } });
+    await page.waitFor(() => page.text('#status').startsWith('Session'), 'the page to connect');
+    const violation = new page.window.Event('securitypolicyviolation') as Event & Record<string, unknown>;
+    Object.assign(violation, { blockedURI: 'https://example.com/', effectiveDirective: 'connect-src' });
+    (page.document.querySelector('#probe') as HTMLButtonElement).click();
+    page.document.dispatchEvent(violation);
+    await page.waitFor(() => logText(page).includes('example.com: TypeError'), 'the failed fetch');
+    expect(logText(page)).toContain('blocked by LUNA: https://example.com/ (connect-src)');
+    page.close();
+  });
+});
+
 describe('examples/arrangement.html', () => {
   async function overlapping(options: { compiledClipFades?: boolean } = {}) {
     const engine = new Luna.MockEngine(options);

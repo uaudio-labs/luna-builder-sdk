@@ -2131,7 +2131,114 @@ var MockEngine = class _MockEngine {
     }
     return Math.round(hi);
   }
+  /** @internal What the last timeline copy or cut put on the clipboard: its length and each track's clips, offset from the range start. */
+  timelineClipboard;
+  /**
+   * @internal The edit context's clip commands with focus `timeline` (fact 150), as LUNA does
+   * them: on the clips of the selected tracks' active playlists inside the selected range.
+   * `copy` puts them on the clipboard cut to the range; `clear` takes the range out of them
+   * (trimming or splitting a clip that crosses an edge) and collapses the selection to its
+   * start; `cut` is both; `paste` puts the clipboard at the selection start, the first copied
+   * track's clips on the first selected track and so on, and selects what it pasted;
+   * `duplicate` pastes the range right after itself and selects the copy. Nothing happens
+   * without a range, or with another focus.
+   */
+  timelineEdit(base, command) {
+    const ctx = `${base}/contexts/main`;
+    if (this.value(ctx, "focus") !== "timeline") return null;
+    const list = (v) => Array.isArray(v) ? v.map(String) : typeof v === "string" && v ? [v] : [];
+    const tracks = list(this.value(ctx, "selection_tracks")).filter((t) => this.has(`${base}/tracks/${t}`));
+    const playlists = tracks.map((t) => String(this.value(`${base}/tracks/${t}`, "playlist_uid")));
+    const start = this.value(ctx, "selection_start");
+    const stop = this.value(ctx, "selection_stop");
+    const s = typeof start === "number" ? start : void 0;
+    const e = typeof stop === "number" ? stop : void 0;
+    const ns = (a, b) => Math.round((this.secondsAt(base, b) - this.secondsAt(base, a)) * 1e9);
+    const clipsOf = (pl) => this.children(`${base}/playlists/${pl}/clips`).map((uid) => {
+      const path = `${base}/playlists/${pl}/clips/${uid}`;
+      return { uid, path, props: Object.fromEntries(this.nodes.get(path).properties) };
+    });
+    const num = (v) => Number(v ?? 0);
+    const copy = () => {
+      if (s === void 0 || e === void 0 || e <= s) return false;
+      this.timelineClipboard = {
+        length: e - s,
+        lanes: playlists.map(
+          (pl) => clipsOf(pl).filter((c) => num(c.props["start"]) < e && num(c.props["stop"]) > s).map((c) => {
+            const c0 = num(c.props["start"]);
+            const from = Math.max(c0, s);
+            const to = Math.min(num(c.props["stop"]), e);
+            const srcStart = num(c.props["source_start"]) + ns(c0, from);
+            return { ...c.props, start: from - s, stop: to - s, source_start: srcStart, source_stop: srcStart + ns(from, to) };
+          })
+        )
+      };
+      return true;
+    };
+    const clear = () => {
+      if (s === void 0 || e === void 0 || e <= s) return;
+      for (const pl of playlists) {
+        for (const c of clipsOf(pl)) {
+          const c0 = num(c.props["start"]);
+          const c1 = num(c.props["stop"]);
+          if (c1 <= s || c0 >= e) continue;
+          const src0 = num(c.props["source_start"]);
+          if (c0 >= s && c1 <= e) {
+            this.removeNode(c.path);
+            continue;
+          }
+          if (c0 < s && c1 > e) {
+            const tailSrc = src0 + ns(c0, e);
+            const id = this.nextClipId(base, pl);
+            this.addNode(`${base}/playlists/${pl}/clips/${id}`, { properties: { ...c.props, uid: id, start: e, source_start: tailSrc } });
+            this.setValue(c.path, "stop", s);
+            this.setValue(c.path, "source_stop", src0 + ns(c0, s));
+          } else if (c0 < s) {
+            this.setValue(c.path, "stop", s);
+            this.setValue(c.path, "source_stop", src0 + ns(c0, s));
+          } else {
+            this.setValue(c.path, "source_start", src0 + ns(c0, e));
+            this.setValue(c.path, "start", e);
+          }
+        }
+      }
+      this.setValue(ctx, "selection_stop", s);
+    };
+    const paste = (at) => {
+      const board = this.timelineClipboard;
+      if (!board) return;
+      board.lanes.forEach((clips, i) => {
+        const pl = playlists[i];
+        if (!pl) return;
+        for (const c of clips) {
+          const id = this.nextClipId(base, pl);
+          this.addNode(`${base}/playlists/${pl}/clips/${id}`, { properties: { ...c, uid: id, start: num(c["start"]) + at, stop: num(c["stop"]) + at } });
+        }
+      });
+      this.setValue(ctx, "selection_start", at);
+      this.setValue(ctx, "selection_stop", at + board.length);
+    };
+    switch (command) {
+      case "copy":
+        copy();
+        break;
+      case "clear":
+        clear();
+        break;
+      case "cut":
+        if (copy()) clear();
+        break;
+      case "paste":
+        if (s !== void 0) paste(s);
+        break;
+      case "duplicate":
+        if (copy() && e !== void 0) paste(e);
+        break;
+    }
+    return null;
+  }
   /** The playlists a context edit names: `playlist_uid`, else `track_uid` (active playlists), else the selection. */
+  /** @internal */
   editPlaylists(base, body, tracksOnly = false) {
     const list = (v) => v === void 0 || v === null ? void 0 : (Array.isArray(v) ? v : [v]).map(String);
     const tracks = list(body["track_uid"]);
@@ -2982,16 +3089,29 @@ var MockEngine = class _MockEngine {
           if (body.stop !== void 0) engine.setValue(path, "stop", body.stop);
           return null;
         },
-        select_all: () => null,
-        copy: () => null,
-        cut: () => null,
-        paste: () => null,
-        duplicate: () => null,
+        /** Widens the range to the clips on the selected playlists, keeping them (fact 150). */
+        select_all: (_d, engine) => {
+          const ctx = `${base}/contexts/main`;
+          const pls = engine.editPlaylists(base, {});
+          const clips = pls.flatMap((pl) => engine.children(`${base}/playlists/${pl}/clips`).map((c) => `${base}/playlists/${pl}/clips/${c}`));
+          if (!clips.length) return null;
+          engine.setValue(ctx, "selection_start", Math.min(...clips.map((c) => Number(engine.value(c, "start")))));
+          engine.setValue(ctx, "selection_stop", Math.max(...clips.map((c) => Number(engine.value(c, "stop")))));
+          return null;
+        },
+        // With focus `timeline`, these act on the clips in the selected range of the selected
+        // tracks (fact 150).
+        copy: (_d, engine) => engine.timelineEdit(base, "copy"),
+        cut: (_d, engine) => engine.timelineEdit(base, "cut"),
+        paste: (_d, engine) => engine.timelineEdit(base, "paste"),
+        duplicate: (_d, engine) => engine.timelineEdit(base, "duplicate"),
         /**
-         * Acts on `selection_notes`, not on a clip (fact 74): deletes the selected note-on
-         * rows and the note-offs that terminate them.
+         * With focus `notes`, acts on `selection_notes`, not on a clip (fact 74): deletes the
+         * selected note-on rows and the note-offs that terminate them. With focus `timeline`,
+         * clears the selected range of the selected tracks (fact 150).
          */
         clear: (_d, engine) => {
+          if (engine.value(`${base}/contexts/main`, "focus") === "timeline") return engine.timelineEdit(base, "clear");
           for (const [clip, rows] of engine.selectedRows(base)) engine.midiEdit(clip, "deleted", rows.map((r) => ({ rowid: r.rowid })));
           return null;
         },
@@ -3914,11 +4034,19 @@ var MockEngine = class _MockEngine {
     if (armed) {
       this.setValue(sessionPath, "playing", true);
       this.setValue(sessionPath, "punched_in", true);
-      this.recording.set(uid, this.children(`${sessionPath}/tracks`).filter((t) => this.value(`${sessionPath}/tracks/${t}`, "record_enabled") === true));
+      const armedTracks2 = this.children(`${sessionPath}/tracks`).filter((t) => this.value(`${sessionPath}/tracks/${t}`, "record_enabled") === true);
+      this.recording.set(uid, armedTracks2);
+      const punchAt2 = Number(this.value(sessionPath, "play_start") ?? 0);
+      for (const track of armedTracks2) this.startRecordTake(sessionPath, track, punchAt2);
       return;
     }
     const armedTracks = this.recording.get(uid) ?? [];
     this.recording.delete(uid);
+    for (const track of armedTracks) {
+      const sourceUid = this.value(`${sessionPath}/record/clips/${track}/rec_${track}`, "source_uid");
+      this.removeNode(`${sessionPath}/record/clips/${track}`);
+      if (typeof sourceUid === "string") this.removeNode(`${sessionPath}/record/audio/${sourceUid}`);
+    }
     const punchAt = Number(this.value(sessionPath, "play_start") ?? 0);
     const loopStart = Number(this.value(sessionPath, "loop_start") ?? 0);
     const loopStop = Number(this.value(sessionPath, "loop_stop") ?? 0);
@@ -3929,6 +4057,100 @@ var MockEngine = class _MockEngine {
   }
   /** @internal Tracks armed when each session's record pass began. */
   recording = /* @__PURE__ */ new Map();
+  /**
+   * Publish a take in progress the way LUNA does while punched in (fact 149):
+   * `record/clips/<track>/<take>` with a `stop` that grows, and on an audio track the file being
+   * written under `record/audio/<source>` with an overview that grows with it; a MIDI-capable
+   * track's take gets a `midi` folder instead.
+   */
+  startRecordTake(sessionPath, track, punchAt) {
+    const trackType = this.value(`${sessionPath}/tracks/${track}`, "track_type");
+    const midi = trackType === "instrument" || trackType === "midi_matrix";
+    const takePath = `${sessionPath}/record/clips/${track}/rec_${track}`;
+    const sourceUid = midi ? void 0 : `recsrc_${track}`;
+    this.addNode(takePath, {
+      properties: {
+        type: "track_record_clip",
+        track_uid: track,
+        session_uid: sessionPath.slice("/sessions/".length),
+        input_node_uid: String(this.value(`${sessionPath}/tracks/${track}`, "input_node_uid") ?? ""),
+        start: punchAt,
+        stop: punchAt,
+        length: 0,
+        ...sourceUid ? { source_uid: sourceUid, source_start: 0, source_stop: 0 } : {}
+      }
+    });
+    if (midi) {
+      this.addNode(`${takePath}/midi`);
+      return;
+    }
+    const filePath = `${sessionPath}/record/audio/${sourceUid}`;
+    const stereo = this.value(`${sessionPath}/tracks/${track}`, "stem_format") === "stereo";
+    this.addNode(filePath, { properties: { uid: sourceUid, stem_format: stereo ? "stereo" : "mono", sample_rate: 48e3, length: 0 } });
+    for (const kind of ["overview", "overview_coarse"]) {
+      this.addNode(`${filePath}/analysis/${kind}`, { properties: { count: 0, md5: null } });
+      this.addNode(`${filePath}/analysis/${kind}/file`, { properties: { data: { count: 0, channels: stereo ? 2 : 1 } } });
+    }
+  }
+  /**
+   * Move every take in progress in a session on to `stopTick`, as LUNA does while recording:
+   * `stop` and `length` grow, and an audio take's `source_stop`, file length and overview grow
+   * with them (fact 149). The mock runs at 120 BPM: a beat is 0.5 s.
+   *
+   * @example
+   * await session.transport.recordEnabled.set(true);
+   * engine.recordProgress('abc', Luna.WHOLE_NOTE);
+   */
+  recordProgress(sessionUid, stopTick) {
+    const sessionPath = `/sessions/${sessionUid}`;
+    for (const track of this.recording.get(sessionUid) ?? []) {
+      const takePath = `${sessionPath}/record/clips/${track}/rec_${track}`;
+      if (!this.nodes.has(takePath)) continue;
+      const start = Number(this.value(takePath, "start") ?? 0);
+      const ns = Math.max(0, (stopTick - start) / 96e9 * 5e8);
+      this.setValue(takePath, "stop", stopTick);
+      this.setValue(takePath, "length", ns);
+      const sourceUid = this.value(takePath, "source_uid");
+      if (typeof sourceUid !== "string") continue;
+      this.setValue(takePath, "source_stop", ns);
+      const filePath = `${sessionPath}/record/audio/${sourceUid}`;
+      this.setValue(filePath, "length", ns);
+      for (const [kind, pairNs] of [
+        ["overview", 125e9 / 48e3],
+        ["overview_coarse", 125e9 / 48e3 * 12]
+      ]) {
+        const count = Math.floor(ns / pairNs);
+        const file = `${filePath}/analysis/${kind}/file`;
+        const data = this.value(file, "data");
+        this.setValue(file, "data", { count, channels: data?.channels ?? 1 });
+        this.setValue(`${filePath}/analysis/${kind}`, "count", count);
+      }
+    }
+  }
+  /**
+   * Record MIDI messages into the take in progress on a track, as LUNA publishes them while
+   * recording: one `midi/<rowid>` node each, its `tick` a session tick (fact 149). Returns the
+   * row ids.
+   *
+   * @example
+   * engine.recordMidi('abc', 'keys', [
+   *   { tick: 0, status: 0x90, data1: 60, data2: 100 },
+   *   { tick: Luna.QUARTER_NOTE, status: 0x80, data1: 60, data2: 0 },
+   * ]);
+   */
+  recordMidi(sessionUid, trackUid, events) {
+    const folder = `/sessions/${sessionUid}/record/clips/${trackUid}/rec_${trackUid}/midi`;
+    if (!this.nodes.has(folder)) throw new Error(`MockEngine: no MIDI take recording on ${trackUid}`);
+    const ids = [];
+    for (const e of events) {
+      const rowid = ++this.recordRowId;
+      const packed = (e.status & 255) << 16 | (e.data1 & 127) << 8 | (e.data2 ?? 0) & 127;
+      this.addNode(`${folder}/${rowid}`, { properties: { tick: e.tick, midi_data: packed, rowid } });
+      ids.push(rowid);
+    }
+    return ids;
+  }
+  recordRowId = 0;
   post(path, data) {
     const { node: nodePath, name } = splitPath(path);
     const node = this.nodes.get(nodePath);

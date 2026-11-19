@@ -2,6 +2,39 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## 3.1.2 Beta 2
+
+Changed
+- The SDK now comes with the Supplemental Terms for LUNA Builder SDK
+  (`SUPPLEMENTAL-TERMS.md`, in the package and the README) alongside the Apache License 2.0.
+  Using or downloading the SDK means agreeing to both.
+
+Added
+- `session.selectTimeline({ tracks, startTick?, stopTick? })` points LUNA's edit selection at
+  tracks on the timeline: the tracks, their active playlists and focus `timeline`, so
+  `context.selectAll()` widens the range to their clips and `context.cut()`, `copy()`,
+  `paste()`, `clear()` and `duplicate()` act on that range of those tracks and paste lands at
+  the range start (fact 150).
+- `Luna.Shortcuts` runs LUNA's edit commands too: `selectAll`, `cut`, `copy`, `paste`, `clear`
+  and `duplicate`. They are off by default; pass `bindings: Luna.EDIT_SHORTCUTS` (Cmd+A,
+  Cmd+X/C/V, Backspace or Delete, Cmd+D, as LUNA) to turn them on, and `prepare(command, session)` to
+  point the selection at what the page shows before each one. Inside LUNA a page in front of
+  another page needs them: LUNA's own edit keys act only while its timeline is showing.
+- `Luna.MockEngine` models timeline select all, cut, copy, paste, clear and duplicate on the
+  selection.
+- `session.recordTakes`, the takes LUNA is recording right now, before they become clips
+  (fact 149). Each `Luna.RecordTake` has its track (`trackUid`), `start` and a `stop` that grows
+  as it records, and `forTrack(track)` finds a track's. An audio take's `audio` is the file
+  being written, for `Luna.Waveforms` and `Luna.audioNsAtTick` like a clip's, and its waveform
+  fills in as LUNA records; a MIDI take (`isMidi`) has `events` and `notes` as they are played,
+  ticks from the take's start, a held note with no `stopTick` yet. A take is disposed when
+  recording stops and the finished clip appears. `Luna.MockEngine` publishes takes while it
+  records, and `engine.recordProgress()` and `engine.recordMidi()` move them on.
+- `examples/server.html`, an Add On that calls a web server: its manifest entry lists
+  `musicbrainz.org` in `network`, the page shows `addOn.network` and `addOn.networkAllowed`,
+  searches MusicBrainz for a song, adds a marker named after a result, and logs the
+  `securitypolicyviolation` LUNA raises for a server the manifest does not list.
+
 ## 3.1.2 Beta 1
 
 Changed (breaking)

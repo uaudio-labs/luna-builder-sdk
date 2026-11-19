@@ -25,6 +25,7 @@
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="playlists"></a> `playlists` | `readonly` | [`Collection`](Collection.md)\<[`Playlist`](Playlist.md)\> | All playlists (take lanes) in the session; each names its track. | - |
 | <a id="readonly"></a> `readOnly` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
+| <a id="recordtakes"></a> `recordTakes` | `readonly` | [`RecordTakes`](RecordTakes.md) | Takes being recorded right now, on every armed track, before they become clips: each with its growing `stop`, its audio file's waveform, or its MIDI so far (fact 149). | - |
 | <a id="sessionpackagepath"></a> `sessionPackagePath` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="sessionpackageuid"></a> `sessionPackageUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="solomode"></a> `soloMode` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
@@ -1072,6 +1073,43 @@ Save (commit) the session.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### selectTimeline()
+
+```ts
+selectTimeline(options): Promise<void>;
+```
+
+Point LUNA's edit selection at tracks on the timeline, as clicking in LUNA's timeline does:
+the tracks, their active playlists and focus `timeline`, and the range when given (the
+current one is kept otherwise). Then `context.cut()`, `copy()`, `paste()`, `clear()` and
+`duplicate()` act on that range of those tracks, and paste lands at the range start
+(fact 150). No undo entry. Use it before an edit command when the user has not just
+selected in LUNA's own timeline: LUNA's selection may name other tracks, or the mixer.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `startTick?`: `number`; `stopTick?`: `number`; `tracks`: readonly (`string` \| [`Track`](Track.md))[]; \} |
+| `options.startTick?` | `number` |
+| `options.stopTick?` | `number` |
+| `options.tracks` | readonly (`string` \| [`Track`](Track.md))[] |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.selectTimeline({ tracks: [track], startTick: bar(5), stopTick: bar(9) });
+await session.context.copy();
+await session.selectTimeline({ tracks: [other], startTick: bar(17) });
+await session.context.paste();
+```
 
 ***
 

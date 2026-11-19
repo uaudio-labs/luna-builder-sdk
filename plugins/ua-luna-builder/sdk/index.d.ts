@@ -595,8 +595,6 @@ declare class MockEngine {
     private putFade;
     /** The tick `seconds` after `tick` through the tempo map. */
     private tickAfter;
-    /** The playlists a context edit names: `playlist_uid`, else `track_uid` (active playlists), else the selection. */
-    private editPlaylists;
     /** Seconds at `tick`, integrating the session's tempo map (constant tempo between events). */
     private secondsAt;
     /**
@@ -818,6 +816,41 @@ declare class MockEngine {
      * the punch point lay inside the loop marks — outside them LUNA rolls and captures nothing.
      */
     private runRecord;
+    /**
+     * Publish a take in progress the way LUNA does while punched in (fact 149):
+     * `record/clips/<track>/<take>` with a `stop` that grows, and on an audio track the file being
+     * written under `record/audio/<source>` with an overview that grows with it; a MIDI-capable
+     * track's take gets a `midi` folder instead.
+     */
+    private startRecordTake;
+    /**
+     * Move every take in progress in a session on to `stopTick`, as LUNA does while recording:
+     * `stop` and `length` grow, and an audio take's `source_stop`, file length and overview grow
+     * with them (fact 149). The mock runs at 120 BPM: a beat is 0.5 s.
+     *
+     * @example
+     * await session.transport.recordEnabled.set(true);
+     * engine.recordProgress('abc', Luna.WHOLE_NOTE);
+     */
+    recordProgress(sessionUid: string, stopTick: number): void;
+    /**
+     * Record MIDI messages into the take in progress on a track, as LUNA publishes them while
+     * recording: one `midi/<rowid>` node each, its `tick` a session tick (fact 149). Returns the
+     * row ids.
+     *
+     * @example
+     * engine.recordMidi('abc', 'keys', [
+     *   { tick: 0, status: 0x90, data1: 60, data2: 100 },
+     *   { tick: Luna.QUARTER_NOTE, status: 0x80, data1: 60, data2: 0 },
+     * ]);
+     */
+    recordMidi(sessionUid: string, trackUid: string, events: readonly {
+        tick: number;
+        status: number;
+        data1: number;
+        data2?: number;
+    }[]): number[];
+    private recordRowId;
     private post;
     private push;
 }
@@ -2288,268 +2321,663 @@ declare class Bus extends Channel {
     setFolderMode(mode: FolderMode): Promise<void>;
 }
 
-type ContextType = 'main' | 'editor' | `alt_${number}` | string;
-/** One playlist's selected notes as LUNA stores them: `[pitch, start, stop, rowid]` in absolute ticks. */
-interface SelectedNotes {
-    readonly playlist_uid: string;
-    readonly notes: ReadonlyArray<readonly [number, number, number, number]>;
+/**
+ * One row of a clip's MIDI table: a single MIDI message at a clip-relative tick.
+ *
+ * This is the shape read back from the engine. {@link MidiEvent} is the (smaller) shape
+ * accepted when writing.
+ */
+interface MidiRow {
+    /** The engine's row id: this row's identity, stable across moves and trims. */
+    readonly rowid: number;
+    /** Ticks from the clip's start (fact 41), `TICKS_PER_BEAT` per quarter note. */
+    readonly tick: number;
+    /** Status byte with the channel in it: `0x90`-`0x9f` note on, `0xb0`-`0xbf` CC, and so on. */
+    readonly status: number;
+    /** 0-based channel, `status & 0x0f`. */
+    readonly channel: number;
+    readonly data1: number;
+    readonly data2: number;
+    /** `false` is LUNA's per-note mute on a note-on row. */
+    readonly enabled: boolean;
+    /**
+     * A SysEx row's whole message, `0xf0` through `0xf7` (`status` is `0xf0`, `data1` and `data2`
+     * are 0); `undefined` on every other row, and on LUNA builds without SysEx (fact 139).
+     */
+    readonly sysex?: readonly number[];
 }
-/** The six selection properties as LUNA holds them, for {@link Context.restore}. */
-interface SelectionSnapshot {
-    readonly focus: unknown;
-    readonly selection_start: unknown;
-    readonly selection_stop: unknown;
-    readonly selection_notes: unknown;
-    readonly selection_playlists: unknown;
-    readonly selection_tracks: unknown;
+/**
+ * A note-on row paired with the note-off that ends it.
+ *
+ * `startTick` and `stopTick` are clip-relative: they count from the clip's start, not from
+ * the start of the session (fact 41). A note at the clip's downbeat has `startTick` 0
+ * wherever the clip sits, and moving the clip does not change it. For a position on the
+ * session timeline add the clip's start.
+ *
+ * @example
+ * const sessionTick = (clip.start.value ?? 0) + note.startTick;
+ */
+interface Note {
+    /** The note-on row id: the note's identity, and its `List.byId` key. */
+    readonly rowid: number;
+    /** The note-off row id, `undefined` for an unterminated note-on. */
+    readonly offRowid: number | undefined;
+    /** MIDI note number, 0-127. */
+    readonly pitch: number;
+    readonly channel: number;
+    /** Ticks from the clip's start, not the session's; add `clip.start.value` for a session tick. */
+    readonly startTick: number;
+    /** Ticks from the clip's start, like `startTick`; `undefined` when no note-off follows. */
+    readonly stopTick: number | undefined;
+    readonly velocity: number;
+    readonly offVelocity: number | undefined;
+    readonly muted: boolean;
 }
-/** Decode LUNA's `selection_notes` (an array, or `null`, or garbage) into frozen rows. */
-declare function selectedNotes(value: unknown): readonly SelectedNotes[];
-declare class Context extends Node {
+/** The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). */
+interface MidiRowData {
+    /** `update` is a whole table; `added`, `changed` and `deleted` are deltas. */
+    operation: 'update' | 'added' | 'changed' | 'deleted' | string;
+    row_ids: number[];
+    enabled?: boolean[];
+    midi_data?: number[];
+    tick?: number[];
+    /** A SysEx row's bytes, `null` on other rows; absent before LUNA stored SysEx (fact 139). */
+    sysex?: (number[] | null)[];
+}
+/** Unpack the three MIDI bytes the engine packs into one number (fact 39). */
+declare function decodeMidiData(packed: number): {
+    status: number;
+    data1: number;
+    data2: number;
+};
+/** Pack three MIDI bytes the way the engine's table stores them (fact 39). */
+declare function encodeMidiData(status: number, data1: number, data2?: number): number;
+/**
+ * Pair note-on rows with the next note-off of the same channel and pitch, in tick order.
+ * Pure, and exported because a page that draws its own lanes often wants it directly.
+ *
+ * @example
+ * const notes = Luna.pairNotes(midi.events.items);
+ */
+declare function pairNotes(rows: readonly MidiRow[]): Note[];
+/**
+ * What a MIDI edit needs to reach LUNA's edit context: the session it lives in, the playlist
+ * that holds the clip, and the clip's own start tick (the selection is in absolute ticks).
+ */
+interface MidiHost {
+    readonly sessionPath: string;
     readonly sessionUid: string;
-    readonly contextType: Prop<ContextType>;
-    /** Selection range in ticks; `null` when nothing is selected. */
-    readonly selectionStart: WritableProp<number | null>;
-    readonly selectionStop: WritableProp<number | null>;
-    readonly selectionTracks: WritableProp<string[] | null>;
-    readonly selectionPlaylists: WritableProp<string[] | null>;
+    readonly playlistUid: string;
+    readonly clipUid: string;
+    /** The clip's timeline start, ticks, or `undefined` before it loads. */
+    readonly startTick: () => number | undefined;
+    /** The kind of `session.transaction()` open, if any. */
+    readonly transactionMode?: (() => TransactionMode | undefined) | undefined;
+}
+/**
+ * The MIDI of one clip, reached as `clip.midi`. Both lists notify once per frame, like
+ * every other {@link List}. An audio clip's table is empty.
+ */
+declare class MidiClip extends Node {
+    private readonly origin;
+    /** Every row, in tick order. `byId` takes a row id. */
+    readonly events: List<MidiRow>;
+    /** Paired notes, in start order. `byId` takes a note-on row id. */
+    readonly notes: List<Note>;
+    private readonly rows;
+    private readonly eventsCell;
+    private readonly notesCell;
+    private readonly releases;
+    /** Deltas applied since the last whole table, stamped so a re-read can discard older ones. */
+    private deltas;
     /**
-     * Selected notes per playlist, in absolute ticks. The selection-based MIDI verbs
-     * (`mute_notes`, `clear`, `change_velocity`) act on this, not on a clip (fact 74).
+     * The last whole table and the version it arrived at. Kept here rather than read back
+     * from the cell, because the cell also receives the deltas (the store applies every push
+     * to it), so its value is not necessarily a whole table.
      */
-    readonly selectionNotes: WritableProp<SelectedNotes[] | null>;
-    /** The focused track, distinct from the selected set. */
-    readonly lastSelectedTrack: WritableProp<string | null>;
-    readonly collapsedFolders: WritableProp<string[] | null>;
-    readonly pinnedTracks: Prop<string[] | null>;
-    readonly hiddenTracks: Prop<string[] | null>;
-    /** Zoom. */
-    readonly pixelsPerTick: WritableProp<number>;
-    readonly gridEnable: WritableProp<boolean>;
-    /** Grid size such as `1_4`, `1_8`, `bar`. */
-    readonly grid: WritableProp<string>;
-    readonly linkEditAndPlay: WritableProp<boolean>;
-    readonly focus: Prop<string>;
-    /** The window's saved settings, a JSON string LUNA writes on a delayed save. */
-    readonly settings: Prop<string>;
+    private table;
+    private tableVersion;
+    private readyPromise;
+    /** The clip this table belongs to, and how to reach its session's edit context. */
+    private readonly host;
+    private contextView;
+    /** The table tick that sits at the clip's start (fact 41). */
+    private get shift();
     /**
-     * LUNA's waveform zoom for this window: the amplitude multiplier its timeline draws audio
-     * with, 1 by default, doubled or halved by Zoom In/Out Waveform and bounded 1/8..256. Pass
-     * it with the clip gain to {@link waveformColumns} to draw at LUNA's height. It is read from
-     * {@link settings}, which LUNA saves some time after a change rather than at once (fact 94).
+     * Read the table and start following edits. Idempotent, like `Node.load`.
      *
      * @example
-     * const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);
+     * await clip.midi.ready();
      */
-    readonly waveformZoom: Prop<number>;
+    ready(): Promise<void>;
+    private seed;
+    private onEvent;
+    private replace;
+    private apply;
+    private publish;
+    /** The session's `main` edit context, for the selection the note verbs act through. */
+    private get context();
     /**
-     * Set range, tracks, playlists and/or focus in one go; omitted parts are left alone. `focus`
-     * is what LUNA's selection commands act on: `timeline` for clips (fact 117).
+     * Set several notes' velocities in one post: one "Change Velocities" undo entry for the
+     * whole batch, where {@link setVelocity} in a loop would be one entry per note. `off`
+     * targets each note's note-off row instead of its note-on.
      *
      * @example
-     * await ctx.select({ startTick: 0, stopTick: Luna.WHOLE_NOTE, playlistUids: [lane.id], focus: 'timeline' });
+     * // Scale every velocity in the clip by a percentage, as one undo entry.
+     * await clip.midi.setVelocities(clip.midi.notes.items.map((n) => ({ note: n, velocity: Math.max(1, Math.min(127, Math.round(n.velocity * 1.25))) })));
      */
-    select(options: {
-        startTick?: number;
-        stopTick?: number;
-        trackUids?: string[];
-        playlistUids?: string[];
-        focus?: string;
+    setVelocities(changes: ReadonlyArray<{
+        note: Note | number;
+        velocity: number;
+    }>, options?: {
+        off?: boolean;
     }): Promise<void>;
-    /** The selected notes, decoded. Empty when nothing is selected. */
-    get notes(): readonly SelectedNotes[];
+    /** Set one note's velocity. `off` targets the note-off row. One "Change Velocities" undo entry. */
+    setVelocity(note: Note | number, velocity: number, options?: {
+        off?: boolean;
+    }): Promise<void>;
     /**
-     * The six selection properties as LUNA holds them now. A wrapper that has to move the
-     * user's selection to do its work takes one of these first and {@link restore}s it after,
-     * so the page never disturbs what the user had selected.
+     * Mute or unmute notes. LUNA's `mute_notes` is a toggle over the selection (fact 74), so
+     * this selects only the notes whose state must change, posts once, and restores the user's
+     * selection. Nothing is posted — and no undo entry made — when nothing needs changing.
+     * Which notes need changing is read from {@link notes}, which a batch transaction does not
+     * update until its commit: mute a note once per batch.
      *
      * @example
-     * const saved = ctx.snapshot();
-     * try { await ctx.selectNotes(playlistUid, rows); await ctx.run('mute_notes'); }
-     * finally { await ctx.restore(saved); }
+     * // Mute everything quieter than 40, as one undo entry.
+     * await clip.midi.setMuted(clip.midi.notes.items.filter((n) => n.velocity < 40), true);
      */
-    snapshot(): SelectionSnapshot;
-    /** Write a snapshot back. No undo entry; LUNA echoes each property. */
-    restore(snapshot: SelectionSnapshot): Promise<void>;
+    setMuted(notes: ReadonlyArray<Note | number>, muted: boolean): Promise<void>;
     /**
-     * Select exactly these notes on one playlist, with the range and focus to match. Ticks are
-     * absolute, as LUNA stores them: `[pitch, start, stop, rowid]`.
+     * Delete notes: `clear` over a selection of exactly these notes, one undo entry, with the
+     * user's selection restored afterwards. Inside a `session.transaction()` batch it joins the
+     * batch's undo step, so deleting notes and writing their replacements with
+     * {@link Clip.addNotes} undoes as one.
+     *
+     * @example
+     * await clip.midi.deleteNotes([clip.midi.notes.items[0]!]);
      */
-    selectNotes(playlistUid: string, notes: ReadonlyArray<readonly [number, number, number, number]>): Promise<void>;
-    /** Re-read the six selection properties (they also arrive as events). */
-    refreshSelection(): Promise<unknown>;
-    /** Run one of the context's edit commands (`copy`, `paste`, `duplicate`, `select_all`, ...). */
-    run(command: string, payload?: Record<string, unknown>): Promise<unknown>;
-    selectAll(): Promise<unknown>;
-    copy(): Promise<unknown>;
-    cut(): Promise<unknown>;
-    paste(): Promise<unknown>;
-    duplicate(): Promise<unknown>;
-    /** Delete the selected content. */
-    clear(): Promise<unknown>;
-    /** Move the selection by `ticks` (negative moves earlier). */
-    nudge(ticks: number): Promise<unknown>;
-    separateClips(): Promise<unknown>;
-    consolidate(): Promise<unknown>;
-    muteClips(): Promise<unknown>;
+    deleteNotes(notes: ReadonlyArray<Note | number>): Promise<void>;
+    /**
+     * Move MIDI rows other than notes — SysEx, CC, program change, pitch bend, aftertouch — by
+     * `byTicks`, in one post and one "Move MIDI Events" undo entry (fact 141). Each row keeps its
+     * id, bytes and `enabled`. This is how LUNA's own MIDI lane drags a SysEx.
+     *
+     * Refused before anything is sent: a note-on or note-off row (a note's two rows move
+     * together; one alone would break the note), a row not in this clip, a `byTicks` that is not
+     * an integer, or a move to before the clip's MIDI origin. A row moved past either end of the
+     * clip stays in the table but does not play there; keep `row.tick + byTicks` within the clip
+     * if it should. Nothing is posted for no rows or `byTicks` 0. LUNA builds without the command
+     * answer with an error.
+     *
+     * @example
+     * // Push every SysEx in the clip one beat later, as one undo entry.
+     * await clip.midi.moveEvents(clip.midi.events.items.filter((r) => r.sysex), Luna.TICKS_PER_BEAT);
+     */
+    moveEvents(rows: ReadonlyArray<MidiRow | number>, byTicks: number): Promise<void>;
+    private resolveOne;
+    private resolve;
+    /** Save the user's selection, select `targets` (absolute ticks), run `fn`, restore. */
+    private withSelection;
+    /**
+     * Wait for an edit to show in the lists. Inside a batch transaction LUNA holds the deltas,
+     * and answers reads of the table from before the batch, until the commit (fact 74): there
+     * is nothing to wait for yet.
+     */
+    private settleEdit;
+    private settleOptions;
+    /**
+     * Re-read the whole table. LUNA holds deltas back inside a batch transaction, so call
+     * this after one if the lists look behind; deltas that arrive later still apply.
+     */
+    refresh(): Promise<void>;
+    protected release(): void;
 }
 
-declare class Marker extends Node {
-    private readonly sessionUid;
-    readonly rowid: Prop<number>;
-    /** Position in ticks. */
-    readonly location: Prop<number>;
+/** LUNA's fade shapes. Another string is passed through as LUNA sent it. */
+type FadeShape = 'linear' | 'equal_power' | 'log';
+/** One fade of a compiled clip, as LUNA applies it (fact 116). Ticks are absolute. */
+interface CompiledFade {
+    /** The fade row, for editing it. */
+    readonly uid: string;
+    readonly start: number;
+    readonly stop: number;
+    readonly shape: FadeShape | string;
+    /** -1 to 1; 0 is the shape's own curve. */
+    readonly curvature: number;
+    /** True when this fade is one side of a crossfade with {@link contributorClipUid}. */
+    readonly crossfade: boolean;
+    /** The clip on the other side of a crossfade; `undefined` for a plain fade. */
+    readonly contributorClipUid: string | undefined;
+}
+/** A compiled clip's state at one moment, as plain data: what a view draws from. */
+interface CompiledClipSnapshot {
+    readonly id: string;
+    readonly clipUid: string | undefined;
+    readonly name: string | undefined;
+    readonly start: number | undefined;
+    readonly stop: number | undefined;
+    readonly sourceStart: number | undefined;
+    readonly sourceStop: number | undefined;
+    readonly fullStart: number | undefined;
+    readonly fullStop: number | undefined;
+    readonly fadeIn: CompiledFade | undefined;
+    readonly fadeOut: CompiledFade | undefined;
+    readonly reportsFades: boolean;
+    readonly renderSourceUid: string | null | undefined;
+    readonly renderSourceStart: number | undefined;
+    readonly renderSourceStop: number | undefined;
+    readonly needsRender: boolean | undefined;
+}
+declare class CompiledClip extends Node {
+    /** The clip this segment is cut from; look it up with `playlist.clips.byId`. */
+    readonly clipUid: Prop<string>;
     readonly name: Prop<string>;
-    readonly comments: Prop<string>;
-    /** ARGB packed integer. */
-    readonly color: Prop<number>;
+    /** Where this segment starts playing, ticks. */
+    readonly start: Prop<number>;
+    /** Where this segment stops playing, ticks. */
+    readonly stop: Prop<number>;
+    /** Source offset at `start`, nanoseconds. */
+    readonly sourceStart: Prop<number>;
+    /** Source offset at `stop`, nanoseconds. */
+    readonly sourceStop: Prop<number>;
     /**
-     * {@link location} as bar|beat, following the marker and the session's time signatures, so
-     * a marker list needs no listeners of its own. Format it with `Luna.formatBarBeat`.
-     * Assumes 4/4 until `session.musical` has loaded.
+     * `start` moved earlier by an incoming crossfade, where this segment's audio already sounds
+     * under the one before it. Equal to `start` without one, and on a LUNA that does not report
+     * fades.
+     */
+    readonly fullStart: Prop<number>;
+    /** `stop` moved later by an outgoing crossfade. Equal to `stop` without one. */
+    readonly fullStop: Prop<number>;
+    readonly fadeIn: Prop<CompiledFade | undefined>;
+    readonly fadeOut: Prop<CompiledFade | undefined>;
+    /**
+     * Whether this LUNA reports fades on compiled clips. When false, `fadeIn` and `fadeOut` are
+     * always `undefined` because LUNA does not say, not because there are none; draw no fades
+     * and offer no fade editing.
+     */
+    readonly reportsFades: Prop<boolean>;
+    /**
+     * The rendering this segment plays when its clip is time-stretched: LUNA renders each
+     * compiled piece of a clip on its own, so a clip split by one on top has a render per piece
+     * and its own `renderSourceUid` names only one of them (fact 116). `null` when this segment
+     * is not rendered; `undefined` on a LUNA that does not report it.
+     */
+    readonly renderSourceUid: Prop<string | null>;
+    /** This segment's range in {@link renderSourceUid}, nanoseconds; `null` without a render. */
+    readonly renderSourceStart: Prop<number | null>;
+    readonly renderSourceStop: Prop<number | null>;
+    /**
+     * Whether this segment plays a rendering: time-stretched, with clip effects, or at another
+     * sample rate than the engine's. While LUNA makes one, `renderSourceUid` is `null` and this
+     * stays true, so the original file is not what plays (fact 116). `undefined` on a LUNA that
+     * does not report it.
+     */
+    readonly needsRender: Prop<boolean>;
+    /**
+     * Every field at once, as a frozen plain object, so a view draws one consistent state
+     * rather than reading props across a push.
      *
      * @example
-     * marker.barBeat.onChange(() => cell.textContent = Luna.formatBarBeat(marker.barBeat.value));
+     * lane.compiledClips.onChange(() => draw(lane.compiledClips.inOrder().map((c) => c.snapshot())));
      */
-    readonly barBeat: Prop<BarBeat>;
+    snapshot(): CompiledClipSnapshot;
     /**
-     * {@link location} in seconds from the session start, following the marker and the tempo
-     * map. `undefined` until `session.musical` has loaded the tempo map; it never assumes a tempo.
+     * Move what shows of this clip so it starts at `toTick`, as dragging it in LUNA does: LUNA's
+     * `move_clips` over this segment's own range (fact 119). One undo step; resolves to the
+     * segment at its new place. Where the clip runs on under another clip:
+     *
+     * - if it shows again further along (or before), LUNA **splits** it at this segment's edge:
+     *   the segment moves as a new clip, and the rest stays where it was;
+     * - if the rest is hidden, LUNA **trims** it to this segment's edge and moves it.
+     *
+     * A clip lying wholly on top of this one is not moved, unlike {@link Clip.move}, which moves
+     * everything inside the clip's span. The user's selection is put back afterwards.
      *
      * @example
-     * marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));
+     * const moved = await seg.move(seg.start.value! + Luna.WHOLE_NOTE);
+     * const copy = await seg.move(seg.stop.value!, { copy: true });
      */
-    readonly seconds: Prop<number>;
-    private get row();
+    move(toTick: number, options?: {
+        copy?: boolean;
+    }): Promise<CompiledClip>;
     /**
-     * `set_marker` and `delete_marker` answer `null` whether or not the rowid matched
-     * (fact 71), so each edit resolves once this marker shows it.
-     */
-    private edit;
-    /** @example await marker.rename('Bridge'); */
-    rename(name: string): Promise<unknown>;
-    /** @example await marker.moveTo(Luna.WHOLE_NOTE * 16); */
-    moveTo(tick: number): Promise<unknown>;
-    /** @example await marker.setColor(0xffff0000); */
-    setColor(argb: number): Promise<unknown>;
-    /** @example await marker.setComments('double chorus'); */
-    setComments(comments: string): Promise<unknown>;
-    /**
-     * Delete this marker and resolve once it has left the list.
+     * Crossfade from this segment into `next`, the segment that starts where this one stops on
+     * the same playlist: butted clips, or overlapping ones where a clip on top begins or ends
+     * over another (fact 117). `align` puts the fade across the edit (`center`, the default),
+     * before it or after it; calling again changes the length. One undo step, or two when
+     * `shape` changes an existing crossfade's shape. Resolves once LUNA shows it. Each clip's
+     * source must reach past the edit by the part of the fade on the other side; LUNA does not
+     * check. Audio clips only.
      *
-     * @example await marker.delete();
+     * @example
+     * const [a, b] = lane.compiledClips.inOrder();
+     * await a.crossfade(b, Luna.EIGHTH_NOTE);
+     */
+    crossfade(next: CompiledClip, lengthTicks: number, options?: {
+        align?: 'center' | 'before' | 'after';
+        shape?: FadeShape;
+    }): Promise<void>;
+    /**
+     * Remove the crossfade between this segment and `next`, both halves. Resolves at once when
+     * there is none.
+     *
+     * @example
+     * await a.removeCrossfade(b);
+     */
+    removeCrossfade(next: CompiledClip): Promise<void>;
+    /** The edit between this segment and `next`, checked: adjoining, same lane, both audio. */
+    private edgeWith;
+    private settleOptions;
+    /** The seven flat `<prefix>_*` properties as one object, `undefined` when LUNA sends null. */
+    private fade;
+}
+/**
+ * A playlist's compiled clips. Loading or watching turns on `enable_compiled_clips` first,
+ * since LUNA publishes nothing until a client asks (fact 116). The SDK never turns it off: the
+ * switch is shared by every client of the session.
+ *
+ * Members come in the order LUNA made them, not timeline order; use {@link inOrder} to draw.
+ *
+ * @example
+ * await lane.compiledClips.load();
+ * lane.compiledClips.onChange(() => draw(lane.compiledClips.inOrder()));
+ */
+declare class CompiledClips extends Collection<CompiledClip> {
+    private enabling;
+    private readonly enable;
+    /** Turn on publishing (once), then fetch the members. */
+    load(): Promise<void>;
+    reload(): Promise<void>;
+    watch(options?: {
+        recursive?: boolean;
+    }): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
+    /**
+     * Segments by timeline position, earliest first.
+     *
+     * @example
+     * const first = lane.compiledClips.inOrder()[0];
+     */
+    inOrder(): CompiledClip[];
+    /**
+     * The segments cut from one clip, earliest first: none when it is fully covered, two or
+     * more when a clip on a higher layer splits it.
+     *
+     * @example
+     * const shown = lane.compiledClips.ofClip(clip.id).length > 0;
+     */
+    ofClip(clipUid: string): CompiledClip[];
+    private enabled;
+}
+
+type ClipType = 'audio' | 'video' | 'midi';
+/** The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. */
+declare function clipTypeFrom(raw: unknown): ClipType | undefined;
+/** One MIDI event to add to a clip. `tick` is relative to the clip start. */
+interface MidiEvent {
+    tick: number;
+    /** Status byte, e.g. 0x90 note on, 0x80 note off, 0xB0 control change. */
+    status: number;
+    data1: number;
+    data2?: number;
+}
+/** One note for {@link Clip.addNotes}. `tick` is relative to the clip start. */
+interface ClipNote {
+    pitch: number;
+    tick: number;
+    lengthTicks: number;
+    /** Note-on velocity, 1-127. Default 100. */
+    velocity?: number;
+    /** MIDI channel, 0-15. Default 0. */
+    channel?: number;
+}
+/** Where a crossfade sits on the edit between two clips, for {@link Clip.crossfade}. */
+type CrossfadeAlign = 'center' | 'before' | 'after';
+/** A clip's state at one moment, as plain data: what a view draws from. */
+interface ClipSnapshot {
+    readonly uid: string;
+    readonly name: string | undefined;
+    readonly clipType: ClipType | undefined;
+    readonly start: number | undefined;
+    readonly stop: number | undefined;
+    readonly sourceUid: string | undefined;
+    readonly sourceStart: number | undefined;
+    readonly sourceStop: number | undefined;
+    readonly layer: number | undefined;
+    readonly muted: boolean | undefined;
+    readonly gain: number | undefined;
+    readonly renderSourceUid: string | undefined;
+    readonly renderState: string | undefined;
+    readonly midiSourceStart: number | undefined;
+}
+declare class Clip extends Node {
+    private readonly sessionUid;
+    private midiClip;
+    private deleting;
+    private contextView;
+    readonly uid: Prop<string>;
+    readonly name: WritableProp<string>;
+    /** Timeline start, ticks. */
+    readonly start: Prop<number>;
+    /** Timeline end, ticks. */
+    readonly stop: Prop<number>;
+    /** Offset into the source file, nanoseconds. */
+    readonly sourceStart: Prop<number>;
+    /** End offset into the source file, nanoseconds. */
+    readonly sourceStop: Prop<number>;
+    /** Uid of the source audio file under the session's workspace `audio` folder. */
+    readonly sourceUid: Prop<string>;
+    /** Clip gain in dB. */
+    readonly gain: WritableProp<number>;
+    /** Stacking layer on its playlist; the higher layer plays where clips overlap. */
+    readonly layer: Prop<number>;
+    /** Whether the clip is muted (`mute`, reported as a boolean or 0/1). */
+    readonly muted: Prop<boolean>;
+    readonly clipType: Prop<ClipType | undefined>;
+    readonly bypass: Prop<boolean>;
+    /**
+     * The time-stretched source LUNA renders when the clip's tick span does not match its
+     * source span at the session tempo, and the state of that render (`current` when it is the
+     * audio actually played). {@link clipAudio} picks between this and `sourceUid` (fact 73).
+     */
+    readonly renderSourceUid: Prop<string | undefined>;
+    readonly renderState: Prop<string | undefined>;
+    /**
+     * For a MIDI clip: the MIDI table tick that sits at this clip's start (fact 41). 0 for
+     * rows created in place; the clip's start tick for an imported MIDI file.
+     */
+    readonly midiSourceStart: Prop<number>;
+    /**
+     * This clip's MIDI as live `events` and `notes` lists. Created on first use and shared;
+     * call `ready()` before reading. Empty for an audio clip.
+     *
+     * @example
+     * await clip.midi.ready();
+     * clip.midi.notes.onChange(() => draw(clip.midi.notes.items));
+     */
+    get midi(): MidiClip;
+    /**
+     * Every field at once, as a frozen plain object, so a view draws one consistent state
+     * rather than reading props across a push.
+     *
+     * @example
+     * playlist.clips.onChange(() => draw(playlist.clips.items.map((c) => c.snapshot())));
+     */
+    snapshot(): ClipSnapshot;
+    /** The playlist this clip sits on, taken from its path. */
+    get playlistUid(): string;
+    /** Length on the timeline, ticks. */
+    get length(): number | undefined;
+    private sessionPost;
+    /** The cell listing this clip's siblings, and a re-read of it for {@link settle}. */
+    private settleOptions;
+    /**
+     * Delete this clip and resolve once it has left its playlist. `delete_clip` answers the
+     * same whether or not anything was deleted (fact 71), so the model is the proof.
+     *
+     * @example
+     * await clip.delete();
      */
     delete(): Promise<unknown>;
-}
-declare class Markers extends Collection<Marker> {
-    /** Markers in timeline order. */
-    get sorted(): Marker[];
-    /** The last marker at or before `tick`. */
-    at(tick: number): Marker | undefined;
-}
-
-/** Options for an edit of session storage. */
-interface StorageEditOptions {
-    /** Record the edit in the session's undo history. Default `false`. */
-    undoable?: boolean;
-}
-/**
- * `/sessions/<uid>/storage/<context>`: one context's records. Get one with
- * `session.storage.context(name)`.
- *
- * @example
- * const store = session.storage.context('com.example.my-add-on');
- * await store.load();
- * store.records.value; // ['layout']
- */
-declare class StorageContext extends Node {
-    private readonly owner;
-    /** Names of this context's records. */
-    readonly records: Prop<string[]>;
-    /** The context's reverse-DNS name. */
-    get name(): string;
     /**
-     * Fetch this context's records and their values. Call once before reading
-     * {@link value}; pushes keep them current while the session is watched.
+     * Set new timeline bounds (ticks). With `split`, cut the clip instead of trimming it; with
+     * `stretch`, time-compress or expand the content to fit rather than revealing or hiding
+     * source audio.
      *
-     * @example await store.load();
-     */
-    load(): Promise<void>;
-    /**
-     * The value of one field as a live prop, `undefined` while it does not exist.
-     * `set` on it is a non-undoable write of an existing field.
+     * `trim_clip` is a command of the **edit context**, not of the session.
      *
      * @example
-     * const timeline = store.value<{ height: number }>('layout', 'timeline');
-     * timeline.onChange(() => console.log(timeline.value?.height));
-     * await timeline.set({ height: 240 });
+     * await clip.trim(clip.start.value!, clip.stop.value! - Luna.QUARTER_NOTE);
      */
-    value<T = unknown>(record: string, field: string): WritableProp<T>;
+    trim(startTick: number, stopTick: number, options?: {
+        split?: boolean;
+        stretch?: boolean;
+    }): Promise<unknown>;
     /**
-     * Add a field with an initial value (default `null`) and resolve once it is visible.
-     * A field that already exists keeps its value.
-     *
-     * @example await store.add('layout', 'timeline', { height: 200 });
-     */
-    add(record: string, field: string, value?: unknown, options?: StorageEditOptions): Promise<void>;
-    /**
-     * Set an existing field and resolve once the new value is visible. Rejects with
-     * `uasrv.invalid_property` if the field was never added.
-     *
-     * @example await store.set('layout', 'timeline', { height: 320 }, { undoable: true });
-     */
-    set(record: string, field: string, value: unknown, options?: StorageEditOptions): Promise<void>;
-    /**
-     * Remove one field, or a whole record when `field` is left out.
+     * Move the clip so it starts at `toTick`, keeping its length, on its own playlist. One undo
+     * step. Resolves to this clip, or with `copy` to the new copy once it is listed. LUNA's
+     * `move_clips` moves a range (fact 117): this is the clip's whole span, so a clip lying
+     * wholly on top of this one moves with it. To move what shows of a clip that others overlap,
+     * the way dragging it in LUNA does, move its pieces from {@link Playlist.compiledClips} with
+     * {@link CompiledClip.move}. The user's selection is put back afterwards.
      *
      * @example
-     * await store.remove('layout', 'timeline');
-     * await store.remove('layout');
+     * await clip.move(clip.start.value! + Luna.WHOLE_NOTE);
+     * const copy = await clip.move(clip.stop.value!, { copy: true });
      */
-    remove(record: string, field?: string, options?: StorageEditOptions): Promise<void>;
+    move(toTick: number, options?: {
+        copy?: boolean;
+    }): Promise<Clip>;
     /**
-     * Remove every record in this context.
-     *
-     * @example await store.clear();
-     */
-    clear(options?: StorageEditOptions): Promise<void>;
-}
-/**
- * `/sessions/<uid>/storage`: every Add On's session storage, by context.
- *
- * @example
- * await session.storage.load();
- * session.storage.contexts.value; // ['com.example.my-add-on']
- * const store = session.storage.context('com.example.my-add-on');
- */
-declare class SessionStorage extends Node {
-    /** Names of the contexts that hold at least one field. */
-    readonly contexts: Prop<string[]>;
-    private readonly byName;
-    /**
-     * Fetch the context names.
-     *
-     * @example await session.storage.load();
-     */
-    load(): Promise<void>;
-    /**
-     * One context's records. It need not exist yet: the first {@link StorageContext.add}
-     * creates it.
-     *
-     * `name` is any non-empty name without `/`, not only your Add On's id. Give each kind of data
-     * its own context, your id plus a suffix, then use a record per item and a field per part,
-     * rather than one record in one value: each `set` replaces a value whole, and only whole
-     * values can be undoable or not.
+     * Copy the clip to start where it ends. One undo step; resolves to the copy.
      *
      * @example
-     * const store = session.storage.context('com.example.my-add-on');
-     * const tracks = session.storage.context('com.example.my-add-on.tracks');
-     * await tracks.add(track.id, 'channel', 0);
+     * const again = await clip.duplicate();
      */
-    context(name: string): StorageContext;
-    private body;
-    /** Wait for the edit to show, re-reading the context while it has not. */
-    private settleOn;
+    duplicate(): Promise<Clip>;
+    /**
+     * Cut the clip at one or more ticks inside it (LUNA's `separate_clips`). One undo step.
+     * Resolves to the pieces in time order; this clip keeps the first. A fade-out moves to the
+     * last piece, and a crossfade at a cut is not kept (fact 117).
+     *
+     * @example
+     * const [left, right] = await clip.split(clip.start.value! + Luna.WHOLE_NOTE);
+     */
+    split(at: number | readonly number[]): Promise<Clip[]>;
+    /**
+     * Mute or unmute the clip. One undo step. (LUNA's `mute_clips` toggles a range instead.)
+     *
+     * @example
+     * await clip.setMuted(true);
+     */
+    setMuted(muted: boolean): Promise<void>;
+    /**
+     * Slide the audio inside the clip without moving the clip: positive `byNs` moves the audio
+     * later, so an earlier part of the source plays at the clip start. LUNA's own content nudge,
+     * so warps move with it; one undo step. The step is one sample at the engine rate. Only a
+     * clip on its track's active playlist can be slipped. A slip that would run past either end
+     * of the source does nothing in LUNA (fact 117); one past the start is refused here with
+     * `out_of_range`, one past the end rejects with `no_effect`.
+     *
+     * @example
+     * await clip.slip(-10_000_000);   // 10 ms earlier
+     */
+    slip(byNs: number): Promise<void>;
+    /**
+     * Fade the clip in over its first `lengthTicks`, or change the length of its fade-in. One
+     * undo step, or two when `shape` changes an existing fade's shape. Without `shape` a new
+     * fade is `log`, LUNA's default. Audio clips only: a MIDI or video clip rejects with
+     * `unavailable`.
+     *
+     * @example
+     * await clip.setFadeIn(Luna.QUARTER_NOTE, { shape: 'equal_power' });
+     */
+    setFadeIn(lengthTicks: number, options?: {
+        shape?: FadeShape;
+    }): Promise<void>;
+    /**
+     * Fade the clip out over its last `lengthTicks`, or change the length of its fade-out.
+     *
+     * @example
+     * await clip.setFadeOut(Luna.HALF_NOTE);
+     */
+    setFadeOut(lengthTicks: number, options?: {
+        shape?: FadeShape;
+    }): Promise<void>;
+    /**
+     * Crossfade from this clip into `next`, which must start where this one stops on the same
+     * playlist. For clips that overlap, such as one on top over the middle of another, crossfade
+     * the segments either side of the edit with {@link CompiledClip.crossfade}. `align` puts the fade across the edit (`center`, the default), before it or
+     * after it. Calling again changes the length. Each clip's source must reach past the edit by
+     * the part of the fade on the other side; LUNA does not check (fact 117).
+     *
+     * @example
+     * await left.crossfade(right, Luna.EIGHTH_NOTE);
+     */
+    crossfade(next: Clip, lengthTicks: number, options?: {
+        align?: CrossfadeAlign;
+        shape?: FadeShape;
+    }): Promise<void>;
+    /**
+     * Remove the clip's plain fade-in. Resolves at once when there is none.
+     *
+     * @example
+     * await clip.removeFadeIn();
+     */
+    removeFadeIn(): Promise<void>;
+    /**
+     * Remove the clip's plain fade-out. Resolves at once when there is none.
+     *
+     * @example
+     * await clip.removeFadeOut();
+     */
+    removeFadeOut(): Promise<void>;
+    /**
+     * Remove the crossfade from this clip into `next`, both halves. Resolves at once when there
+     * is none.
+     *
+     * @example
+     * await left.removeCrossfade(right);
+     */
+    removeCrossfade(next: Clip): Promise<void>;
+    /** Add raw MIDI events to this (MIDI) clip in one undo step. */
+    addMidi(events: MidiEvent[]): Promise<unknown>;
+    /** Add a note: note-on at `tick`, note-off at `tick + lengthTicks`. */
+    addNote(note: number, tick: number, lengthTicks: number, velocity?: number, channel?: number): Promise<unknown>;
+    /**
+     * Add several notes to this (MIDI) clip in one `add_midi` post, so they land as one undo
+     * step. Each note is a note-on at `tick` and a note-off at `tick + lengthTicks`.
+     *
+     * @example
+     * // A C major triad on beat 1, then its arpeggio.
+     * await clip.addNotes([
+     *   ...[60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })),
+     *   ...[60, 64, 67].map((pitch, i) => ({ pitch, tick: (i + 1) * Luna.QUARTER_NOTE, lengthTicks: Luna.QUARTER_NOTE, velocity: 80 })),
+     * ]);
+     */
+    addNotes(notes: readonly ClipNote[]): Promise<unknown>;
+    bringToFront(): Promise<unknown>;
+    sendToBack(): Promise<unknown>;
+    private get playlistPath();
+    private get context();
+    private contextPost;
+    /** Commands that select what they act on move the user's selection; put it back after. */
+    private keepingSelection;
+    private bounds;
+    private siblingList;
+    /** Settle options that re-read this clip itself, for edits that change only its properties. */
+    private refreshingOptions;
+    private fadeLength;
+    /**
+     * One `set_fade` (fact 117). LUNA applies `fade_shape` only to a fade it creates, so a shape
+     * asked of a fade that already existed goes through `change_fade_curvature` as well.
+     */
+    private setFade;
+    /** `delete_fades` takes every fade lying wholly inside a range; aim it at one fade's range. */
+    private deleteFadeRange;
     protected release(): void;
 }
 
@@ -2856,663 +3284,627 @@ declare class Musical {
     clearChords(): Promise<void>;
 }
 
-/** LUNA's fade shapes. Another string is passed through as LUNA sent it. */
-type FadeShape = 'linear' | 'equal_power' | 'log';
-/** One fade of a compiled clip, as LUNA applies it (fact 116). Ticks are absolute. */
-interface CompiledFade {
-    /** The fade row, for editing it. */
-    readonly uid: string;
-    readonly start: number;
-    readonly stop: number;
-    readonly shape: FadeShape | string;
-    /** -1 to 1; 0 is the shape's own curve. */
-    readonly curvature: number;
-    /** True when this fade is one side of a crossfade with {@link contributorClipUid}. */
-    readonly crossfade: boolean;
-    /** The clip on the other side of a crossfade; `undefined` for a plain fade. */
-    readonly contributorClipUid: string | undefined;
+/** Pairs per cached page; four pages cover a minute of fine pairs. */
+declare const WAVEFORM_PAGE = 1024;
+/**
+ * The analysis to draw at a zoom level: `coarse` once a pixel spans at least one coarse pair
+ * (31.25 ms), `fine` when zoomed closer. Below one fine pair per pixel the same pair repeats;
+ * neither analysis is PCM.
+ */
+declare function kindForScale(nsPerPixel: number): OverviewKind;
+interface PairRange {
+    /** First pair whose span touches `startNs`. */
+    readonly index: number;
+    /** Pairs up to the one containing `stopNs`; 0 when the range is empty. */
+    readonly count: number;
 }
-/** A compiled clip's state at one moment, as plain data: what a view draws from. */
-interface CompiledClipSnapshot {
-    readonly id: string;
-    readonly clipUid: string | undefined;
-    readonly name: string | undefined;
-    readonly start: number | undefined;
-    readonly stop: number | undefined;
-    readonly sourceStart: number | undefined;
-    readonly sourceStop: number | undefined;
-    readonly fullStart: number | undefined;
-    readonly fullStop: number | undefined;
-    readonly fadeIn: CompiledFade | undefined;
-    readonly fadeOut: CompiledFade | undefined;
-    readonly reportsFades: boolean;
-    readonly renderSourceUid: string | null | undefined;
-    readonly renderSourceStart: number | undefined;
-    readonly renderSourceStop: number | undefined;
-    readonly needsRender: boolean | undefined;
+/** The overview pairs covering `[startNs, stopNs)` of a source. Both are file offsets, never timeline ticks. */
+declare function pairRange(startNs: number, stopNs: number, kind?: OverviewKind): PairRange;
+/** The clip fields placement needs. A {@link Clip} satisfies it, as does a plain snapshot. */
+interface ClipLike {
+    readonly sourceUid: string | undefined;
+    readonly sourceStartNs: number | undefined;
+    readonly sourceStopNs: number | undefined;
+    readonly renderSourceUid?: string | undefined;
+    readonly renderState?: string | undefined;
 }
-declare class CompiledClip extends Node {
-    /** The clip this segment is cut from; look it up with `playlist.clips.byId`. */
-    readonly clipUid: Prop<string>;
-    readonly name: Prop<string>;
-    /** Where this segment starts playing, ticks. */
-    readonly start: Prop<number>;
-    /** Where this segment stops playing, ticks. */
-    readonly stop: Prop<number>;
-    /** Source offset at `start`, nanoseconds. */
-    readonly sourceStart: Prop<number>;
-    /** Source offset at `stop`, nanoseconds. */
-    readonly sourceStop: Prop<number>;
-    /**
-     * `start` moved earlier by an incoming crossfade, where this segment's audio already sounds
-     * under the one before it. Equal to `start` without one, and on a LUNA that does not report
-     * fades.
-     */
-    readonly fullStart: Prop<number>;
-    /** `stop` moved later by an outgoing crossfade. Equal to `stop` without one. */
-    readonly fullStop: Prop<number>;
-    readonly fadeIn: Prop<CompiledFade | undefined>;
-    readonly fadeOut: Prop<CompiledFade | undefined>;
-    /**
-     * Whether this LUNA reports fades on compiled clips. When false, `fadeIn` and `fadeOut` are
-     * always `undefined` because LUNA does not say, not because there are none; draw no fades
-     * and offer no fade editing.
-     */
-    readonly reportsFades: Prop<boolean>;
-    /**
-     * The rendering this segment plays when its clip is time-stretched: LUNA renders each
-     * compiled piece of a clip on its own, so a clip split by one on top has a render per piece
-     * and its own `renderSourceUid` names only one of them (fact 116). `null` when this segment
-     * is not rendered; `undefined` on a LUNA that does not report it.
-     */
-    readonly renderSourceUid: Prop<string | null>;
-    /** This segment's range in {@link renderSourceUid}, nanoseconds; `null` without a render. */
-    readonly renderSourceStart: Prop<number | null>;
-    readonly renderSourceStop: Prop<number | null>;
-    /**
-     * Whether this segment plays a rendering: time-stretched, with clip effects, or at another
-     * sample rate than the engine's. While LUNA makes one, `renderSourceUid` is `null` and this
-     * stays true, so the original file is not what plays (fact 116). `undefined` on a LUNA that
-     * does not report it.
-     */
-    readonly needsRender: Prop<boolean>;
-    /**
-     * Every field at once, as a frozen plain object, so a view draws one consistent state
-     * rather than reading props across a push.
-     *
-     * @example
-     * lane.compiledClips.onChange(() => draw(lane.compiledClips.inOrder().map((c) => c.snapshot())));
-     */
-    snapshot(): CompiledClipSnapshot;
-    /**
-     * Move what shows of this clip so it starts at `toTick`, as dragging it in LUNA does: LUNA's
-     * `move_clips` over this segment's own range (fact 119). One undo step; resolves to the
-     * segment at its new place. Where the clip runs on under another clip:
-     *
-     * - if it shows again further along (or before), LUNA **splits** it at this segment's edge:
-     *   the segment moves as a new clip, and the rest stays where it was;
-     * - if the rest is hidden, LUNA **trims** it to this segment's edge and moves it.
-     *
-     * A clip lying wholly on top of this one is not moved, unlike {@link Clip.move}, which moves
-     * everything inside the clip's span. The user's selection is put back afterwards.
-     *
-     * @example
-     * const moved = await seg.move(seg.start.value! + Luna.WHOLE_NOTE);
-     * const copy = await seg.move(seg.stop.value!, { copy: true });
-     */
-    move(toTick: number, options?: {
-        copy?: boolean;
-    }): Promise<CompiledClip>;
-    /**
-     * Crossfade from this segment into `next`, the segment that starts where this one stops on
-     * the same playlist: butted clips, or overlapping ones where a clip on top begins or ends
-     * over another (fact 117). `align` puts the fade across the edit (`center`, the default),
-     * before it or after it; calling again changes the length. One undo step, or two when
-     * `shape` changes an existing crossfade's shape. Resolves once LUNA shows it. Each clip's
-     * source must reach past the edit by the part of the fade on the other side; LUNA does not
-     * check. Audio clips only.
-     *
-     * @example
-     * const [a, b] = lane.compiledClips.inOrder();
-     * await a.crossfade(b, Luna.EIGHTH_NOTE);
-     */
-    crossfade(next: CompiledClip, lengthTicks: number, options?: {
-        align?: 'center' | 'before' | 'after';
-        shape?: FadeShape;
-    }): Promise<void>;
-    /**
-     * Remove the crossfade between this segment and `next`, both halves. Resolves at once when
-     * there is none.
-     *
-     * @example
-     * await a.removeCrossfade(b);
-     */
-    removeCrossfade(next: CompiledClip): Promise<void>;
-    /** The edit between this segment and `next`, checked: adjoining, same lane, both audio. */
-    private edgeWith;
-    private settleOptions;
-    /** The seven flat `<prefix>_*` properties as one object, `undefined` when LUNA sends null. */
-    private fade;
+interface ClipAudio {
+    /** The source whose overview matches what the engine plays. */
+    readonly source: AudioSource;
+    /** File range in nanoseconds: the clip's source range, or the whole render. */
+    readonly startNs: number;
+    readonly stopNs: number;
+    /** True when `source` is LUNA's time-stretched render rather than the original file. */
+    readonly stretched: boolean;
+}
+/** Anything that can resolve a source uid: `session.sources`, or a plain array. */
+type SourceLookup = {
+    byId(uid: string): AudioSource | undefined;
+} | readonly AudioSource[];
+declare function clipAudio(clip: ClipLike | Clip, sources: SourceLookup): ClipAudio | undefined;
+interface CompiledClipLike {
+    readonly start: number | undefined | {
+        readonly value: number | undefined;
+    };
+    readonly stop: number | undefined | {
+        readonly value: number | undefined;
+    };
+    readonly sourceStart: number | undefined | {
+        readonly value: number | undefined;
+    };
+    readonly sourceStop: number | undefined | {
+        readonly value: number | undefined;
+    };
+    /** The segment's own rendering: a uid, `null` for none, `undefined` when LUNA does not say. */
+    readonly renderSourceUid?: string | null | undefined | {
+        readonly value: string | null | undefined;
+    };
+    readonly renderSourceStart?: number | null | undefined | {
+        readonly value: number | null | undefined;
+    };
+    readonly renderSourceStop?: number | null | undefined | {
+        readonly value: number | null | undefined;
+    };
+    /** True when the segment plays a rendering, made or still being made. */
+    readonly needsRender?: boolean | undefined | {
+        readonly value: boolean | undefined;
+    };
 }
 /**
- * A playlist's compiled clips. Loading or watching turns on `enable_compiled_clips` first,
- * since LUNA publishes nothing until a client asks (fact 116). The SDK never turns it off: the
- * switch is shared by every client of the session.
+ * Which audio one compiled segment plays, over the segment only, or `undefined` when there is
+ * nothing safe to draw (see {@link clipAudio}). `clip` is the raw clip the segment is cut from
+ * (`playlist.clips.byId(segment.clipUid.value)`): it names the source. Map ticks with
+ * {@link audioNsAtTick} anchored at the segment, which also reaches into a crossfade's
+ * `fullStart`..`fullStop`.
  *
- * Members come in the order LUNA made them, not timeline order; use {@link inOrder} to draw.
+ * A time-stretched clip plays LUNA's renders, one per compiled piece (fact 116), so a segment
+ * draws its own `renderSourceUid` over `renderSourceStart`..`renderSourceStop`. On a LUNA that
+ * does not report those, only the clip's first piece can be placed, by cutting the clip's own
+ * render by time; a later piece is `undefined`, an outline rather than the wrong audio. While
+ * LUNA makes a segment's rendering (after an edit that changes it, such as a crossfade) the
+ * answer is `undefined` too, not the original file at the wrong scale.
  *
  * @example
- * await lane.compiledClips.load();
- * lane.compiledClips.onChange(() => draw(lane.compiledClips.inOrder()));
+ * for (const seg of lane.compiledClips.inOrder()) {
+ *   const clip = lane.clips.byId(seg.clipUid.value);
+ *   const audio = clip && Luna.compiledClipAudio(timeline, seg, clip, session.sources);
+ *   if (!audio) continue;
+ *   const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
+ *   const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(timeline, seg, audio, tickAtPx(i)));
+ * }
  */
-declare class CompiledClips extends Collection<CompiledClip> {
-    private enabling;
-    private readonly enable;
-    /** Turn on publishing (once), then fetch the members. */
-    load(): Promise<void>;
-    reload(): Promise<void>;
-    watch(options?: {
-        recursive?: boolean;
-    }): {
-        ready: Promise<void>;
-        release: Unsubscribe;
+declare function compiledClipAudio(timeline: Timeline, segment: CompiledClipLike, clip: (ClipLike & {
+    readonly startTicks: number | undefined;
+}) | Clip, sources: SourceLookup): ClipAudio | undefined;
+/**
+ * The file offset (ns) that plays at a timeline tick inside a clip: the clip's audio start
+ * plus the tempo-map seconds between the clip start and the tick. Linear in seconds, not in
+ * ticks, so a tempo change inside the clip bends the mapping exactly as the engine does.
+ *
+ * The result can lie outside `[audio.startNs, audio.stopNs)` for ticks outside the clip;
+ * clamp before drawing there. Throws `unavailable` while the tempo map is not loaded.
+ *
+ * @example
+ * const ns = Luna.audioNsAtTick(session.musical.timeline, clip, audio, playheadTick);
+ */
+declare function audioNsAtTick(timeline: Timeline, clip: {
+    start: {
+        value: number | undefined;
     };
-    /**
-     * Segments by timeline position, earliest first.
-     *
-     * @example
-     * const first = lane.compiledClips.inOrder()[0];
-     */
-    inOrder(): CompiledClip[];
-    /**
-     * The segments cut from one clip, earliest first: none when it is fully covered, two or
-     * more when a clip on a higher layer splits it.
-     *
-     * @example
-     * const shown = lane.compiledClips.ofClip(clip.id).length > 0;
-     */
-    ofClip(clipUid: string): CompiledClip[];
-    private enabled;
+} | {
+    startTicks: number | undefined;
+}, audio: ClipAudio, tick: number): number;
+interface WaveformChannel {
+    readonly min: Float32Array;
+    readonly max: Float32Array;
 }
+interface WaveformRange {
+    readonly kind: OverviewKind;
+    readonly pairNs: number;
+    /** The first pair returned; `channels[c].min[i]` covers `[(index + i) * pairNs, (index + i + 1) * pairNs)`. */
+    readonly index: number;
+    /** Pairs actually returned per channel. */
+    readonly count: number;
+    readonly channels: readonly WaveformChannel[];
+    /** False when the analysis ended (or is still growing) before the requested range. */
+    readonly complete: boolean;
+}
+/**
+ * A bounded cache of overview pages, keyed by source, analysis and page index. A short page
+ * (the end of the analysis, or growth in progress) is never cached, so a recording still
+ * being written is re-read until it settles.
+ *
+ * The cache does not watch LUNA: call `invalidate(uid)` when a source is removed or its
+ * `overviewInfo().md5` changes.
+ *
+ * @example
+ * const cache = new Luna.Waveforms({ maxPages: 512 });
+ * const range = await cache.range(audio.source, audio.startNs, audio.stopNs, 'coarse');
+ */
+declare class Waveforms {
+    private readonly pages;
+    private readonly inFlight;
+    private readonly max;
+    constructor(options?: {
+        maxPages?: number;
+    });
+    /** Pages held right now. */
+    get size(): number;
+    /** Drop one source's pages, or everything. */
+    invalidate(uid?: string): void;
+    /** The pairs covering `[startNs, stopNs)` of `source`, assembled from cached and fresh pages. */
+    range(source: AudioSource, startNs: number, stopNs: number, kind?: OverviewKind): Promise<WaveformRange>;
+    private page;
+}
+/** Options for {@link waveformColumns}. */
+interface WaveformScale {
+    /**
+     * Linear multiplier on every value, clipped to -1..1; default 1. Must be finite and > 0.
+     * LUNA multiplies by its waveform zoom and the clip's gain:
+     * `session.context.waveformZoom.value * 10 ** (clip.gain.value / 20)`.
+     */
+    readonly gain?: number;
+}
+/**
+ * The loudest absolute value in a range, across every channel, in 0..1; 0 when the range is
+ * empty. To normalize a clip, pass `gain: 1 / peak` to {@link waveformColumns}, taking the
+ * peak from the clip's whole range, not the visible columns, so the scale holds while
+ * scrolling.
+ *
+ * @example
+ * const peak = Luna.waveformPeak(range);   // 0.25 for a clip peaking at -12 dBFS
+ */
+declare function waveformPeak(range: WaveformRange): number;
+interface WaveformColumns {
+    /** Columns returned; `channels[c].min[i]` is column `i`. */
+    readonly width: number;
+    /**
+     * One entry per source channel, in file order (left then right for stereo), never folded
+     * together. A column with no pair under it is `NaN` in both arrays: draw nothing there.
+     */
+    readonly channels: readonly WaveformChannel[];
+}
+/**
+ * Reduce a {@link WaveformRange} to one min/max per drawn column, per channel, the way LUNA's
+ * own timeline does:
+ *
+ * - a column holds the loudest of the pairs that end inside it, so peaks survive zooming out;
+ * - its minimum is never above zero and its maximum never below, so the shape always touches
+ *   the zero line;
+ * - zoomed in past one pair per column, the columns between two pairs are interpolated
+ *   linearly between them rather than repeating a pair as a step;
+ * - values are linear, times `gain` ({@link WaveformScale}), clipped to -1..1. LUNA draws no
+ *   decibel curve; its gain is the window's waveform zoom times the clip gain.
+ *
+ * `nsAt(i)` is the file offset (ns) at the left edge of column `i`, for `i` in `0..width`,
+ * and must not decrease; column `i` covers `[nsAt(i), nsAt(i + 1))`. For a timeline that is
+ * {@link audioNsAtTick} of the tick at that edge, so a tempo change bends the mapping as the
+ * engine does. Columns outside the range are `NaN`. For a sharp shape on a high-density
+ * display, use one column per device pixel.
+ *
+ * Draw each channel in its own lane ({@link waveformLanes}) with {@link traceWaveform};
+ * folding a stereo range into one shape makes it look mono.
+ *
+ * @example
+ * const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(timeline, clip, audio, tickAtPx(x0 + i)),
+ *   { gain: session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20) });
+ * const lanes = Luna.waveformLanes(cols.channels.length, top, height);
+ * ctx.beginPath();
+ * cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0));
+ * ctx.fill();
+ */
+declare function waveformColumns(range: WaveformRange, width: number, nsAt: (column: number) => number, options?: WaveformScale): WaveformColumns;
+interface WaveformLane {
+    /** The lane's zero line. */
+    readonly mid: number;
+    /** Pixels from `mid` to full scale; `mid - max * half` is where a pair's maximum lands. */
+    readonly half: number;
+}
+/**
+ * Split `height` pixels from `top` into one equal lane per channel, stacked in file order
+ * (left above right for stereo), each with a zero line and a full-scale half-height.
+ * `gap` pixels are kept clear at the top and bottom of every lane; LUNA keeps none.
+ *
+ * @example
+ * const [left, right] = Luna.waveformLanes(2, 20, 80, 0);   // left.mid 40, right.mid 80, half 20
+ */
+declare function waveformLanes(channels: number, top: number, height: number, gap?: number): readonly WaveformLane[];
+/** The part of a canvas 2D context {@link traceWaveform} draws with; `CanvasRenderingContext2D` and `Path2D` both fit. */
+interface WaveformPathTarget {
+    moveTo(x: number, y: number): void;
+    lineTo(x: number, y: number): void;
+    closePath(): void;
+}
+interface TraceWaveformOptions {
+    /** Width of one column in the target's units; default 1. Use `1 / devicePixelRatio` for device-pixel columns. */
+    readonly columnWidth?: number;
+    /**
+     * Distance each outline sits beyond the zero line, so silence draws a thin axis line rather
+     * than vanishing; default 0.5, as LUNA draws it.
+     */
+    readonly axis?: number;
+}
+/**
+ * Add one channel's waveform to a path as LUNA fills it: for every run of drawable columns,
+ * one closed shape through the column centres, the top outline (`mid - axis - max * half`)
+ * left to right and the bottom outline (`mid + axis - min * half`) back, squared off at the
+ * run's outer edges. `NaN` columns break the shape. It only adds subpaths; call
+ * `beginPath()` before and `fill()` after, so several channels or clips fill in one go.
+ *
+ * @example
+ * ctx.beginPath();
+ * cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0, { columnWidth: 1 / devicePixelRatio }));
+ * ctx.fillStyle = '#000000a0';
+ * ctx.fill();
+ */
+declare function traceWaveform(target: WaveformPathTarget, channel: WaveformChannel, lane: WaveformLane, x0: number, options?: TraceWaveformOptions): void;
 
 /**
- * One row of a clip's MIDI table: a single MIDI message at a clip-relative tick.
+ * A take being recorded on one track. Read it from {@link Session.recordTakes}; it is disposed
+ * when recording stops and LUNA turns it into a clip.
  *
- * This is the shape read back from the engine. {@link MidiEvent} is the (smaller) shape
- * accepted when writing.
- */
-interface MidiRow {
-    /** The engine's row id: this row's identity, stable across moves and trims. */
-    readonly rowid: number;
-    /** Ticks from the clip's start (fact 41), `TICKS_PER_BEAT` per quarter note. */
-    readonly tick: number;
-    /** Status byte with the channel in it: `0x90`-`0x9f` note on, `0xb0`-`0xbf` CC, and so on. */
-    readonly status: number;
-    /** 0-based channel, `status & 0x0f`. */
-    readonly channel: number;
-    readonly data1: number;
-    readonly data2: number;
-    /** `false` is LUNA's per-note mute on a note-on row. */
-    readonly enabled: boolean;
-    /**
-     * A SysEx row's whole message, `0xf0` through `0xf7` (`status` is `0xf0`, `data1` and `data2`
-     * are 0); `undefined` on every other row, and on LUNA builds without SysEx (fact 139).
-     */
-    readonly sysex?: readonly number[];
-}
-/**
- * A note-on row paired with the note-off that ends it.
- *
- * `startTick` and `stopTick` are clip-relative: they count from the clip's start, not from
- * the start of the session (fact 41). A note at the clip's downbeat has `startTick` 0
- * wherever the clip sits, and moving the clip does not change it. For a position on the
- * session timeline add the clip's start.
+ * Ticks are session ticks, like a clip's `start` and `stop`; `sourceStart` and `sourceStop` are
+ * nanoseconds into the file being written. {@link events} and {@link notes} use ticks from the
+ * take's start, as a clip's MIDI does, so a note at `startTick` sits at `take.start.value +
+ * startTick`. A note still held has no `stopTick`: draw it to `take.stop.value`.
  *
  * @example
- * const sessionTick = (clip.start.value ?? 0) + note.startTick;
+ * const take = session.recordTakes.forTrack(track)[0];
+ * if (take?.audio) {
+ *   const range = await waves.range(take.audio.source, take.audio.startNs, take.audio.stopNs, 'coarse');
+ * }
  */
-interface Note {
-    /** The note-on row id: the note's identity, and its `List.byId` key. */
-    readonly rowid: number;
-    /** The note-off row id, `undefined` for an unterminated note-on. */
-    readonly offRowid: number | undefined;
-    /** MIDI note number, 0-127. */
-    readonly pitch: number;
-    readonly channel: number;
-    /** Ticks from the clip's start, not the session's; add `clip.start.value` for a session tick. */
-    readonly startTick: number;
-    /** Ticks from the clip's start, like `startTick`; `undefined` when no note-off follows. */
-    readonly stopTick: number | undefined;
-    readonly velocity: number;
-    readonly offVelocity: number | undefined;
-    readonly muted: boolean;
-}
-/** The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). */
-interface MidiRowData {
-    /** `update` is a whole table; `added`, `changed` and `deleted` are deltas. */
-    operation: 'update' | 'added' | 'changed' | 'deleted' | string;
-    row_ids: number[];
-    enabled?: boolean[];
-    midi_data?: number[];
-    tick?: number[];
-    /** A SysEx row's bytes, `null` on other rows; absent before LUNA stored SysEx (fact 139). */
-    sysex?: (number[] | null)[];
-}
-/** Unpack the three MIDI bytes the engine packs into one number (fact 39). */
-declare function decodeMidiData(packed: number): {
-    status: number;
-    data1: number;
-    data2: number;
-};
-/** Pack three MIDI bytes the way the engine's table stores them (fact 39). */
-declare function encodeMidiData(status: number, data1: number, data2?: number): number;
-/**
- * Pair note-on rows with the next note-off of the same channel and pitch, in tick order.
- * Pure, and exported because a page that draws its own lanes often wants it directly.
- *
- * @example
- * const notes = Luna.pairNotes(midi.events.items);
- */
-declare function pairNotes(rows: readonly MidiRow[]): Note[];
-/**
- * What a MIDI edit needs to reach LUNA's edit context: the session it lives in, the playlist
- * that holds the clip, and the clip's own start tick (the selection is in absolute ticks).
- */
-interface MidiHost {
-    readonly sessionPath: string;
-    readonly sessionUid: string;
-    readonly playlistUid: string;
-    readonly clipUid: string;
-    /** The clip's timeline start, ticks, or `undefined` before it loads. */
-    readonly startTick: () => number | undefined;
-    /** The kind of `session.transaction()` open, if any. */
-    readonly transactionMode?: (() => TransactionMode | undefined) | undefined;
-}
-/**
- * The MIDI of one clip, reached as `clip.midi`. Both lists notify once per frame, like
- * every other {@link List}. An audio clip's table is empty.
- */
-declare class MidiClip extends Node {
-    private readonly origin;
-    /** Every row, in tick order. `byId` takes a row id. */
+declare class RecordTake extends Node {
+    private readonly sessionPath;
+    /** The track this take records onto. */
+    readonly trackUid: Prop<string>;
+    /** The input it records from. */
+    readonly inputNodeUid: Prop<string>;
+    /** Session tick where recording began. */
+    readonly start: Prop<number>;
+    /** Session tick reached so far; grows while recording. */
+    readonly stop: Prop<number>;
+    /** The audio file being written; `undefined` on a MIDI take. */
+    readonly sourceUid: Prop<string>;
+    /** Nanoseconds into the file where the take begins. */
+    readonly sourceStart: Prop<number>;
+    /** Nanoseconds into the file reached so far; grows while recording. */
+    readonly sourceStop: Prop<number>;
+    /** The messages recorded so far, in tick order, ticks from the take's start. */
     readonly events: List<MidiRow>;
-    /** Paired notes, in start order. `byId` takes a note-on row id. */
+    /** {@link events} paired into notes; a held note has no `stopTick` yet. */
     readonly notes: List<Note>;
     private readonly rows;
-    private readonly eventsCell;
-    private readonly notesCell;
-    private readonly releases;
-    /** Deltas applied since the last whole table, stamped so a re-read can discard older ones. */
-    private deltas;
+    private file;
     /**
-     * The last whole table and the version it arrived at. Kept here rather than read back
-     * from the cell, because the cell also receives the deltas (the store applies every push
-     * to it), so its value is not necessarily a whole table.
+     * True for a take on a MIDI-capable track (an instrument track): LUNA gives it a `midi`
+     * folder, which its messages arrive in. Known once the take has loaded.
      */
-    private table;
-    private tableVersion;
-    private readyPromise;
-    /** The clip this table belongs to, and how to reach its session's edit context. */
-    private readonly host;
-    private contextView;
-    /** The table tick that sits at the clip's start (fact 41). */
-    private get shift();
+    get isMidi(): boolean;
     /**
-     * Read the table and start following edits. Idempotent, like `Node.load`.
-     *
-     * @example
-     * await clip.midi.ready();
+     * The file being written and the part of it this take covers, for {@link Waveforms.range}
+     * and {@link audioNsAtTick}; `undefined` on a MIDI take or before LUNA names the file. Its
+     * overview grows as LUNA records: redraw when `stop` or `sourceStop` moves. The partial last
+     * page is read again each time, so the waveform fills in.
      */
-    ready(): Promise<void>;
-    private seed;
-    private onEvent;
-    private replace;
-    private apply;
-    private publish;
-    /** The session's `main` edit context, for the selection the note verbs act through. */
-    private get context();
-    /**
-     * Set several notes' velocities in one post: one "Change Velocities" undo entry for the
-     * whole batch, where {@link setVelocity} in a loop would be one entry per note. `off`
-     * targets each note's note-off row instead of its note-on.
-     *
-     * @example
-     * // Scale every velocity in the clip by a percentage, as one undo entry.
-     * await clip.midi.setVelocities(clip.midi.notes.items.map((n) => ({ note: n, velocity: Math.max(1, Math.min(127, Math.round(n.velocity * 1.25))) })));
-     */
-    setVelocities(changes: ReadonlyArray<{
-        note: Note | number;
-        velocity: number;
-    }>, options?: {
-        off?: boolean;
-    }): Promise<void>;
-    /** Set one note's velocity. `off` targets the note-off row. One "Change Velocities" undo entry. */
-    setVelocity(note: Note | number, velocity: number, options?: {
-        off?: boolean;
-    }): Promise<void>;
-    /**
-     * Mute or unmute notes. LUNA's `mute_notes` is a toggle over the selection (fact 74), so
-     * this selects only the notes whose state must change, posts once, and restores the user's
-     * selection. Nothing is posted — and no undo entry made — when nothing needs changing.
-     * Which notes need changing is read from {@link notes}, which a batch transaction does not
-     * update until its commit: mute a note once per batch.
-     *
-     * @example
-     * // Mute everything quieter than 40, as one undo entry.
-     * await clip.midi.setMuted(clip.midi.notes.items.filter((n) => n.velocity < 40), true);
-     */
-    setMuted(notes: ReadonlyArray<Note | number>, muted: boolean): Promise<void>;
-    /**
-     * Delete notes: `clear` over a selection of exactly these notes, one undo entry, with the
-     * user's selection restored afterwards. Inside a `session.transaction()` batch it joins the
-     * batch's undo step, so deleting notes and writing their replacements with
-     * {@link Clip.addNotes} undoes as one.
-     *
-     * @example
-     * await clip.midi.deleteNotes([clip.midi.notes.items[0]!]);
-     */
-    deleteNotes(notes: ReadonlyArray<Note | number>): Promise<void>;
-    /**
-     * Move MIDI rows other than notes — SysEx, CC, program change, pitch bend, aftertouch — by
-     * `byTicks`, in one post and one "Move MIDI Events" undo entry (fact 141). Each row keeps its
-     * id, bytes and `enabled`. This is how LUNA's own MIDI lane drags a SysEx.
-     *
-     * Refused before anything is sent: a note-on or note-off row (a note's two rows move
-     * together; one alone would break the note), a row not in this clip, a `byTicks` that is not
-     * an integer, or a move to before the clip's MIDI origin. A row moved past either end of the
-     * clip stays in the table but does not play there; keep `row.tick + byTicks` within the clip
-     * if it should. Nothing is posted for no rows or `byTicks` 0. LUNA builds without the command
-     * answer with an error.
-     *
-     * @example
-     * // Push every SysEx in the clip one beat later, as one undo entry.
-     * await clip.midi.moveEvents(clip.midi.events.items.filter((r) => r.sysex), Luna.TICKS_PER_BEAT);
-     */
-    moveEvents(rows: ReadonlyArray<MidiRow | number>, byTicks: number): Promise<void>;
-    private resolveOne;
-    private resolve;
-    /** Save the user's selection, select `targets` (absolute ticks), run `fn`, restore. */
-    private withSelection;
-    /**
-     * Wait for an edit to show in the lists. Inside a batch transaction LUNA holds the deltas,
-     * and answers reads of the table from before the batch, until the commit (fact 74): there
-     * is nothing to wait for yet.
-     */
-    private settleEdit;
-    private settleOptions;
-    /**
-     * Re-read the whole table. LUNA holds deltas back inside a batch transaction, so call
-     * this after one if the lists look behind; deltas that arrive later still apply.
-     */
-    refresh(): Promise<void>;
+    get audio(): ClipAudio | undefined;
     protected release(): void;
 }
+/**
+ * The takes being recorded in a session, across every track: {@link Session.recordTakes}.
+ * Empty while nothing records. `onChange` fires when a take starts or ends; follow a take's own
+ * props (`stop`, `notes`) for its progress.
+ *
+ * @example
+ * await session.ready();
+ * session.recordTakes.onChange(() => {
+ *   for (const take of session.recordTakes.items) console.log(take.trackUid.value, take.stop.value);
+ * });
+ */
+declare class RecordTakes implements List<RecordTake> {
+    private readonly tracks;
+    private readonly listeners;
+    private trackOffs;
+    private tracksOff;
+    private loaded;
+    /** Every take recording now, track by track. */
+    get items(): readonly RecordTake[];
+    get value(): readonly RecordTake[];
+    /** The take with this uid. */
+    byId(id: string): RecordTake | undefined;
+    /**
+     * The takes recording on one track (normally one), by the track or its uid.
+     *
+     * @example
+     * const [take] = session.recordTakes.forTrack(track);
+     */
+    forTrack(track: {
+        readonly id: string;
+    } | string): RecordTake[];
+    /** Called when a take starts or ends. */
+    onChange(listener: () => void): Unsubscribe;
+    /**
+     * Read the takes recording now. {@link Session.ready} does it; later takes follow pushes.
+     *
+     * @example
+     * await session.recordTakes.load();
+     */
+    load(): Promise<void>;
+    /** Follow the track folders and each folder's takes; load what is new. */
+    private wire;
+    private notify;
+}
 
-type ClipType = 'audio' | 'video' | 'midi';
-/** The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. */
-declare function clipTypeFrom(raw: unknown): ClipType | undefined;
-/** One MIDI event to add to a clip. `tick` is relative to the clip start. */
-interface MidiEvent {
-    tick: number;
-    /** Status byte, e.g. 0x90 note on, 0x80 note off, 0xB0 control change. */
-    status: number;
-    data1: number;
-    data2?: number;
+type ContextType = 'main' | 'editor' | `alt_${number}` | string;
+/** One playlist's selected notes as LUNA stores them: `[pitch, start, stop, rowid]` in absolute ticks. */
+interface SelectedNotes {
+    readonly playlist_uid: string;
+    readonly notes: ReadonlyArray<readonly [number, number, number, number]>;
 }
-/** One note for {@link Clip.addNotes}. `tick` is relative to the clip start. */
-interface ClipNote {
-    pitch: number;
-    tick: number;
-    lengthTicks: number;
-    /** Note-on velocity, 1-127. Default 100. */
-    velocity?: number;
-    /** MIDI channel, 0-15. Default 0. */
-    channel?: number;
+/** The six selection properties as LUNA holds them, for {@link Context.restore}. */
+interface SelectionSnapshot {
+    readonly focus: unknown;
+    readonly selection_start: unknown;
+    readonly selection_stop: unknown;
+    readonly selection_notes: unknown;
+    readonly selection_playlists: unknown;
+    readonly selection_tracks: unknown;
 }
-/** Where a crossfade sits on the edit between two clips, for {@link Clip.crossfade}. */
-type CrossfadeAlign = 'center' | 'before' | 'after';
-/** A clip's state at one moment, as plain data: what a view draws from. */
-interface ClipSnapshot {
-    readonly uid: string;
-    readonly name: string | undefined;
-    readonly clipType: ClipType | undefined;
-    readonly start: number | undefined;
-    readonly stop: number | undefined;
-    readonly sourceUid: string | undefined;
-    readonly sourceStart: number | undefined;
-    readonly sourceStop: number | undefined;
-    readonly layer: number | undefined;
-    readonly muted: boolean | undefined;
-    readonly gain: number | undefined;
-    readonly renderSourceUid: string | undefined;
-    readonly renderState: string | undefined;
-    readonly midiSourceStart: number | undefined;
+/** Decode LUNA's `selection_notes` (an array, or `null`, or garbage) into frozen rows. */
+declare function selectedNotes(value: unknown): readonly SelectedNotes[];
+declare class Context extends Node {
+    readonly sessionUid: string;
+    readonly contextType: Prop<ContextType>;
+    /** Selection range in ticks; `null` when nothing is selected. */
+    readonly selectionStart: WritableProp<number | null>;
+    readonly selectionStop: WritableProp<number | null>;
+    readonly selectionTracks: WritableProp<string[] | null>;
+    readonly selectionPlaylists: WritableProp<string[] | null>;
+    /**
+     * Selected notes per playlist, in absolute ticks. The selection-based MIDI verbs
+     * (`mute_notes`, `clear`, `change_velocity`) act on this, not on a clip (fact 74).
+     */
+    readonly selectionNotes: WritableProp<SelectedNotes[] | null>;
+    /** The focused track, distinct from the selected set. */
+    readonly lastSelectedTrack: WritableProp<string | null>;
+    readonly collapsedFolders: WritableProp<string[] | null>;
+    readonly pinnedTracks: Prop<string[] | null>;
+    readonly hiddenTracks: Prop<string[] | null>;
+    /** Zoom. */
+    readonly pixelsPerTick: WritableProp<number>;
+    readonly gridEnable: WritableProp<boolean>;
+    /** Grid size such as `1_4`, `1_8`, `bar`. */
+    readonly grid: WritableProp<string>;
+    readonly linkEditAndPlay: WritableProp<boolean>;
+    readonly focus: Prop<string>;
+    /** The window's saved settings, a JSON string LUNA writes on a delayed save. */
+    readonly settings: Prop<string>;
+    /**
+     * LUNA's waveform zoom for this window: the amplitude multiplier its timeline draws audio
+     * with, 1 by default, doubled or halved by Zoom In/Out Waveform and bounded 1/8..256. Pass
+     * it with the clip gain to {@link waveformColumns} to draw at LUNA's height. It is read from
+     * {@link settings}, which LUNA saves some time after a change rather than at once (fact 94).
+     *
+     * @example
+     * const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);
+     */
+    readonly waveformZoom: Prop<number>;
+    /**
+     * Set range, tracks, playlists and/or focus in one go; omitted parts are left alone. `focus`
+     * is what LUNA's selection commands act on: `timeline` for clips (fact 117).
+     *
+     * @example
+     * await ctx.select({ startTick: 0, stopTick: Luna.WHOLE_NOTE, playlistUids: [lane.id], focus: 'timeline' });
+     */
+    select(options: {
+        startTick?: number;
+        stopTick?: number;
+        trackUids?: string[];
+        playlistUids?: string[];
+        focus?: string;
+    }): Promise<void>;
+    /** The selected notes, decoded. Empty when nothing is selected. */
+    get notes(): readonly SelectedNotes[];
+    /**
+     * The six selection properties as LUNA holds them now. A wrapper that has to move the
+     * user's selection to do its work takes one of these first and {@link restore}s it after,
+     * so the page never disturbs what the user had selected.
+     *
+     * @example
+     * const saved = ctx.snapshot();
+     * try { await ctx.selectNotes(playlistUid, rows); await ctx.run('mute_notes'); }
+     * finally { await ctx.restore(saved); }
+     */
+    snapshot(): SelectionSnapshot;
+    /** Write a snapshot back. No undo entry; LUNA echoes each property. */
+    restore(snapshot: SelectionSnapshot): Promise<void>;
+    /**
+     * Select exactly these notes on one playlist, with the range and focus to match. Ticks are
+     * absolute, as LUNA stores them: `[pitch, start, stop, rowid]`.
+     */
+    selectNotes(playlistUid: string, notes: ReadonlyArray<readonly [number, number, number, number]>): Promise<void>;
+    /** Re-read the six selection properties (they also arrive as events). */
+    refreshSelection(): Promise<unknown>;
+    /** Run one of the context's edit commands (`copy`, `paste`, `duplicate`, `select_all`, ...). */
+    run(command: string, payload?: Record<string, unknown>): Promise<unknown>;
+    /**
+     * Widen the selected range to everything on the selected tracks' playlists (clips, notes,
+     * automation), keeping the tracks (fact 150). No undo entry.
+     *
+     * @example
+     * await session.selectTimeline({ tracks: [track] });
+     * await session.context.selectAll();
+     */
+    selectAll(): Promise<unknown>;
+    copy(): Promise<unknown>;
+    cut(): Promise<unknown>;
+    paste(): Promise<unknown>;
+    duplicate(): Promise<unknown>;
+    /** Delete the selected content. */
+    clear(): Promise<unknown>;
+    /** Move the selection by `ticks` (negative moves earlier). */
+    nudge(ticks: number): Promise<unknown>;
+    separateClips(): Promise<unknown>;
+    consolidate(): Promise<unknown>;
+    muteClips(): Promise<unknown>;
 }
-declare class Clip extends Node {
+
+declare class Marker extends Node {
     private readonly sessionUid;
-    private midiClip;
-    private deleting;
-    private contextView;
-    readonly uid: Prop<string>;
-    readonly name: WritableProp<string>;
-    /** Timeline start, ticks. */
-    readonly start: Prop<number>;
-    /** Timeline end, ticks. */
-    readonly stop: Prop<number>;
-    /** Offset into the source file, nanoseconds. */
-    readonly sourceStart: Prop<number>;
-    /** End offset into the source file, nanoseconds. */
-    readonly sourceStop: Prop<number>;
-    /** Uid of the source audio file under the session's workspace `audio` folder. */
-    readonly sourceUid: Prop<string>;
-    /** Clip gain in dB. */
-    readonly gain: WritableProp<number>;
-    /** Stacking layer on its playlist; the higher layer plays where clips overlap. */
-    readonly layer: Prop<number>;
-    /** Whether the clip is muted (`mute`, reported as a boolean or 0/1). */
-    readonly muted: Prop<boolean>;
-    readonly clipType: Prop<ClipType | undefined>;
-    readonly bypass: Prop<boolean>;
+    readonly rowid: Prop<number>;
+    /** Position in ticks. */
+    readonly location: Prop<number>;
+    readonly name: Prop<string>;
+    readonly comments: Prop<string>;
+    /** ARGB packed integer. */
+    readonly color: Prop<number>;
     /**
-     * The time-stretched source LUNA renders when the clip's tick span does not match its
-     * source span at the session tempo, and the state of that render (`current` when it is the
-     * audio actually played). {@link clipAudio} picks between this and `sourceUid` (fact 73).
-     */
-    readonly renderSourceUid: Prop<string | undefined>;
-    readonly renderState: Prop<string | undefined>;
-    /**
-     * For a MIDI clip: the MIDI table tick that sits at this clip's start (fact 41). 0 for
-     * rows created in place; the clip's start tick for an imported MIDI file.
-     */
-    readonly midiSourceStart: Prop<number>;
-    /**
-     * This clip's MIDI as live `events` and `notes` lists. Created on first use and shared;
-     * call `ready()` before reading. Empty for an audio clip.
+     * {@link location} as bar|beat, following the marker and the session's time signatures, so
+     * a marker list needs no listeners of its own. Format it with `Luna.formatBarBeat`.
+     * Assumes 4/4 until `session.musical` has loaded.
      *
      * @example
-     * await clip.midi.ready();
-     * clip.midi.notes.onChange(() => draw(clip.midi.notes.items));
+     * marker.barBeat.onChange(() => cell.textContent = Luna.formatBarBeat(marker.barBeat.value));
      */
-    get midi(): MidiClip;
+    readonly barBeat: Prop<BarBeat>;
     /**
-     * Every field at once, as a frozen plain object, so a view draws one consistent state
-     * rather than reading props across a push.
+     * {@link location} in seconds from the session start, following the marker and the tempo
+     * map. `undefined` until `session.musical` has loaded the tempo map; it never assumes a tempo.
      *
      * @example
-     * playlist.clips.onChange(() => draw(playlist.clips.items.map((c) => c.snapshot())));
+     * marker.seconds.onChange(() => cell.textContent = Luna.formatMinSec(marker.seconds.value));
      */
-    snapshot(): ClipSnapshot;
-    /** The playlist this clip sits on, taken from its path. */
-    get playlistUid(): string;
-    /** Length on the timeline, ticks. */
-    get length(): number | undefined;
-    private sessionPost;
-    /** The cell listing this clip's siblings, and a re-read of it for {@link settle}. */
-    private settleOptions;
+    readonly seconds: Prop<number>;
+    private get row();
     /**
-     * Delete this clip and resolve once it has left its playlist. `delete_clip` answers the
-     * same whether or not anything was deleted (fact 71), so the model is the proof.
+     * `set_marker` and `delete_marker` answer `null` whether or not the rowid matched
+     * (fact 71), so each edit resolves once this marker shows it.
+     */
+    private edit;
+    /** @example await marker.rename('Bridge'); */
+    rename(name: string): Promise<unknown>;
+    /** @example await marker.moveTo(Luna.WHOLE_NOTE * 16); */
+    moveTo(tick: number): Promise<unknown>;
+    /** @example await marker.setColor(0xffff0000); */
+    setColor(argb: number): Promise<unknown>;
+    /** @example await marker.setComments('double chorus'); */
+    setComments(comments: string): Promise<unknown>;
+    /**
+     * Delete this marker and resolve once it has left the list.
      *
-     * @example
-     * await clip.delete();
+     * @example await marker.delete();
      */
     delete(): Promise<unknown>;
+}
+declare class Markers extends Collection<Marker> {
+    /** Markers in timeline order. */
+    get sorted(): Marker[];
+    /** The last marker at or before `tick`. */
+    at(tick: number): Marker | undefined;
+}
+
+/** Options for an edit of session storage. */
+interface StorageEditOptions {
+    /** Record the edit in the session's undo history. Default `false`. */
+    undoable?: boolean;
+}
+/**
+ * `/sessions/<uid>/storage/<context>`: one context's records. Get one with
+ * `session.storage.context(name)`.
+ *
+ * @example
+ * const store = session.storage.context('com.example.my-add-on');
+ * await store.load();
+ * store.records.value; // ['layout']
+ */
+declare class StorageContext extends Node {
+    private readonly owner;
+    /** Names of this context's records. */
+    readonly records: Prop<string[]>;
+    /** The context's reverse-DNS name. */
+    get name(): string;
     /**
-     * Set new timeline bounds (ticks). With `split`, cut the clip instead of trimming it; with
-     * `stretch`, time-compress or expand the content to fit rather than revealing or hiding
-     * source audio.
+     * Fetch this context's records and their values. Call once before reading
+     * {@link value}; pushes keep them current while the session is watched.
      *
-     * `trim_clip` is a command of the **edit context**, not of the session.
-     *
-     * @example
-     * await clip.trim(clip.start.value!, clip.stop.value! - Luna.QUARTER_NOTE);
+     * @example await store.load();
      */
-    trim(startTick: number, stopTick: number, options?: {
-        split?: boolean;
-        stretch?: boolean;
-    }): Promise<unknown>;
+    load(): Promise<void>;
     /**
-     * Move the clip so it starts at `toTick`, keeping its length, on its own playlist. One undo
-     * step. Resolves to this clip, or with `copy` to the new copy once it is listed. LUNA's
-     * `move_clips` moves a range (fact 117): this is the clip's whole span, so a clip lying
-     * wholly on top of this one moves with it. To move what shows of a clip that others overlap,
-     * the way dragging it in LUNA does, move its pieces from {@link Playlist.compiledClips} with
-     * {@link CompiledClip.move}. The user's selection is put back afterwards.
-     *
-     * @example
-     * await clip.move(clip.start.value! + Luna.WHOLE_NOTE);
-     * const copy = await clip.move(clip.stop.value!, { copy: true });
-     */
-    move(toTick: number, options?: {
-        copy?: boolean;
-    }): Promise<Clip>;
-    /**
-     * Copy the clip to start where it ends. One undo step; resolves to the copy.
-     *
-     * @example
-     * const again = await clip.duplicate();
-     */
-    duplicate(): Promise<Clip>;
-    /**
-     * Cut the clip at one or more ticks inside it (LUNA's `separate_clips`). One undo step.
-     * Resolves to the pieces in time order; this clip keeps the first. A fade-out moves to the
-     * last piece, and a crossfade at a cut is not kept (fact 117).
+     * The value of one field as a live prop, `undefined` while it does not exist.
+     * `set` on it is a non-undoable write of an existing field.
      *
      * @example
-     * const [left, right] = await clip.split(clip.start.value! + Luna.WHOLE_NOTE);
+     * const timeline = store.value<{ height: number }>('layout', 'timeline');
+     * timeline.onChange(() => console.log(timeline.value?.height));
+     * await timeline.set({ height: 240 });
      */
-    split(at: number | readonly number[]): Promise<Clip[]>;
+    value<T = unknown>(record: string, field: string): WritableProp<T>;
     /**
-     * Mute or unmute the clip. One undo step. (LUNA's `mute_clips` toggles a range instead.)
+     * Add a field with an initial value (default `null`) and resolve once it is visible.
+     * A field that already exists keeps its value.
+     *
+     * @example await store.add('layout', 'timeline', { height: 200 });
+     */
+    add(record: string, field: string, value?: unknown, options?: StorageEditOptions): Promise<void>;
+    /**
+     * Set an existing field and resolve once the new value is visible. Rejects with
+     * `uasrv.invalid_property` if the field was never added.
+     *
+     * @example await store.set('layout', 'timeline', { height: 320 }, { undoable: true });
+     */
+    set(record: string, field: string, value: unknown, options?: StorageEditOptions): Promise<void>;
+    /**
+     * Remove one field, or a whole record when `field` is left out.
      *
      * @example
-     * await clip.setMuted(true);
+     * await store.remove('layout', 'timeline');
+     * await store.remove('layout');
      */
-    setMuted(muted: boolean): Promise<void>;
+    remove(record: string, field?: string, options?: StorageEditOptions): Promise<void>;
     /**
-     * Slide the audio inside the clip without moving the clip: positive `byNs` moves the audio
-     * later, so an earlier part of the source plays at the clip start. LUNA's own content nudge,
-     * so warps move with it; one undo step. The step is one sample at the engine rate. Only a
-     * clip on its track's active playlist can be slipped. A slip that would run past either end
-     * of the source does nothing in LUNA (fact 117); one past the start is refused here with
-     * `out_of_range`, one past the end rejects with `no_effect`.
+     * Remove every record in this context.
+     *
+     * @example await store.clear();
+     */
+    clear(options?: StorageEditOptions): Promise<void>;
+}
+/**
+ * `/sessions/<uid>/storage`: every Add On's session storage, by context.
+ *
+ * @example
+ * await session.storage.load();
+ * session.storage.contexts.value; // ['com.example.my-add-on']
+ * const store = session.storage.context('com.example.my-add-on');
+ */
+declare class SessionStorage extends Node {
+    /** Names of the contexts that hold at least one field. */
+    readonly contexts: Prop<string[]>;
+    private readonly byName;
+    /**
+     * Fetch the context names.
+     *
+     * @example await session.storage.load();
+     */
+    load(): Promise<void>;
+    /**
+     * One context's records. It need not exist yet: the first {@link StorageContext.add}
+     * creates it.
+     *
+     * `name` is any non-empty name without `/`, not only your Add On's id. Give each kind of data
+     * its own context, your id plus a suffix, then use a record per item and a field per part,
+     * rather than one record in one value: each `set` replaces a value whole, and only whole
+     * values can be undoable or not.
      *
      * @example
-     * await clip.slip(-10_000_000);   // 10 ms earlier
+     * const store = session.storage.context('com.example.my-add-on');
+     * const tracks = session.storage.context('com.example.my-add-on.tracks');
+     * await tracks.add(track.id, 'channel', 0);
      */
-    slip(byNs: number): Promise<void>;
-    /**
-     * Fade the clip in over its first `lengthTicks`, or change the length of its fade-in. One
-     * undo step, or two when `shape` changes an existing fade's shape. Without `shape` a new
-     * fade is `log`, LUNA's default. Audio clips only: a MIDI or video clip rejects with
-     * `unavailable`.
-     *
-     * @example
-     * await clip.setFadeIn(Luna.QUARTER_NOTE, { shape: 'equal_power' });
-     */
-    setFadeIn(lengthTicks: number, options?: {
-        shape?: FadeShape;
-    }): Promise<void>;
-    /**
-     * Fade the clip out over its last `lengthTicks`, or change the length of its fade-out.
-     *
-     * @example
-     * await clip.setFadeOut(Luna.HALF_NOTE);
-     */
-    setFadeOut(lengthTicks: number, options?: {
-        shape?: FadeShape;
-    }): Promise<void>;
-    /**
-     * Crossfade from this clip into `next`, which must start where this one stops on the same
-     * playlist. For clips that overlap, such as one on top over the middle of another, crossfade
-     * the segments either side of the edit with {@link CompiledClip.crossfade}. `align` puts the fade across the edit (`center`, the default), before it or
-     * after it. Calling again changes the length. Each clip's source must reach past the edit by
-     * the part of the fade on the other side; LUNA does not check (fact 117).
-     *
-     * @example
-     * await left.crossfade(right, Luna.EIGHTH_NOTE);
-     */
-    crossfade(next: Clip, lengthTicks: number, options?: {
-        align?: CrossfadeAlign;
-        shape?: FadeShape;
-    }): Promise<void>;
-    /**
-     * Remove the clip's plain fade-in. Resolves at once when there is none.
-     *
-     * @example
-     * await clip.removeFadeIn();
-     */
-    removeFadeIn(): Promise<void>;
-    /**
-     * Remove the clip's plain fade-out. Resolves at once when there is none.
-     *
-     * @example
-     * await clip.removeFadeOut();
-     */
-    removeFadeOut(): Promise<void>;
-    /**
-     * Remove the crossfade from this clip into `next`, both halves. Resolves at once when there
-     * is none.
-     *
-     * @example
-     * await left.removeCrossfade(right);
-     */
-    removeCrossfade(next: Clip): Promise<void>;
-    /** Add raw MIDI events to this (MIDI) clip in one undo step. */
-    addMidi(events: MidiEvent[]): Promise<unknown>;
-    /** Add a note: note-on at `tick`, note-off at `tick + lengthTicks`. */
-    addNote(note: number, tick: number, lengthTicks: number, velocity?: number, channel?: number): Promise<unknown>;
-    /**
-     * Add several notes to this (MIDI) clip in one `add_midi` post, so they land as one undo
-     * step. Each note is a note-on at `tick` and a note-off at `tick + lengthTicks`.
-     *
-     * @example
-     * // A C major triad on beat 1, then its arpeggio.
-     * await clip.addNotes([
-     *   ...[60, 64, 67].map((pitch) => ({ pitch, tick: 0, lengthTicks: Luna.QUARTER_NOTE })),
-     *   ...[60, 64, 67].map((pitch, i) => ({ pitch, tick: (i + 1) * Luna.QUARTER_NOTE, lengthTicks: Luna.QUARTER_NOTE, velocity: 80 })),
-     * ]);
-     */
-    addNotes(notes: readonly ClipNote[]): Promise<unknown>;
-    bringToFront(): Promise<unknown>;
-    sendToBack(): Promise<unknown>;
-    private get playlistPath();
-    private get context();
-    private contextPost;
-    /** Commands that select what they act on move the user's selection; put it back after. */
-    private keepingSelection;
-    private bounds;
-    private siblingList;
-    /** Settle options that re-read this clip itself, for edits that change only its properties. */
-    private refreshingOptions;
-    private fadeLength;
-    /**
-     * One `set_fade` (fact 117). LUNA applies `fade_shape` only to a fade it creates, so a shape
-     * asked of a fade that already existed goes through `change_fade_curvature` as well.
-     */
-    private setFade;
-    /** `delete_fades` takes every fade lying wholly inside a range; aim it at one fade's range. */
-    private deleteFadeRange;
+    context(name: string): StorageContext;
+    private body;
+    /** Wait for the edit to show, re-reading the context while it has not. */
+    private settleOn;
     protected release(): void;
 }
 
@@ -4611,6 +5003,11 @@ declare class Session extends Node {
     /** The `main` edit context: selection, zoom and the context edit commands. */
     readonly context: Context;
     /**
+     * Takes being recorded right now, on every armed track, before they become clips: each with
+     * its growing `stop`, its audio file's waveform, or its MIDI so far (fact 149).
+     */
+    readonly recordTakes: RecordTakes;
+    /**
      * The track the user is working on: the main context's `lastSelectedTrack`, else the first
      * selected track, else the first visible track. `undefined` only when the session has no
      * visible track. Notifies when the answer moves to a different track, not on every
@@ -4641,6 +5038,25 @@ declare class Session extends Node {
     get sources(): Collection<AudioSource> | undefined;
     /** The active playlist of a track, once playlists are loaded. */
     playlistFor(track: Track): Playlist | undefined;
+    /**
+     * Point LUNA's edit selection at tracks on the timeline, as clicking in LUNA's timeline does:
+     * the tracks, their active playlists and focus `timeline`, and the range when given (the
+     * current one is kept otherwise). Then `context.cut()`, `copy()`, `paste()`, `clear()` and
+     * `duplicate()` act on that range of those tracks, and paste lands at the range start
+     * (fact 150). No undo entry. Use it before an edit command when the user has not just
+     * selected in LUNA's own timeline: LUNA's selection may name other tracks, or the mixer.
+     *
+     * @example
+     * await session.selectTimeline({ tracks: [track], startTick: bar(5), stopTick: bar(9) });
+     * await session.context.copy();
+     * await session.selectTimeline({ tracks: [other], startTick: bar(17) });
+     * await session.context.paste();
+     */
+    selectTimeline(options: {
+        tracks: readonly (Track | string)[];
+        startTick?: number;
+        stopTick?: number;
+    }): Promise<void>;
     /** The master bus, once buses are loaded. */
     get master(): Bus | undefined;
     /**
@@ -6234,7 +6650,7 @@ declare function bindClock(el: HTMLElement, transport: Transport, options?: Cloc
  */
 
 /** The commands the standard shortcuts cover. */
-type ShortcutCommand = 'undo' | 'redo' | 'togglePlayback' | 'toggleRecord';
+type ShortcutCommand = 'undo' | 'redo' | 'togglePlayback' | 'toggleRecord' | 'selectAll' | 'cut' | 'copy' | 'paste' | 'clear' | 'duplicate';
 type ShortcutPlatform = 'mac' | 'other';
 /**
  * A key combination as `Modifier+...+Key`. Modifiers are `Mod` (Cmd on a Mac, Ctrl
@@ -6249,6 +6665,20 @@ type ShortcutBindings = Record<ShortcutCommand, readonly KeyCombo[]>;
  * uses Cmd, which `Mod` covers.
  */
 declare const DEFAULT_SHORTCUTS: Readonly<ShortcutBindings>;
+/**
+ * LUNA's default keys for its edit commands (fact 150): Cmd+A to select all, Cmd+X, Cmd+C,
+ * Cmd+V (Ctrl off the Mac), Backspace or Delete to clear, and Cmd+D for Duplicate Selection. Pass them as
+ * `bindings` to have {@link Shortcuts} run them; each acts on LUNA's edit selection, which
+ * `options.prepare` can point at what the page shows first (`session.selectTimeline`).
+ *
+ * @example
+ * const keys = new Luna.Shortcuts(luna, {
+ *   bindings: Luna.EDIT_SHORTCUTS,
+ *   prepare: (command, session) => session.selectTimeline({ tracks: [shownTrack] }),
+ * });
+ * document.addEventListener('keydown', (e) => keys.handle(e));
+ */
+declare const EDIT_SHORTCUTS: Readonly<Pick<ShortcutBindings, 'selectAll' | 'cut' | 'copy' | 'paste' | 'clear' | 'duplicate'>>;
 interface ShortcutsOptions {
     /** Replace the combos of some commands; `[]` disables one. The rest keep their defaults. */
     bindings?: Partial<ShortcutBindings>;
@@ -6260,6 +6690,12 @@ interface ShortcutsOptions {
     onError?: (error: unknown, command: ShortcutCommand) => void;
     /** Called after a key was matched and its command started. */
     onCommand?: (command: ShortcutCommand, event: KeyboardEvent) => void;
+    /**
+     * Called before an edit command (`selectAll`, `cut`, `copy`, `paste`, `clear`, `duplicate`) runs, and
+     * awaited: point LUNA's edit selection at what the page shows here, for example with
+     * `session.selectTimeline`. A rejection stops the command and goes to `onError`.
+     */
+    prepare?: (command: ShortcutCommand, session: Session) => void | Promise<void>;
 }
 /** The parts of a `KeyboardEvent` a binding matches on. */
 type ShortcutKeyEvent = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>;
@@ -6336,261 +6772,6 @@ interface ShortcutsBinding {
 declare function bindShortcuts(client: Client, options?: ShortcutsOptions & {
     target?: EventTarget;
 }): ShortcutsBinding;
-
-/** Pairs per cached page; four pages cover a minute of fine pairs. */
-declare const WAVEFORM_PAGE = 1024;
-/**
- * The analysis to draw at a zoom level: `coarse` once a pixel spans at least one coarse pair
- * (31.25 ms), `fine` when zoomed closer. Below one fine pair per pixel the same pair repeats;
- * neither analysis is PCM.
- */
-declare function kindForScale(nsPerPixel: number): OverviewKind;
-interface PairRange {
-    /** First pair whose span touches `startNs`. */
-    readonly index: number;
-    /** Pairs up to the one containing `stopNs`; 0 when the range is empty. */
-    readonly count: number;
-}
-/** The overview pairs covering `[startNs, stopNs)` of a source. Both are file offsets, never timeline ticks. */
-declare function pairRange(startNs: number, stopNs: number, kind?: OverviewKind): PairRange;
-/** The clip fields placement needs. A {@link Clip} satisfies it, as does a plain snapshot. */
-interface ClipLike {
-    readonly sourceUid: string | undefined;
-    readonly sourceStartNs: number | undefined;
-    readonly sourceStopNs: number | undefined;
-    readonly renderSourceUid?: string | undefined;
-    readonly renderState?: string | undefined;
-}
-interface ClipAudio {
-    /** The source whose overview matches what the engine plays. */
-    readonly source: AudioSource;
-    /** File range in nanoseconds: the clip's source range, or the whole render. */
-    readonly startNs: number;
-    readonly stopNs: number;
-    /** True when `source` is LUNA's time-stretched render rather than the original file. */
-    readonly stretched: boolean;
-}
-/** Anything that can resolve a source uid: `session.sources`, or a plain array. */
-type SourceLookup = {
-    byId(uid: string): AudioSource | undefined;
-} | readonly AudioSource[];
-declare function clipAudio(clip: ClipLike | Clip, sources: SourceLookup): ClipAudio | undefined;
-interface CompiledClipLike {
-    readonly start: number | undefined | {
-        readonly value: number | undefined;
-    };
-    readonly stop: number | undefined | {
-        readonly value: number | undefined;
-    };
-    readonly sourceStart: number | undefined | {
-        readonly value: number | undefined;
-    };
-    readonly sourceStop: number | undefined | {
-        readonly value: number | undefined;
-    };
-    /** The segment's own rendering: a uid, `null` for none, `undefined` when LUNA does not say. */
-    readonly renderSourceUid?: string | null | undefined | {
-        readonly value: string | null | undefined;
-    };
-    readonly renderSourceStart?: number | null | undefined | {
-        readonly value: number | null | undefined;
-    };
-    readonly renderSourceStop?: number | null | undefined | {
-        readonly value: number | null | undefined;
-    };
-    /** True when the segment plays a rendering, made or still being made. */
-    readonly needsRender?: boolean | undefined | {
-        readonly value: boolean | undefined;
-    };
-}
-/**
- * Which audio one compiled segment plays, over the segment only, or `undefined` when there is
- * nothing safe to draw (see {@link clipAudio}). `clip` is the raw clip the segment is cut from
- * (`playlist.clips.byId(segment.clipUid.value)`): it names the source. Map ticks with
- * {@link audioNsAtTick} anchored at the segment, which also reaches into a crossfade's
- * `fullStart`..`fullStop`.
- *
- * A time-stretched clip plays LUNA's renders, one per compiled piece (fact 116), so a segment
- * draws its own `renderSourceUid` over `renderSourceStart`..`renderSourceStop`. On a LUNA that
- * does not report those, only the clip's first piece can be placed, by cutting the clip's own
- * render by time; a later piece is `undefined`, an outline rather than the wrong audio. While
- * LUNA makes a segment's rendering (after an edit that changes it, such as a crossfade) the
- * answer is `undefined` too, not the original file at the wrong scale.
- *
- * @example
- * for (const seg of lane.compiledClips.inOrder()) {
- *   const clip = lane.clips.byId(seg.clipUid.value);
- *   const audio = clip && Luna.compiledClipAudio(timeline, seg, clip, session.sources);
- *   if (!audio) continue;
- *   const range = await cache.range(audio.source, audio.startNs, audio.stopNs, kind);
- *   const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(timeline, seg, audio, tickAtPx(i)));
- * }
- */
-declare function compiledClipAudio(timeline: Timeline, segment: CompiledClipLike, clip: (ClipLike & {
-    readonly startTicks: number | undefined;
-}) | Clip, sources: SourceLookup): ClipAudio | undefined;
-/**
- * The file offset (ns) that plays at a timeline tick inside a clip: the clip's audio start
- * plus the tempo-map seconds between the clip start and the tick. Linear in seconds, not in
- * ticks, so a tempo change inside the clip bends the mapping exactly as the engine does.
- *
- * The result can lie outside `[audio.startNs, audio.stopNs)` for ticks outside the clip;
- * clamp before drawing there. Throws `unavailable` while the tempo map is not loaded.
- *
- * @example
- * const ns = Luna.audioNsAtTick(session.musical.timeline, clip, audio, playheadTick);
- */
-declare function audioNsAtTick(timeline: Timeline, clip: {
-    start: {
-        value: number | undefined;
-    };
-} | {
-    startTicks: number | undefined;
-}, audio: ClipAudio, tick: number): number;
-interface WaveformChannel {
-    readonly min: Float32Array;
-    readonly max: Float32Array;
-}
-interface WaveformRange {
-    readonly kind: OverviewKind;
-    readonly pairNs: number;
-    /** The first pair returned; `channels[c].min[i]` covers `[(index + i) * pairNs, (index + i + 1) * pairNs)`. */
-    readonly index: number;
-    /** Pairs actually returned per channel. */
-    readonly count: number;
-    readonly channels: readonly WaveformChannel[];
-    /** False when the analysis ended (or is still growing) before the requested range. */
-    readonly complete: boolean;
-}
-/**
- * A bounded cache of overview pages, keyed by source, analysis and page index. A short page
- * (the end of the analysis, or growth in progress) is never cached, so a recording still
- * being written is re-read until it settles.
- *
- * The cache does not watch LUNA: call `invalidate(uid)` when a source is removed or its
- * `overviewInfo().md5` changes.
- *
- * @example
- * const cache = new Luna.Waveforms({ maxPages: 512 });
- * const range = await cache.range(audio.source, audio.startNs, audio.stopNs, 'coarse');
- */
-declare class Waveforms {
-    private readonly pages;
-    private readonly inFlight;
-    private readonly max;
-    constructor(options?: {
-        maxPages?: number;
-    });
-    /** Pages held right now. */
-    get size(): number;
-    /** Drop one source's pages, or everything. */
-    invalidate(uid?: string): void;
-    /** The pairs covering `[startNs, stopNs)` of `source`, assembled from cached and fresh pages. */
-    range(source: AudioSource, startNs: number, stopNs: number, kind?: OverviewKind): Promise<WaveformRange>;
-    private page;
-}
-/** Options for {@link waveformColumns}. */
-interface WaveformScale {
-    /**
-     * Linear multiplier on every value, clipped to -1..1; default 1. Must be finite and > 0.
-     * LUNA multiplies by its waveform zoom and the clip's gain:
-     * `session.context.waveformZoom.value * 10 ** (clip.gain.value / 20)`.
-     */
-    readonly gain?: number;
-}
-/**
- * The loudest absolute value in a range, across every channel, in 0..1; 0 when the range is
- * empty. To normalize a clip, pass `gain: 1 / peak` to {@link waveformColumns}, taking the
- * peak from the clip's whole range, not the visible columns, so the scale holds while
- * scrolling.
- *
- * @example
- * const peak = Luna.waveformPeak(range);   // 0.25 for a clip peaking at -12 dBFS
- */
-declare function waveformPeak(range: WaveformRange): number;
-interface WaveformColumns {
-    /** Columns returned; `channels[c].min[i]` is column `i`. */
-    readonly width: number;
-    /**
-     * One entry per source channel, in file order (left then right for stereo), never folded
-     * together. A column with no pair under it is `NaN` in both arrays: draw nothing there.
-     */
-    readonly channels: readonly WaveformChannel[];
-}
-/**
- * Reduce a {@link WaveformRange} to one min/max per drawn column, per channel, the way LUNA's
- * own timeline does:
- *
- * - a column holds the loudest of the pairs that end inside it, so peaks survive zooming out;
- * - its minimum is never above zero and its maximum never below, so the shape always touches
- *   the zero line;
- * - zoomed in past one pair per column, the columns between two pairs are interpolated
- *   linearly between them rather than repeating a pair as a step;
- * - values are linear, times `gain` ({@link WaveformScale}), clipped to -1..1. LUNA draws no
- *   decibel curve; its gain is the window's waveform zoom times the clip gain.
- *
- * `nsAt(i)` is the file offset (ns) at the left edge of column `i`, for `i` in `0..width`,
- * and must not decrease; column `i` covers `[nsAt(i), nsAt(i + 1))`. For a timeline that is
- * {@link audioNsAtTick} of the tick at that edge, so a tempo change bends the mapping as the
- * engine does. Columns outside the range are `NaN`. For a sharp shape on a high-density
- * display, use one column per device pixel.
- *
- * Draw each channel in its own lane ({@link waveformLanes}) with {@link traceWaveform};
- * folding a stereo range into one shape makes it look mono.
- *
- * @example
- * const cols = Luna.waveformColumns(range, width, (i) => Luna.audioNsAtTick(timeline, clip, audio, tickAtPx(x0 + i)),
- *   { gain: session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20) });
- * const lanes = Luna.waveformLanes(cols.channels.length, top, height);
- * ctx.beginPath();
- * cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0));
- * ctx.fill();
- */
-declare function waveformColumns(range: WaveformRange, width: number, nsAt: (column: number) => number, options?: WaveformScale): WaveformColumns;
-interface WaveformLane {
-    /** The lane's zero line. */
-    readonly mid: number;
-    /** Pixels from `mid` to full scale; `mid - max * half` is where a pair's maximum lands. */
-    readonly half: number;
-}
-/**
- * Split `height` pixels from `top` into one equal lane per channel, stacked in file order
- * (left above right for stereo), each with a zero line and a full-scale half-height.
- * `gap` pixels are kept clear at the top and bottom of every lane; LUNA keeps none.
- *
- * @example
- * const [left, right] = Luna.waveformLanes(2, 20, 80, 0);   // left.mid 40, right.mid 80, half 20
- */
-declare function waveformLanes(channels: number, top: number, height: number, gap?: number): readonly WaveformLane[];
-/** The part of a canvas 2D context {@link traceWaveform} draws with; `CanvasRenderingContext2D` and `Path2D` both fit. */
-interface WaveformPathTarget {
-    moveTo(x: number, y: number): void;
-    lineTo(x: number, y: number): void;
-    closePath(): void;
-}
-interface TraceWaveformOptions {
-    /** Width of one column in the target's units; default 1. Use `1 / devicePixelRatio` for device-pixel columns. */
-    readonly columnWidth?: number;
-    /**
-     * Distance each outline sits beyond the zero line, so silence draws a thin axis line rather
-     * than vanishing; default 0.5, as LUNA draws it.
-     */
-    readonly axis?: number;
-}
-/**
- * Add one channel's waveform to a path as LUNA fills it: for every run of drawable columns,
- * one closed shape through the column centres, the top outline (`mid - axis - max * half`)
- * left to right and the bottom outline (`mid + axis - min * half`) back, squared off at the
- * run's outer edges. `NaN` columns break the shape. It only adds subpaths; call
- * `beginPath()` before and `fill()` after, so several channels or clips fill in one go.
- *
- * @example
- * ctx.beginPath();
- * cols.channels.forEach((ch, c) => Luna.traceWaveform(ctx, ch, lanes[c], x0, { columnWidth: 1 / devicePixelRatio }));
- * ctx.fillStyle = '#000000a0';
- * ctx.fill();
- */
-declare function traceWaveform(target: WaveformPathTarget, channel: WaveformChannel, lane: WaveformLane, x0: number, options?: TraceWaveformOptions): void;
 
 /**
  * The categories an Add On's manifest `categories` names (HBH-36068): one or more of these, by
@@ -7287,6 +7468,7 @@ declare const luna_Disposed: typeof Disposed;
 type luna_DragOptions = DragOptions;
 type luna_Drivers = Drivers;
 declare const luna_Drivers: typeof Drivers;
+declare const luna_EDIT_SHORTCUTS: typeof EDIT_SHORTCUTS;
 declare const luna_EDIT_TIMEOUT_MS: typeof EDIT_TIMEOUT_MS;
 declare const luna_EIGHTH_NOTE: typeof EIGHTH_NOTE;
 type luna_Effect = Effect;
@@ -7427,6 +7609,10 @@ declare const luna_RECORD_LOOP_MARGIN_TICKS: typeof RECORD_LOOP_MARGIN_TICKS;
 type luna_RangeOptions = RangeOptions;
 type luna_RecPlayMode = RecPlayMode;
 type luna_RecordOptions = RecordOptions;
+type luna_RecordTake = RecordTake;
+declare const luna_RecordTake: typeof RecordTake;
+type luna_RecordTakes = RecordTakes;
+declare const luna_RecordTakes: typeof RecordTakes;
 type luna_Releasable = Releasable;
 type luna_Render = Render;
 declare const luna_Render: typeof Render;
@@ -7603,7 +7789,7 @@ declare const luna_waveformPeak: typeof waveformPeak;
 declare const luna_writable: typeof writable;
 declare const luna_yieldTask: typeof yieldTask;
 declare namespace luna {
-  export { luna_ADD_ON_CATEGORIES as ADD_ON_CATEGORIES, luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnCategory as AddOnCategory, type luna_AddOnCategoryInfo as AddOnCategoryInfo, type luna_AddOnInstalledFrom as AddOnInstalledFrom, luna_AddOnInstance as AddOnInstance, type luna_AddOnTarget as AddOnTarget, type luna_AlgType as AlgType, luna_Assistant as Assistant, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Chord as Chord, type luna_ChordSpec as ChordSpec, luna_Chords as Chords, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipNote as ClipNote, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, type luna_ClockOptions as ClockOptions, luna_Collection as Collection, type luna_CommandHandler as CommandHandler, luna_CompiledClip as CompiledClip, type luna_CompiledClipLike as CompiledClipLike, type luna_CompiledClipSnapshot as CompiledClipSnapshot, luna_CompiledClips as CompiledClips, type luna_CompiledFade as CompiledFade, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, type luna_CrossfadeAlign as CrossfadeAlign, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, luna_Drivers as Drivers, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, type Event$1 as Event, type luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, type luna_FadeShape as FadeShape, type luna_FileEntry as FileEntry, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, type luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_ImportPathOptions as ImportPathOptions, type luna_InsertClipOptions as InsertClipOptions, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, luna_LUNA_DEVICE_UID as LUNA_DEVICE_UID, type luna_LengthFollows as LengthFollows, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, type luna_LogFn as LogFn, type luna_LogLevel as LogLevel, luna_MAX_SECRET_BYTES as MAX_SECRET_BYTES, luna_MAX_SECRET_NAME_LENGTH as MAX_SECRET_NAME_LENGTH, luna_MAX_SYSEX_BYTES as MAX_SYSEX_BYTES, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, luna_MidiDevice as MidiDevice, luna_MidiDevices as MidiDevices, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, luna_MidiInput as MidiInput, type luna_MidiInputListenOptions as MidiInputListenOptions, type luna_MidiInputMessage as MidiInputMessage, type luna_MidiInputTarget as MidiInputTarget, type luna_MidiInputType as MidiInputType, type luna_MidiOutputTarget as MidiOutputTarget, luna_MidiPort as MidiPort, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, type luna_MockEngineOptions as MockEngineOptions, type luna_MockMidiRow as MockMidiRow, type luna_MockMidiSent as MockMidiSent, type luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, type luna_MoveToFolderOptions as MoveToFolderOptions, luna_Musical as Musical, type luna_NestedFileEntry as NestedFileEntry, type luna_NewBusOptions as NewBusOptions, type luna_NewFolderOptions as NewFolderOptions, type luna_NewNote as NewNote, type luna_NewTrackFromPresetOptions as NewTrackFromPresetOptions, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, type luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, type luna_ParsedChord as ParsedChord, type luna_PathDrop as PathDrop, type luna_PathDropHandlers as PathDropHandlers, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, type luna_PluginQueryOptions as PluginQueryOptions, type luna_PluginRequirement as PluginRequirement, type luna_PluginRow as PluginRow, type luna_PluginWindow as PluginWindow, luna_Plugins as Plugins, type luna_Port as Port, type luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_PresetQueryOptions as PresetQueryOptions, type luna_PresetRecommendation as PresetRecommendation, type luna_PresetRow as PresetRow, luna_PresetSelection as PresetSelection, type luna_PresetSelectionOptions as PresetSelectionOptions, type luna_PresetTagGroup as PresetTagGroup, luna_Presets as Presets, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, type luna_QwertyKeyEvent as QwertyKeyEvent, luna_QwertyMidi as QwertyMidi, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, type luna_ReorderOptions as ReorderOptions, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SecretStorage as SecretStorage, luna_Secrets as Secrets, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_SendMidi as SendMidi, type luna_SendMidiTrackTarget as SendMidiTrackTarget, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_SessionStorage as SessionStorage, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, type luna_SocketConstructor as SocketConstructor, type luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, type luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_StorageContext as StorageContext, type luna_StorageEditOptions as StorageEditOptions, luna_Store as Store, type luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TRACK_PRESET_CATEGORIES as TRACK_PRESET_CATEGORIES, luna_Taper as Taper, type luna_TaperMarksOptions as TaperMarksOptions, type luna_TaperName as TaperName, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, type luna_TraceWaveformOptions as TraceWaveformOptions, luna_Track as Track, type luna_TrackPresetCategory as TrackPresetCategory, luna_TrackPresetSelection as TrackPresetSelection, type luna_TrackPresetSelectionOptions as TrackPresetSelectionOptions, type luna_TrackType as TrackType, type luna_TransactionMode as TransactionMode, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, type luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, type luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformPathTarget as WaveformPathTarget, type luna_WaveformRange as WaveformRange, type luna_WaveformScale as WaveformScale, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, type luna_WebSocketPortOptions as WebSocketPortOptions, type luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_addOnTarget as addOnTarget, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindClock as bindClock, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_canDropPaths as canDropPaths, luna_clients as clients, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_compiledClipAudio as compiledClipAudio, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_decodeMidiEvents as decodeMidiEvents, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_formatMinSec as formatMinSec, luna_formatTimeSignature as formatTimeSignature, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isAddOnCategory as isAddOnCategory, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_normalizeChordName as normalizeChordName, luna_onPathDrop as onPathDrop, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_parseChord as parseChord, luna_pluginVersionMeets as pluginVersionMeets, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_suggestAddOnCategories as suggestAddOnCategories, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_traceWaveform as traceWaveform, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_waveformPeak as waveformPeak, luna_writable as writable, luna_yieldTask as yieldTask };
+  export { luna_ADD_ON_CATEGORIES as ADD_ON_CATEGORIES, luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnCategory as AddOnCategory, type luna_AddOnCategoryInfo as AddOnCategoryInfo, type luna_AddOnInstalledFrom as AddOnInstalledFrom, luna_AddOnInstance as AddOnInstance, type luna_AddOnTarget as AddOnTarget, type luna_AlgType as AlgType, luna_Assistant as Assistant, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Chord as Chord, type luna_ChordSpec as ChordSpec, luna_Chords as Chords, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipNote as ClipNote, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, type luna_ClockOptions as ClockOptions, luna_Collection as Collection, type luna_CommandHandler as CommandHandler, luna_CompiledClip as CompiledClip, type luna_CompiledClipLike as CompiledClipLike, type luna_CompiledClipSnapshot as CompiledClipSnapshot, luna_CompiledClips as CompiledClips, type luna_CompiledFade as CompiledFade, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, type luna_CrossfadeAlign as CrossfadeAlign, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, luna_Drivers as Drivers, luna_EDIT_SHORTCUTS as EDIT_SHORTCUTS, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, type Event$1 as Event, type luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, type luna_FadeShape as FadeShape, type luna_FileEntry as FileEntry, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, type luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_ImportPathOptions as ImportPathOptions, type luna_InsertClipOptions as InsertClipOptions, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, luna_LUNA_DEVICE_UID as LUNA_DEVICE_UID, type luna_LengthFollows as LengthFollows, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, type luna_LogFn as LogFn, type luna_LogLevel as LogLevel, luna_MAX_SECRET_BYTES as MAX_SECRET_BYTES, luna_MAX_SECRET_NAME_LENGTH as MAX_SECRET_NAME_LENGTH, luna_MAX_SYSEX_BYTES as MAX_SYSEX_BYTES, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, luna_MidiDevice as MidiDevice, luna_MidiDevices as MidiDevices, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, luna_MidiInput as MidiInput, type luna_MidiInputListenOptions as MidiInputListenOptions, type luna_MidiInputMessage as MidiInputMessage, type luna_MidiInputTarget as MidiInputTarget, type luna_MidiInputType as MidiInputType, type luna_MidiOutputTarget as MidiOutputTarget, luna_MidiPort as MidiPort, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, type luna_MockEngineOptions as MockEngineOptions, type luna_MockMidiRow as MockMidiRow, type luna_MockMidiSent as MockMidiSent, type luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, type luna_MoveToFolderOptions as MoveToFolderOptions, luna_Musical as Musical, type luna_NestedFileEntry as NestedFileEntry, type luna_NewBusOptions as NewBusOptions, type luna_NewFolderOptions as NewFolderOptions, type luna_NewNote as NewNote, type luna_NewTrackFromPresetOptions as NewTrackFromPresetOptions, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, type luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, type luna_ParsedChord as ParsedChord, type luna_PathDrop as PathDrop, type luna_PathDropHandlers as PathDropHandlers, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, type luna_PluginQueryOptions as PluginQueryOptions, type luna_PluginRequirement as PluginRequirement, type luna_PluginRow as PluginRow, type luna_PluginWindow as PluginWindow, luna_Plugins as Plugins, type luna_Port as Port, type luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_PresetQueryOptions as PresetQueryOptions, type luna_PresetRecommendation as PresetRecommendation, type luna_PresetRow as PresetRow, luna_PresetSelection as PresetSelection, type luna_PresetSelectionOptions as PresetSelectionOptions, type luna_PresetTagGroup as PresetTagGroup, luna_Presets as Presets, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, type luna_QwertyKeyEvent as QwertyKeyEvent, luna_QwertyMidi as QwertyMidi, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, luna_RecordTake as RecordTake, luna_RecordTakes as RecordTakes, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, type luna_ReorderOptions as ReorderOptions, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SecretStorage as SecretStorage, luna_Secrets as Secrets, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_SendMidi as SendMidi, type luna_SendMidiTrackTarget as SendMidiTrackTarget, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_SessionStorage as SessionStorage, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, type luna_SocketConstructor as SocketConstructor, type luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, type luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_StorageContext as StorageContext, type luna_StorageEditOptions as StorageEditOptions, luna_Store as Store, type luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TRACK_PRESET_CATEGORIES as TRACK_PRESET_CATEGORIES, luna_Taper as Taper, type luna_TaperMarksOptions as TaperMarksOptions, type luna_TaperName as TaperName, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, type luna_TraceWaveformOptions as TraceWaveformOptions, luna_Track as Track, type luna_TrackPresetCategory as TrackPresetCategory, luna_TrackPresetSelection as TrackPresetSelection, type luna_TrackPresetSelectionOptions as TrackPresetSelectionOptions, type luna_TrackType as TrackType, type luna_TransactionMode as TransactionMode, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, type luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, type luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformPathTarget as WaveformPathTarget, type luna_WaveformRange as WaveformRange, type luna_WaveformScale as WaveformScale, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, type luna_WebSocketPortOptions as WebSocketPortOptions, type luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_addOnTarget as addOnTarget, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindClock as bindClock, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_canDropPaths as canDropPaths, luna_clients as clients, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_compiledClipAudio as compiledClipAudio, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_decodeMidiEvents as decodeMidiEvents, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_formatMinSec as formatMinSec, luna_formatTimeSignature as formatTimeSignature, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isAddOnCategory as isAddOnCategory, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_normalizeChordName as normalizeChordName, luna_onPathDrop as onPathDrop, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_parseChord as parseChord, luna_pluginVersionMeets as pluginVersionMeets, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_suggestAddOnCategories as suggestAddOnCategories, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_traceWaveform as traceWaveform, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_waveformPeak as waveformPeak, luna_writable as writable, luna_yieldTask as yieldTask };
 }
 
 export { luna as Luna };

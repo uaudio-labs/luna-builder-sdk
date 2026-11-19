@@ -121,6 +121,20 @@
             "height": 760
         },
         {
+            "id": "com.uaudio.builder.server",
+            "title": "Server (Builder)",
+            "categories": ["Utility"],
+            "version": "0.1.0",
+            "engines": [
+                "luna"
+            ],
+            "html": "server.html",
+            "local_content_offset": "..",
+            "network": ["musicbrainz.org"],
+            "width": 900,
+            "height": 820
+        },
+        {
             "id": "com.uaudio.builder.import",
             "title": "Import and record (Builder)",
             "categories": ["Import & Export", "Recording"],

@@ -59,6 +59,8 @@
 | [Presets](classes/Presets.md) | - |
 | [PresetSelection](classes/PresetSelection.md) | Created by [Presets.selection](classes/Presets.md#selection). |
 | [QwertyMidi](classes/QwertyMidi.md) | - |
+| [RecordTake](classes/RecordTake.md) | A take being recorded on one track. Read it from [Session.recordTakes](classes/Session.md#recordtakes); it is disposed when recording stops and LUNA turns it into a clip. |
+| [RecordTakes](classes/RecordTakes.md) | The takes being recorded in a session, across every track: [Session.recordTakes](classes/Session.md#recordtakes). Empty while nothing records. `onChange` fires when a take starts or ends; follow a take's own props (`stop`, `notes`) for its progress. |
 | [Render](classes/Render.md) | `/renders/<uid>`: a bounce or an export. `state` runs `created` -> `running` -> `completed` | `aborted`, and LUNA drops the node shortly after it settles, so latch anything you still need rather than reading it later (fact 44). |
 | [Renders](classes/Renders.md) | An observable ordered collection with id lookup. |
 | [RequestTimeout](classes/RequestTimeout.md) | The engine did not answer a request within the port's timeout. |
@@ -255,6 +257,7 @@
 | [DEFAULT\_LUNA\_PORT](variables/DEFAULT_LUNA_PORT.md) | - |
 | [DEFAULT\_SHORTCUTS](variables/DEFAULT_SHORTCUTS.md) | LUNA's default shortcuts for the four commands (fact 79). Windows uses Ctrl where the Mac uses Cmd, which `Mod` covers. |
 | [DISPLAY\_TICKS\_PER\_BEAT](variables/DISPLAY_TICKS_PER_BEAT.md) | Musical time units (EVIDENCE fact 16). |
+| [EDIT\_SHORTCUTS](variables/EDIT_SHORTCUTS.md) | LUNA's default keys for its edit commands (fact 150): Cmd+A to select all, Cmd+X, Cmd+C, Cmd+V (Ctrl off the Mac), Backspace or Delete to clear, and Cmd+D for Duplicate Selection. Pass them as `bindings` to have [Shortcuts](classes/Shortcuts.md) run them; each acts on LUNA's edit selection, which `options.prepare` can point at what the page shows first (`session.selectTimeline`). |
 | [EDIT\_TIMEOUT\_MS](variables/EDIT_TIMEOUT_MS.md) | How long [settle](functions/settle.md) waits by default for the model to reflect an edit. |
 | [EIGHTH\_NOTE](variables/EIGHTH_NOTE.md) | - |
 | [HALF\_NOTE](variables/HALF_NOTE.md) | - |

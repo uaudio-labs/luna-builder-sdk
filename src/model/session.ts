@@ -19,6 +19,7 @@ import { AudioSource } from './audio-source';
 import { Bus, type FolderMode } from './bus';
 import type { Channel } from './channel';
 import { Collection } from './collection';
+import { RecordTakes } from './record';
 import { Context } from './context';
 import { Markers } from './markers';
 import { SessionStorage } from './storage';
@@ -260,6 +261,11 @@ export class Session extends Node {
   /** The `main` edit context: selection, zoom and the context edit commands. */
   readonly context: Context;
   /**
+   * Takes being recorded right now, on every armed track, before they become clips: each with
+   * its growing `stop`, its audio file's waveform, or its MIDI so far (fact 149).
+   */
+  readonly recordTakes: RecordTakes;
+  /**
    * The track the user is working on: the main context's `lastSelectedTrack`, else the first
    * selected track, else the first visible track. `undefined` only when the session has no
    * visible track. Notifies when the answer moves to a different track, not on every
@@ -303,6 +309,7 @@ export class Session extends Node {
     this.storage = new SessionStorage(client, this.path);
     this.contexts = new Collection<Context>(client, `${this.path}/contexts`, (p) => new Context(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.context = new Context(client, `${this.path}/contexts/main`, uid);
+    this.recordTakes = new RecordTakes(client, this.path);
     const focusedId = derived([this.context.lastSelectedTrack, this.context.selectionTracks, this.tracks], () => this.focusedTrackId(), { distinct: true });
     this.focusedTrack = derived([focusedId], () => {
       const id = focusedId.value;
@@ -329,7 +336,7 @@ export class Session extends Node {
       const watch = this.client.store.watch(this.path, { recursive: true, load: { flatvalue: true, commands: false } });
       this.watchRelease = watch.release;
       // Open plugin editors live in /gui, outside the session subtree (effect.editorOpen, fact 126).
-      this.readyPromise = watch.ready.then(() => Promise.all([this.tracks.load(), this.buses.load(), this.playlists.load(), this.musical.ready(), this.markers.load(), this.contexts.load(), this.client.gui.watchPluginWindows()])).then(() => undefined);
+      this.readyPromise = watch.ready.then(() => Promise.all([this.tracks.load(), this.buses.load(), this.playlists.load(), this.musical.ready(), this.markers.load(), this.contexts.load(), this.recordTakes.load(), this.client.gui.watchPluginWindows()])).then(() => undefined);
     }
     return this.readyPromise;
   }
@@ -357,6 +364,37 @@ export class Session extends Node {
   playlistFor(track: Track): Playlist | undefined {
     const uid = track.playlistUid.value;
     return uid ? this.playlists.byId(uid) : undefined;
+  }
+
+  /**
+   * Point LUNA's edit selection at tracks on the timeline, as clicking in LUNA's timeline does:
+   * the tracks, their active playlists and focus `timeline`, and the range when given (the
+   * current one is kept otherwise). Then `context.cut()`, `copy()`, `paste()`, `clear()` and
+   * `duplicate()` act on that range of those tracks, and paste lands at the range start
+   * (fact 150). No undo entry. Use it before an edit command when the user has not just
+   * selected in LUNA's own timeline: LUNA's selection may name other tracks, or the mixer.
+   *
+   * @example
+   * await session.selectTimeline({ tracks: [track], startTick: bar(5), stopTick: bar(9) });
+   * await session.context.copy();
+   * await session.selectTimeline({ tracks: [other], startTick: bar(17) });
+   * await session.context.paste();
+   */
+  async selectTimeline(options: { tracks: readonly (Track | string)[]; startTick?: number; stopTick?: number }): Promise<void> {
+    const ids = options.tracks.map((t) => (typeof t === 'string' ? t : t.id));
+    const playlists: string[] = [];
+    for (const id of ids) {
+      const track = this.tracks.byId(id);
+      const lane = track && this.playlistFor(track);
+      if (lane) playlists.push(lane.id);
+    }
+    await this.context.select({
+      trackUids: ids,
+      playlistUids: playlists,
+      focus: 'timeline',
+      ...(options.startTick !== undefined ? { startTick: options.startTick } : {}),
+      ...(options.stopTick !== undefined ? { stopTick: options.stopTick } : {}),
+    });
   }
 
   /** The master bus, once buses are loaded. */
@@ -1224,6 +1262,7 @@ export class Session extends Node {
     this.markers.dispose();
     this.storage.dispose();
     this.contexts.dispose();
+    this.recordTakes.dispose();
     this.sourcesCollection?.dispose();
     this.sourcesRelease?.();
     this.sourcesRelease = undefined;

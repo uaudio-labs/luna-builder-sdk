@@ -131,6 +131,12 @@ await lane.deleteFades(startTick, stopTick);
   so its own model would not change. LUNA refuses a `set` of several properties at once.
 - Commands that act on LUNA's selection (move, slip, heal) move the user's selection; the SDK
   puts it back.
+- Select all, cut, copy, paste, clear and duplicate act on LUNA's selection as the user's keys do:
+  `session.selectTimeline({ tracks, startTick, stopTick })` first (tracks, their playlists and
+  focus `timeline`), then `session.context.cut()` and the rest. Paste lands at the range start
+  and selects what it pasted; duplicate lands at the range end; `selectAll()` widens the range
+  to everything on the selected tracks (fact 150). For keys, pass
+  `Luna.EDIT_SHORTCUTS` and a `prepare` that calls `selectTimeline` to `Luna.Shortcuts`.
 
 ## 8. An interactive editor
 
@@ -157,11 +163,35 @@ await lane.deleteFades(startTick, stopTick);
 - Wait with `await engine.settled(); await luna.settled();` before asserting, and wait for the
   page's own state (its busy flag, what is under the pointer) rather than a fixed delay.
 - A test should fail without the fix: run it once against the old code.
+- To test a take in progress, arm a track and set `session.transport.recordEnabled` from the
+  page's client; `engine.recordProgress(sessionUid, stopTick)` moves every take on and
+  `engine.recordMidi(sessionUid, trackUid, events)` plays MIDI into one.
 - Setting a clip property on the mock recompiles its lane; to imitate a state of LUNA's
   compiled clips (such as the render gap), set the compiled clip's properties alone.
 - Then check against a running LUNA (skills/verify-add-on). Edits that touch rendered clips
   leave renderings behind: wait until `session.sources` stops growing, then remove the ones
   your test created.
+
+## 10. Takes being recorded
+
+A take is not on the playlist until recording stops. To draw it as it records, as LUNA's
+timeline does, read `session.recordTakes` (fact 149):
+
+- `session.recordTakes.forTrack(track)` is the track's take in progress, or none. Redraw on
+  `session.recordTakes.onChange` (a take starts or ends) and on the take's `stop`.
+- An audio take's `take.audio` is the file being written: draw it with `waves.range(audio.source,
+  audio.startNs, audio.stopNs, kind)` and `Luna.audioNsAtTick(timeline, take, audio, tick)`,
+  as a clip. Only full pages are cached, so each redraw reads the newest bins.
+- A MIDI take's `take.notes` (ticks from `take.start`) grows as notes are played; a note with no
+  `stopTick` is still held, so draw it to `take.stop.value`.
+- When recording stops the take is disposed and the clip appears on the playlist; stop drawing
+  the take then, and the clip takes its place.
+
+```js
+const take = session.recordTakes.forTrack(track)[0];
+if (take?.audio) draw(await waves.range(take.audio.source, take.audio.startNs, take.audio.stopNs, 'coarse'));
+else if (take?.isMidi) for (const n of take.notes.items) bar(take.start.value + n.startTick, take.start.value + (n.stopTick ?? take.stop.value - take.start.value), n.pitch);
+```
 
 ## Checklist
 
@@ -171,4 +201,5 @@ await lane.deleteFades(startTick, stopTick);
 - [ ] Selection is a piece; drags use `seg.move`; crossfades use `seg.crossfade`.
 - [ ] No fade handles or settings on MIDI clips; notes drawn instead.
 - [ ] Preview held until painted; view start in ticks; SVG pointers.
+- [ ] Takes being recorded drawn from `session.recordTakes`, if the page shows recording.
 - [ ] Tested on the mock, the test failing without the fix, and checked on LUNA.

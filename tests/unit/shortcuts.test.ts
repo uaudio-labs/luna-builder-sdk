@@ -240,3 +240,51 @@ describe('Transport.toggleRecord (fact 80)', () => {
     expect(engine.requests.filter((r) => r.verb === 'set' && r.path.includes('playing'))).toHaveLength(0);
   });
 });
+
+describe('edit shortcuts', () => {
+  const C: KeyInit = { key: 'c', code: 'KeyC', metaKey: true };
+  const BACKSPACE: KeyInit = { key: 'Backspace', code: 'Backspace' };
+
+  it('are off by default, so a page keeps Cmd+C and Backspace', async () => {
+    const { luna } = await connected();
+    bind(luna);
+    expect(press(window, C).defaultPrevented).toBe(false);
+    expect(press(window, BACKSPACE).defaultPrevented).toBe(false);
+    expect(Luna.DEFAULT_SHORTCUTS.copy).toEqual([]);
+    await luna.close();
+  });
+
+  it('run the edit context command after the page points the selection, with EDIT_SHORTCUTS', async () => {
+    const { engine, luna, session } = await connected();
+    const order: string[] = [];
+    const keys = new Luna.Shortcuts(luna, {
+      platform: 'mac',
+      bindings: Luna.EDIT_SHORTCUTS,
+      prepare: async (command, s) => {
+        order.push(`prepare ${command}`);
+        await s.selectTimeline({ tracks: ['Vocal'] });
+      },
+    });
+    for (const [init, command] of [
+      [C, 'copy'],
+      [{ key: 'a', code: 'KeyA', metaKey: true }, 'select_all'],
+      [{ key: 'x', code: 'KeyX', metaKey: true }, 'cut'],
+      [{ key: 'v', code: 'KeyV', metaKey: true }, 'paste'],
+      [{ key: 'd', code: 'KeyD', metaKey: true }, 'duplicate'],
+      [BACKSPACE, 'clear'],
+      [{ key: 'Delete', code: 'Delete' }, 'clear'],
+    ] as const) {
+      const e = new KeyboardEvent('keydown', { cancelable: true, ...init });
+      expect(keys.handle(e)).toBe(true);
+      expect(e.defaultPrevented).toBe(true);
+      await until(() => posted(engine, command).length > 0, command);
+    }
+    expect(order[0]).toBe('prepare copy');
+    expect(engine.value('/sessions/abc/contexts/main', 'focus')).toBe('timeline');
+    expect(engine.value('/sessions/abc/contexts/main', 'selection_tracks')).toEqual(['Vocal']);
+    // A held key does not repeat an edit.
+    expect(keys.handle(new KeyboardEvent('keydown', { cancelable: true, ...C, repeat: true }))).toBe(false);
+    void session;
+    await luna.close();
+  });
+});

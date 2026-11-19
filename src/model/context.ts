@@ -202,6 +202,14 @@ export class Context extends Node {
     return this.wire.post(`${this.path}/commands/${command}`, { session_uid: this.sessionUid, ...payload });
   }
 
+  /**
+   * Widen the selected range to everything on the selected tracks' playlists (clips, notes,
+   * automation), keeping the tracks (fact 150). No undo entry.
+   *
+   * @example
+   * await session.selectTimeline({ tracks: [track] });
+   * await session.context.selectAll();
+   */
   selectAll(): Promise<unknown> {
     return this.run('select_all');
   }

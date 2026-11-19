@@ -20,6 +20,9 @@ from.
    `Luna.audioNsAtTick(timeline, seg, audio, tick)`. When it returns `undefined` while
    `seg.needsRender.value` is true, keep the waveform you drew last for that clip and span.
    Colour by `track.color`. Draw MIDI clips' notes from `clip.midi.notes` (§2).
+   While recording, draw each track's take in progress from `session.recordTakes` (§10): an
+   audio take's `take.audio` like a clip's, a MIDI take's `take.notes` (a held note runs to
+   `take.stop`).
 3. **Draw fades** in a second pass over all segments, fade-in rising, fade-out falling, a
    crossfade as two crossing ramps (§3). No fades on MIDI or video clips.
 4. **Select** the clicked segment, `{ clipUid, start }`, not the clip (§4).

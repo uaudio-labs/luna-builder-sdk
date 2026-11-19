@@ -10,6 +10,7 @@
 - [`Clip`](Clip.md)
 - [`CompiledClip`](CompiledClip.md)
 - [`Playlist`](Playlist.md)
+- [`RecordTake`](RecordTake.md)
 - [`AudioSource`](AudioSource.md)
 - [`Effect`](Effect.md)
 - [`Marker`](Marker.md)

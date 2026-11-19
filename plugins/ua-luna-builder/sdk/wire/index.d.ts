@@ -672,8 +672,6 @@ declare class MockEngine {
     private putFade;
     /** The tick `seconds` after `tick` through the tempo map. */
     private tickAfter;
-    /** The playlists a context edit names: `playlist_uid`, else `track_uid` (active playlists), else the selection. */
-    private editPlaylists;
     /** Seconds at `tick`, integrating the session's tempo map (constant tempo between events). */
     private secondsAt;
     /**
@@ -895,6 +893,41 @@ declare class MockEngine {
      * the punch point lay inside the loop marks — outside them LUNA rolls and captures nothing.
      */
     private runRecord;
+    /**
+     * Publish a take in progress the way LUNA does while punched in (fact 149):
+     * `record/clips/<track>/<take>` with a `stop` that grows, and on an audio track the file being
+     * written under `record/audio/<source>` with an overview that grows with it; a MIDI-capable
+     * track's take gets a `midi` folder instead.
+     */
+    private startRecordTake;
+    /**
+     * Move every take in progress in a session on to `stopTick`, as LUNA does while recording:
+     * `stop` and `length` grow, and an audio take's `source_stop`, file length and overview grow
+     * with them (fact 149). The mock runs at 120 BPM: a beat is 0.5 s.
+     *
+     * @example
+     * await session.transport.recordEnabled.set(true);
+     * engine.recordProgress('abc', Luna.WHOLE_NOTE);
+     */
+    recordProgress(sessionUid: string, stopTick: number): void;
+    /**
+     * Record MIDI messages into the take in progress on a track, as LUNA publishes them while
+     * recording: one `midi/<rowid>` node each, its `tick` a session tick (fact 149). Returns the
+     * row ids.
+     *
+     * @example
+     * engine.recordMidi('abc', 'keys', [
+     *   { tick: 0, status: 0x90, data1: 60, data2: 100 },
+     *   { tick: Luna.QUARTER_NOTE, status: 0x80, data1: 60, data2: 0 },
+     * ]);
+     */
+    recordMidi(sessionUid: string, trackUid: string, events: readonly {
+        tick: number;
+        status: number;
+        data1: number;
+        data2?: number;
+    }[]): number[];
+    private recordRowId;
     private post;
     private push;
 }

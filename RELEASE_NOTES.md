@@ -3,6 +3,18 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 3.1.2 Beta 2 — 2026-11-18
+
+- `session.recordTakes` follows the takes LUNA is recording before they become clips: an audio
+  take's waveform as it grows, a MIDI take's notes as they are played.
+- `session.selectTimeline` points LUNA's edit selection at a range of tracks, so the context's
+  `selectAll`, `cut`, `copy`, `paste`, `clear` and `duplicate` act on it; `Luna.Shortcuts` can
+  bind LUNA's edit keys in a page with `Luna.EDIT_SHORTCUTS` (off by default).
+- `Luna.MockEngine` models takes being recorded and the timeline edit commands.
+- New `examples/server.html` shows an Add On calling a web server it lists in `network`.
+- The SDK now comes with the Supplemental Terms for LUNA Builder SDK alongside the Apache
+  License; using it means agreeing to both.
+
 ## 3.1.2 Beta 1 — 2026-11-17
 
 - **Breaking:** inside LUNA an Add On page now reaches only the servers its new manifest
