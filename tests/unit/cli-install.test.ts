@@ -1,6 +1,6 @@
 /** `ua-builder install` refuses an Add On whose id or name another installed Add On uses. */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,10 +27,10 @@ function addOn(parent: string, name: string, manifest: object): string {
   return dir;
 }
 
-async function run(dir: string): Promise<number> {
+async function run(dir: string, ...flags: string[]): Promise<number> {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
-    return await install(parseArgs([dir]));
+    return await install(parseArgs([dir, ...flags]));
   } finally {
     log.mockRestore();
   }
@@ -66,6 +66,46 @@ describe.skipIf(process.platform === 'win32')('ua-builder install', () => {
     expect(await run(dir)).toBe(0);
     expect(await run(dir)).toBe(0);
     expect(existsSync(join(addOns, 'Mine', 'manifest.json'))).toBe(true);
+  });
+});
+
+// LUNA keeps an Add On's secrets, servers and web storage for the folder it is installed in,
+// so a Windows reinstall must update the copy, not delete and re-create it.
+describe.skipIf(process.platform === 'win32')('ua-builder install (Windows copy, simulated)', () => {
+  const platform = process.platform;
+  beforeEach(() => { Object.defineProperty(process, 'platform', { value: 'win32' }); });
+  afterEach(() => { Object.defineProperty(process, 'platform', { value: platform }); });
+
+  it('--force updates the installed copy in place, keeping its folder', async () => {
+    const src = mkdtempSync(join(tmpdir(), 'ua-src-'));
+    dirs.push(src);
+    const dir = addOn(src, 'mine', { package_name: 'Mine', id: 'com.x.mine', name: 'Mine' });
+    writeFileSync(join(dir, 'old.js'), 'old');
+    mkdirSync(join(dir, 'lib'));
+    writeFileSync(join(dir, 'lib', 'a.js'), 'a1');
+    writeFileSync(join(dir, 'lib', 'gone.js'), 'x');
+    mkdirSync(join(dir, 'swap'));
+    mkdirSync(join(dir, 'node_modules'));
+    writeFileSync(join(dir, 'node_modules', 'dep.js'), 'dep');
+    expect(await run(dir)).toBe(0);
+    const target = join(addOns, 'Mine');
+    const ino = statSync(target).ino;
+    expect(existsSync(join(target, 'node_modules'))).toBe(false);
+
+    await expect(run(dir)).rejects.toThrow('pass --force');
+    rmSync(join(dir, 'old.js'));
+    rmSync(join(dir, 'lib', 'gone.js'));
+    writeFileSync(join(dir, 'lib', 'a.js'), 'a2');
+    rmSync(join(dir, 'swap'), { recursive: true });
+    writeFileSync(join(dir, 'swap'), 'now a file');
+    writeFileSync(join(target, 'stray.txt'), 'left by hand');
+    expect(await run(dir, '--force')).toBe(0);
+
+    expect(statSync(target).ino).toBe(ino);
+    expect(readFileSync(join(target, 'lib', 'a.js'), 'utf8')).toBe('a2');
+    expect(readFileSync(join(target, 'swap'), 'utf8')).toBe('now a file');
+    for (const gone of ['old.js', 'stray.txt', join('lib', 'gone.js'), 'node_modules']) expect(existsSync(join(target, gone))).toBe(false);
+    expect(existsSync(join(target, 'manifest.json'))).toBe(true);
   });
 });
 

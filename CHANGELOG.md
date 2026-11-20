@@ -2,6 +2,23 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## 3.1.2 Beta 4
+
+Changed
+- The docs describe how LUNA 3.1.2 keeps an Add On's secrets, allowed servers and (macOS) web
+  storage: for its install, the folder it is installed in, not its `id`, so another package
+  declaring the same `id` gets none of them. A reinstall or an update starts with nothing, and
+  removing the Add On deletes its secrets (docs/MANIFEST.md, "What an install keeps"; facts
+  107 and 114). Add Ons should ask again for a key when `luna.secrets.get` answers `null`
+  rather than assume it survives an update.
+- `Luna.MockEngine` serves media URLs on the install host LUNA 3.1.2 uses,
+  `ua-content://<id>_t<token>/...`; `engine.installTokens` pins a token.
+
+Fixed
+- `ua-builder install --force` on Windows copies over the installed folder in place instead of
+  deleting and re-copying it. A new folder is a new install to LUNA 3.1.2, so every reinstall
+  lost the Add On's secrets, allowed servers and web storage.
+
 ## 3.1.2 Beta 3
 
 Added

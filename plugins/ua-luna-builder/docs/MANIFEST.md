@@ -460,11 +460,12 @@ nowhere else. `Luna.ADD_ON_CATEGORIES` holds this list in the SDK, and
   resources works, but only inside the manifest folder or the `local_content_offset` folder;
   a reference outside it fails to load. Keep resource references relative to the `html` file
   so they resolve either way.
-- On macOS each local page is its own origin, named by its `id`: its `localStorage`,
-  IndexedDB, cookies and cache are its own, and no other Add On can read or change them. They
-  last across launches and updates while the `id` stays the same; change the `id` and the
-  Add On starts with empty storage. Web storage is still not a place for secrets such as API
-  keys; use `luna.secrets` (see "Secrets" below).
+- On macOS each local page is its own origin, belonging to this install of the Add On (see
+  "What an install keeps" below): its `localStorage`, IndexedDB, cookies and cache are its
+  own, and no other Add On can read or change them, even one that declares the same `id`.
+  They last across launches and edits to the installed files; a reinstall or an update
+  starts with empty storage. Web storage is still not a place for secrets such as API keys;
+  use `luna.secrets` (see "Secrets" below).
 - On Windows the page is loaded from `file://`, where module scripts are blocked: use the
   script-tag bundle (`vendor/luna.global.js`), and bundle your own code to a classic script.
   The `add-on-typescript` template (`ua-builder new --template add-on-typescript`) builds
@@ -491,6 +492,8 @@ list the server in `network` and the user must allow it:
   installed another way (`ua-builder install`, a folder copied in), when it first opens. Until
   the user allows them, requests to them fail. DON'T ALLOW holds until LUNA restarts. The user
   can allow or remove each server in **Settings > Add Ons > SERVERS**; either reloads your page.
+- What the user allowed belongs to this install of the Add On (see "What an install keeps"):
+  an Add On that declares the same `id` gets none of it, and an update asks again.
 - It covers every way a page reaches out: `fetch`, XHR, `WebSocket`, `EventSource`, images,
   media, fonts, style sheets, frames, workers and scripts (a CDN must be listed too). Only
   `https` and `wss`, never plain `http` or `ws` off this computer. A blocked request fails and
@@ -520,9 +523,10 @@ await luna.secrets.delete('openai.api_key'); // a "Disconnect" button
 ```
 
 - Inside LUNA, values go to the OS credential store: the login keychain on macOS, Credential
-  Manager on Windows. LUNA scopes them by the manifest's `id`, so another Add On cannot read
-  them, and it answers only the Add On's own page: not an iframe in it, and not a page it
-  navigated to. Keep the `id` stable; a new `id` starts with no secrets.
+  Manager on Windows. They belong to this install of the Add On (see "What an install
+  keeps" below), so no other Add On can read them, even one that declares the same `id`, and
+  LUNA answers only the Add On's own page: not an iframe in it, and not a page it navigated
+  to.
 - Elsewhere (a browser, `ua-builder serve`, a LUNA that predates secrets) values live in page
   memory and are gone on reload; the first `set` warns on the console. `luna.secrets.storage`
   is `'keychain'` or `'memory'`; tell the user when keys will not be remembered.
@@ -530,8 +534,29 @@ await luna.secrets.delete('openai.api_key'); // a "Disconnect" button
   example `openai.api_key`. A value is a string of at most 2560 UTF-8 bytes.
 - Errors carry a `code`: `invalid_name`, `too_large`, `store_error` (the OS store refused, for
   example the user denied keychain access), `timeout` (no answer).
-- Uninstalling the Add On does not remove its secrets. Offer a way to delete them.
+- Removing the Add On deletes its secrets, and so does installing an update over it: ask for
+  them again when `get` answers `null`. Offer a way to delete them too.
 - On macOS, LUNA may ask the user once to allow keychain access, for example after an update.
+
+## What an install keeps
+
+An `id` proves nothing on its own: any package can declare any `id`. So LUNA keeps an Add On's
+secrets, the servers the user allowed it and, on macOS, its web storage for one **install**:
+the folder it was installed into in the Add Ons folder, not the `id` in its manifest.
+
+- They last while that folder stays: across launches, edits to its files, and renaming or
+  moving the folder within the Add Ons folder.
+- A new folder is a new install that starts with nothing: installing a `.lunaaddon` (an
+  update that replaces the installed Add On included), copying a folder in, or swapping
+  the folder while LUNA is closed. Changing the manifest's `id` starts over too.
+- When the folder goes (removed in LUNA, deleted, or moved out of the Add Ons folder), LUNA
+  deletes its secrets and forgets its servers. LUNA's replace prompt tells the user an update
+  deletes them.
+- While you develop, keep the same folder installed. `ua-builder install` links your project
+  folder on macOS, so rebuilding and reinstalling keep everything; on Windows it copies, and
+  `--force` copies over the installed folder in place rather than replacing it, which keeps
+  it too.
+- Never rely on secrets or storage surviving an update: when they are missing, ask again.
 
 ## Checklist
 

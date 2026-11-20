@@ -1,10 +1,17 @@
-import { cpSync, existsSync, lstatSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { addOnClashes, addOnsFolder, entryTargets, flagString, installedAddOns, menuFor, prepareAddOnsFolder, readManifest, type Args } from './util';
 
 /**
  * Put an Add On folder where LUNA looks for it. macOS: a symlink, so edits are live.
- * Windows: a copy (symlinks need elevation). LUNA rescans the folder; no restart needed.
+ * Windows: a copy (symlinks need elevation); `--force` copies over an installed copy in place.
+ * LUNA rescans the folder; no restart needed.
+ *
+ * LUNA keeps an Add On's secrets, allowed servers and web storage for the folder it is
+ * installed in, not its id: a new folder starts with nothing, and a removed one has them
+ * deleted. So a reinstall must keep the same folder: on macOS the link resolves to the
+ * project folder either way, and on Windows `--force` updates the copy's contents instead of
+ * deleting and re-creating it.
  */
 export async function install(args: Args): Promise<number> {
   const dir = resolve(args.positional[0] ?? process.cwd());
@@ -19,6 +26,7 @@ export async function install(args: Args): Promise<number> {
   const own = installed.filter((a) => a.entry === target || sameFolder(a.entry, dir)).map((a) => a.entry);
   const clashes = addOnClashes(entries, installed, own);
   if (clashes.length) throw new Error(`An installed Add On already uses this identity:\n  - ${clashes.join('\n  - ')}\nChange "id" or "name" in manifest.json, or remove the other Add On.`);
+  let update = false;
   if (existsSync(target) || isDanglingLink(target)) {
     const st = lstatSync(target);
     if (st.isSymbolicLink()) {
@@ -28,20 +36,37 @@ export async function install(args: Args): Promise<number> {
         return report(entries);
       }
       rmSync(target);
-    } else if (process.platform === 'win32' && args.flags['force']) {
-      rmSync(target, { recursive: true, force: true });
+    } else if (process.platform === 'win32' && args.flags['force'] && st.isDirectory()) {
+      update = true;
     } else {
       throw new Error(`${target} exists and is not a symlink; remove it or pass --force (Windows copy)`);
     }
   }
   if (process.platform === 'win32') {
-    cpSync(dir, target, { recursive: true, filter: (src) => !src.includes(`${join('node_modules')}`) });
-    console.log(`Copied ${dir} -> ${target}`);
+    const copied = (src: string) => !src.includes(`${join('node_modules')}`);
+    if (update) prune(dir, target, copied);
+    cpSync(dir, target, { recursive: true, force: true, filter: copied });
+    console.log(`${update ? 'Updated' : 'Copied'} ${dir} -> ${target}`);
   } else {
     symlinkSync(dir, target);
     console.log(`Linked ${target} -> ${dir}`);
   }
   return report(entries);
+}
+
+/**
+ * Delete what is in the installed copy `target` but no longer in the project `dir` (or no
+ * longer copied), keeping `target` itself and every folder still in `dir`, so the folder LUNA
+ * identifies the install by stays the same.
+ */
+function prune(dir: string, target: string, copied: (src: string) => boolean): void {
+  for (const entry of readdirSync(target, { withFileTypes: true })) {
+    const src = join(dir, entry.name);
+    const dest = join(target, entry.name);
+    const there = copied(src) && (existsSync(src) || isDanglingLink(src));
+    if (there && entry.isDirectory() && lstatSync(src).isDirectory()) prune(src, dest, copied);
+    else if (!there || entry.isDirectory() !== lstatSync(src).isDirectory()) rmSync(dest, { recursive: true, force: true });
+  }
 }
 
 function sameFolder(a: string, b: string): boolean {

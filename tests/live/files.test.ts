@@ -105,8 +105,10 @@ describe.skipIf(!live)('live: serving a media file', () => {
     // The URL names the real file: temp folders are often links themselves (/var -> /private/var).
     const real = realpathSync(join(dir, 'My Tone #1.wav'));
     const url = await luna.gui.serveMediaFile(addOnId, join(dir, 'My Tone #1.wav'));
-    const expected = process.platform === 'win32' ? 'file:///' : `ua-content://${addOnId.toLowerCase().replaceAll('_', '__')}`;
-    expect(url.startsWith(expected)).toBe(true);
+    // macOS: the host is the escaped id and, for an installed Add On, `_t` and its install token.
+    const host = addOnId.toLowerCase().replaceAll('_', '__').replaceAll('.', '\\.');
+    if (process.platform === 'win32') expect(url.startsWith('file:///')).toBe(true);
+    else expect(url).toMatch(new RegExp(`^ua-content://${host}(_t[0-9a-f]{32})?/`));
     expect(url.endsWith('/My%20Tone%20%231.wav')).toBe(true);
     expect(decodeURIComponent(url).endsWith(real.replaceAll('\\', '/'))).toBe(true);
     if (links) expect(await luna.gui.serveMediaFile(addOnId, join(dir, 'alias.wav'))).toBe(url);

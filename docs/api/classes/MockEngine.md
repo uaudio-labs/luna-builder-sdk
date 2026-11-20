@@ -30,6 +30,7 @@ new MockEngine(options): MockEngine;
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
 | <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [showcase](#showcase) that were imported from a link, which `/gui/remove_add_on` removes (from here and from `showcase`); any other package is the showcase's own and is refused. |
 | <a id="installingpackages"></a> `installingPackages` | `public` | `string`[] | `[]` | Package ids `/gui/install_add_on` treats as already installing. |
+| <a id="installtokens"></a> `installTokens` | `public` | `Record`\<`string`, `string`\> | `{}` | Each installed Add On's install token, by lowercase id: 32 lowercase hex digits that LUNA gives an install (fact 114) and that end its page host (`<id>_t<token>`). The mock makes one up the first time an id needs it; set one to pin it. **Example** `engine.installTokens['com.example.demo'] = '0123456789abcdef0123456789abcdef';` |
 | <a id="listlimit"></a> `listLimit` | `public` | `number` | `10000` | Entries a recursive `/gui/list_files` returns before it sets `truncated` (LUNA: 10,000). |
 | <a id="mediafiles"></a> `mediaFiles` | `public` | `Record`\<`string`, `true` \| `null` \| `string`\> | `{}` | The files `/gui/serve_media_file` finds, by absolute path: `true` for an audio, video or MIDI file it serves, `null` for one it refuses (not media, or media in name only), or the path a link leads to, which is served under that path. A path not listed is missing. **Example** `engine.mediaFiles['/Movies/cut.mov'] = true; engine.mediaFiles['/Movies/notes.mp4'] = null; engine.mediaFiles['/Movies/latest.mov'] = '/Movies/cut.mov';` |
 | <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
@@ -741,6 +742,32 @@ has(path): boolean;
 #### Returns
 
 `boolean`
+
+***
+
+### installToken()
+
+```ts
+installToken(id): string;
+```
+
+The install token of the Add On `id` (lowercase), made up on first use.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `id` | `string` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+const host = `com.example.demo_t${engine.installToken('com.example.demo')}`;
+```
 
 ***
 

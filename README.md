@@ -9,7 +9,7 @@ everything under one `Luna` namespace.
 [Supplemental Terms for LUNA Builder SDK](SUPPLEMENTAL-TERMS.md). By downloading or using the
 LUNA Builder SDK, you agree to these terms.
 
-Status: alpha. Sessions, transport, tracks, controls, buses, playlists, clips, MIDI,
+Status: beta. Sessions, transport, tracks, controls, buses, playlists, clips, MIDI,
 automation, renders and recording are implemented and tested against a live LUNA. See
 [CHANGELOG.md](CHANGELOG.md).
 

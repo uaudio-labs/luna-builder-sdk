@@ -1477,7 +1477,7 @@ var Luna = (() => {
               const linked = engine.mediaFiles[path];
               const target2 = typeof linked === "string" ? linked : normalizeFolder(path);
               engine.mediaServed.push({ addOnId: id2, path: target2 });
-              return { url: `ua-content://${localContentHost(id2)}${encodeMediaPath(target2)}` };
+              return { url: `ua-content://${localContentHost(id2)}_t${engine.installToken(id2)}${encodeMediaPath(target2)}` };
             }
             const file = engine.mediaFiles[path];
             if (file === void 0) throw fail("uasrv.filesystem_error", "no file at path");
@@ -1486,7 +1486,7 @@ var Luna = (() => {
             if (!engine.has(`/gui/add_ons/${id}`)) throw fail("uasrv.not_installed", `no Add On ${id}`);
             const target = file === true ? path : file;
             engine.mediaServed.push({ addOnId: id, path: target });
-            return { url: `ua-content://${localContentHost(id)}${encodeMediaPath(target)}` };
+            return { url: `ua-content://${localContentHost(id)}_t${engine.installToken(id)}${encodeMediaPath(target)}` };
           },
           show_save_dialog: (_data, engine) => {
             const uid = `fc${engine.nextRow()}`;
@@ -1587,6 +1587,29 @@ var Luna = (() => {
     mediaFiles = {};
     /** Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. */
     mediaServed = [];
+    /**
+     * Each installed Add On's install token, by lowercase id: 32 lowercase hex digits that LUNA
+     * gives an install (fact 114) and that end its page host (`<id>_t<token>`). The mock makes
+     * one up the first time an id needs it; set one to pin it.
+     *
+     * @example
+     * engine.installTokens['com.example.demo'] = '0123456789abcdef0123456789abcdef';
+     */
+    installTokens = {};
+    /**
+     * The install token of the Add On `id` (lowercase), made up on first use.
+     *
+     * @example
+     * const host = `com.example.demo_t${engine.installToken('com.example.demo')}`;
+     */
+    installToken(id) {
+      let token = this.installTokens[id];
+      if (token === void 0) {
+        token = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+        this.installTokens[id] = token;
+      }
+      return token;
+    }
     /**
      * The showcase `/gui/install_add_on` installs from: each package id to the ids of the
      * Add Ons in it, all lowercase.

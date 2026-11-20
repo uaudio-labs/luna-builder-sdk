@@ -1320,7 +1320,7 @@ are not visible there.
 }
 
 // cli/install.ts
-import { cpSync as cpSync2, existsSync as existsSync7, lstatSync, readlinkSync, realpathSync as realpathSync4, rmSync as rmSync3, symlinkSync } from "fs";
+import { cpSync as cpSync2, existsSync as existsSync7, lstatSync, readdirSync as readdirSync5, readlinkSync, realpathSync as realpathSync4, rmSync as rmSync3, symlinkSync } from "fs";
 import { basename as basename3, join as join7, resolve as resolve6 } from "path";
 async function install(args) {
   const dir = resolve6(args.positional[0] ?? process.cwd());
@@ -1336,6 +1336,7 @@ async function install(args) {
   if (clashes.length) throw new Error(`An installed Add On already uses this identity:
   - ${clashes.join("\n  - ")}
 Change "id" or "name" in manifest.json, or remove the other Add On.`);
+  let update = false;
   if (existsSync7(target) || isDanglingLink(target)) {
     const st = lstatSync(target);
     if (st.isSymbolicLink()) {
@@ -1345,20 +1346,31 @@ Change "id" or "name" in manifest.json, or remove the other Add On.`);
         return report(entries);
       }
       rmSync3(target);
-    } else if (process.platform === "win32" && args.flags["force"]) {
-      rmSync3(target, { recursive: true, force: true });
+    } else if (process.platform === "win32" && args.flags["force"] && st.isDirectory()) {
+      update = true;
     } else {
       throw new Error(`${target} exists and is not a symlink; remove it or pass --force (Windows copy)`);
     }
   }
   if (process.platform === "win32") {
-    cpSync2(dir, target, { recursive: true, filter: (src) => !src.includes(`${join7("node_modules")}`) });
-    console.log(`Copied ${dir} -> ${target}`);
+    const copied = (src) => !src.includes(`${join7("node_modules")}`);
+    if (update) prune(dir, target, copied);
+    cpSync2(dir, target, { recursive: true, force: true, filter: copied });
+    console.log(`${update ? "Updated" : "Copied"} ${dir} -> ${target}`);
   } else {
     symlinkSync(dir, target);
     console.log(`Linked ${target} -> ${dir}`);
   }
   return report(entries);
+}
+function prune(dir, target, copied) {
+  for (const entry of readdirSync5(target, { withFileTypes: true })) {
+    const src = join7(dir, entry.name);
+    const dest = join7(target, entry.name);
+    const there = copied(src) && (existsSync7(src) || isDanglingLink(src));
+    if (there && entry.isDirectory() && lstatSync(src).isDirectory()) prune(src, dest, copied);
+    else if (!there || entry.isDirectory() !== lstatSync(src).isDirectory()) rmSync3(dest, { recursive: true, force: true });
+  }
 }
 function sameFolder(a, b) {
   try {

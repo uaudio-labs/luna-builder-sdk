@@ -812,11 +812,12 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
 
   it('serves a media file to an Add On as a URL on its own origin (fact 114)', async () => {
     const { engine, luna } = await connected();
+    engine.installTokens['com.example.demo'] = '0123456789abcdef0123456789abcdef';
     engine.mediaFiles['/Movies/My Cut #1.mov'] = true;
     engine.mediaFiles['/Movies/latest.mov'] = '/Movies/My Cut #1.mov';
-    expect(await luna.gui.serveMediaFile('com.example.demo', '/Movies/My Cut #1.mov')).toBe('ua-content://com.example.demo/Movies/My%20Cut%20%231.mov');
+    expect(await luna.gui.serveMediaFile('com.example.demo', '/Movies/My Cut #1.mov')).toBe('ua-content://com.example.demo_t0123456789abcdef0123456789abcdef/Movies/My%20Cut%20%231.mov');
     // A link is served under the file it leads to; the id is matched without case.
-    expect(await luna.gui.serveMediaFile('COM.Example.Demo', '/Movies/latest.mov')).toBe('ua-content://com.example.demo/Movies/My%20Cut%20%231.mov');
+    expect(await luna.gui.serveMediaFile('COM.Example.Demo', '/Movies/latest.mov')).toBe('ua-content://com.example.demo_t0123456789abcdef0123456789abcdef/Movies/My%20Cut%20%231.mov');
     expect(engine.mediaServed).toEqual([
       { addOnId: 'com.example.demo', path: '/Movies/My Cut #1.mov' },
       { addOnId: 'com.example.demo', path: '/Movies/My Cut #1.mov' },
@@ -919,8 +920,9 @@ describe('Luna.Markers, Luna.Context, Luna.Automation, MIDI, Luna.Gui, Luna.Jobs
     engine.folders['/Other'] = ['notes.txt'];
     engine.mediaFiles['/Other/notes.txt'] = null;
     engine.grantFolder('/Project');
-    expect(await luna.gui.serveMediaFile('com.example.demo', '/Project/data.json')).toBe('ua-content://com.example.demo/Project/data.json');
-    expect(await luna.gui.serveMediaFile('com.example.demo', '/Project/img/cover.png')).toBe('ua-content://com.example.demo/Project/img/cover.png');
+    engine.installTokens['com.example.demo'] = '0123456789abcdef0123456789abcdef';
+    expect(await luna.gui.serveMediaFile('com.example.demo', '/Project/data.json')).toBe('ua-content://com.example.demo_t0123456789abcdef0123456789abcdef/Project/data.json');
+    expect(await luna.gui.serveMediaFile('com.example.demo', '/Project/img/cover.png')).toBe('ua-content://com.example.demo_t0123456789abcdef0123456789abcdef/Project/img/cover.png');
     const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: Luna.Error) => e.code);
     // Hidden files below it, and anything outside it that is not media, take the media rule.
     expect(await code(luna.gui.serveMediaFile('com.example.demo', '/Project/.env'))).toBe('uasrv.filesystem_error');

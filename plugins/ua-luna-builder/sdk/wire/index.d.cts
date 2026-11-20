@@ -466,6 +466,22 @@ declare class MockEngine {
         path: string;
     }[];
     /**
+     * Each installed Add On's install token, by lowercase id: 32 lowercase hex digits that LUNA
+     * gives an install (fact 114) and that end its page host (`<id>_t<token>`). The mock makes
+     * one up the first time an id needs it; set one to pin it.
+     *
+     * @example
+     * engine.installTokens['com.example.demo'] = '0123456789abcdef0123456789abcdef';
+     */
+    installTokens: Record<string, string>;
+    /**
+     * The install token of the Add On `id` (lowercase), made up on first use.
+     *
+     * @example
+     * const host = `com.example.demo_t${engine.installToken('com.example.demo')}`;
+     */
+    installToken(id: string): string;
+    /**
      * The showcase `/gui/install_add_on` installs from: each package id to the ids of the
      * Add Ons in it, all lowercase.
      *

@@ -3,6 +3,16 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 3.1.2 Beta 4 — 2026-11-20
+
+- The docs now explain that LUNA 3.1.2 keeps an Add On's secrets, allowed servers and web
+  storage for its install, not its `id`: an update starts with none, and removing the Add On
+  deletes its secrets (docs/MANIFEST.md, "What an install keeps").
+- `ua-builder install --force` on Windows updates the installed copy in place, so a reinstall
+  keeps the Add On's secrets, allowed servers and web storage.
+- `Luna.MockEngine` serves media files on LUNA 3.1.2's install host
+  (`ua-content://<id>_t<token>/...`); `engine.installTokens` pins the token.
+
 ## 3.1.2 Beta 3 — 2026-11-19
 
 - A new `"Education"` Add On category, for Add Ons that teach music or LUNA; `ua-builder` accepts

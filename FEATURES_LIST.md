@@ -168,7 +168,7 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 
 - Keep an Add On's data with the session in session storage (`session.storage`), with
   undoable or non-undoable edits.
-- Keep API keys and tokens in the OS keychain, scoped to the Add On (`luna.secrets`).
+- Keep API keys and tokens in the OS keychain, scoped to the Add On's install (`luna.secrets`).
 - Read LUNA's own preferences.
 
 ## LUNA's UI and Add Ons
