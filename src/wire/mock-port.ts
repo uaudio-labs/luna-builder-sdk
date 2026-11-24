@@ -271,6 +271,8 @@ export class MockEngine {
   readonly transactions: string[] = [];
   /** Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. */
   readonly midiSent: MockMidiSent[] = [];
+  /** Every route `set_page` handed to a page, in order (fact 243). The mock only records them. */
+  readonly pageRoutes: { page: string; route: string; contextType: string }[] = [];
   private readonly compiledClipFades: boolean;
   /** Per playlist path: published compiled-clip node names by start tick, and the next name. */
   private readonly compiled = new Map<string, { byStart: Map<number, string>; next: number }>();
@@ -636,12 +638,21 @@ export class MockEngine {
       commands: {
         ...progressSuppressionCommands(),
         set_page: (data, engine) => {
-          const body = (data ?? {}) as { page?: string; context_type?: string };
+          const body = (data ?? {}) as { page?: string; context_type?: string; route?: unknown };
+          const refuse = (why: string) => new UAError('uasrv.invalid_value', `set_page: ${why}`, { cmd: 'post', path: '/gui/set_page' });
+          // Fact 243: a route is checked before anything changes. Only the dashboard, the
+          // catalog and universe take one; universe's must be a printable path.
+          if (body.route !== undefined && body.route !== null) {
+            if (typeof body.route !== 'string' || body.route === '') throw refuse('route must be a non-empty string');
+            if (!['dashboard', 'catalog', 'universe'].includes(body.page ?? '')) throw refuse(`page ${String(body.page)} takes no route`);
+            if (body.page === 'universe' && /[\x00-\x20\x7f-\uffff\\#]/.test(body.route)) throw refuse('universe route is not a path');
+          }
           // Fact 236: LUNA Play is opened another way; set_page refuses it.
           if (!['mixer', 'timeline', 'home', 'addon', 'dashboard', 'catalog', 'universe'].includes(body.page ?? '')) {
-            throw new UAError('uasrv.invalid_value', `set_page: no page ${String(body.page)}`, { cmd: 'post', path: '/gui/set_page' });
+            throw refuse(`no page ${String(body.page)}`);
           }
           engine.setValue(`/gui/windows/${body.context_type ?? 'main'}`, 'page', body.page ?? 'timeline');
+          if (typeof body.route === 'string') engine.pageRoutes.push({ page: body.page ?? '', route: body.route, contextType: body.context_type ?? 'main' });
           return null;
         },
         open_url: () => null,

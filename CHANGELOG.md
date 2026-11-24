@@ -17,14 +17,20 @@ Changed (breaking)
   computer can take longer: pass `{ timeoutMs }` (or `{ wait: true }`, which waits without
   limit) where that matters. With nothing open it still rejects with `Luna.NoSessionOpen`.
 - `luna.gui.setPage()` takes a `Luna.SettablePage` (`'mixer' | 'timeline' | 'home' | 'addon' |
-  'dashboard'`) instead of any string, since LUNA refuses `lunaplay`, which it only reports
-  (fact 236). It resolves with nothing once the window shows the page, instead of with LUNA's
-  reply as soon as LUNA answered, and rejects with code `no_effect` if the window never shows
-  it. Code that read the reply, or passed another page name, must change.
+  'dashboard' | 'catalog' | 'universe'`) instead of any string, since LUNA refuses `lunaplay`,
+  which it only reports (fact 236). It resolves once the window shows the page (a minimised
+  window is restored and switched a moment later), instead of as soon as LUNA answered, and
+  rejects with code `no_effect` if the window never shows it. LUNA's reply carries no data, so
+  nothing is lost there. A page name held in a `string` must be narrowed to `SettablePage`.
 
 Added
 - `luna.session({ wait: true })` waits for the user to open a session, and `timeoutMs`
   bounds how long it waits.
+- `luna.gui.setPage(page, { route, contextType })` opens a page at a view inside it: the
+  dashboard's (`free_with_luna`), the catalog's (`filter:free`) or a path on the Universe site
+  (`index/showcase?kind=addon`). LUNA refuses a route for any other page, or an empty one,
+  before switching (fact 243). The second argument may still be the context type as a string.
+  `Luna.MockEngine` checks routes as LUNA does and records them in `engine.pageRoutes`.
 - `session.loadSources()` answers the session's source files loaded and ready in one call.
   `Collection.onAnyChange(listener, { props })` calls one listener when members come or go
   or the named props of any member change, following members added later.

@@ -835,19 +835,24 @@ if (path) video.src = await luna.gui.serveMediaFile('com.example.my-add-on', pat
 ### setPage()
 
 ```ts
-setPage(page, contextType): Promise<void>;
+setPage(page, options): Promise<void>;
 ```
 
-Switch the main window (or another context's window) to a page, and resolve once the
-window's `page` shows it (fact 236). LUNA refuses a page it cannot switch to, `lunaplay`
-among them, with `uasrv.invalid_value`.
+Switch the main window (or another context's window) to a page, optionally at a view
+inside it, and resolve once the window's `page` shows it (fact 236). LUNA answers with no
+data, so the window's `page` is the confirmation. A minimised window is restored and
+switched a moment later, which this waits for. LUNA refuses a page it cannot switch to,
+`lunaplay` among them, with `uasrv.invalid_value`, and one this window or LUNA build
+lacks with `uasrv.not_implemented`.
+
+The second argument is the context type (`'main'`) or [SetPageOptions](../interfaces/SetPageOptions.md).
 
 #### Parameters
 
-| Parameter | Type | Default value |
-| ------ | ------ | ------ |
-| `page` | [`SettablePage`](../type-aliases/SettablePage.md) | `undefined` |
-| `contextType` | `string` | `'main'` |
+| Parameter | Type |
+| ------ | ------ |
+| `page` | [`SettablePage`](../type-aliases/SettablePage.md) |
+| `options` | `string` \| [`SetPageOptions`](../interfaces/SetPageOptions.md) |
 
 #### Returns
 
@@ -858,6 +863,7 @@ among them, with `uasrv.invalid_value`.
 ```ts
 await luna.gui.setPage('mixer');
 luna.gui.main.page.value; // 'mixer'
+await luna.gui.setPage('universe', { route: 'index/showcase?kind=addon' });
 ```
 
 ***

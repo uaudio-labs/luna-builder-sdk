@@ -76,4 +76,37 @@ describe('gui.setPage() (fact 236)', () => {
     expect(luna.gui.main.page.value).toBe('mixer');
     await expect(luna.gui.setPage('lunaplay' as Luna.SettablePage)).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
   });
+
+  it('switches to the catalog and universe, and hands a route to the pages that take one (fact 243)', async () => {
+    const { luna, engine } = await connected();
+    await luna.gui.setPage('catalog', { route: 'filter:free' });
+    expect(luna.gui.main.page.value).toBe('catalog');
+    await luna.gui.setPage('universe', { route: 'index/showcase?kind=addon' });
+    expect(luna.gui.main.page.value).toBe('universe');
+    expect(engine.pageRoutes).toEqual([
+      { page: 'catalog', route: 'filter:free', contextType: 'main' },
+      { page: 'universe', route: 'index/showcase?kind=addon', contextType: 'main' },
+    ]);
+    const sent = engine.requests.filter((r) => r.path === '/gui/set_page').map((r) => r.data);
+    expect(sent[0]).toEqual({ page: 'catalog', context_type: 'main', route: 'filter:free' });
+  });
+
+  it('refuses a route for a page that takes none, an empty one, or a universe route that is not a path, before switching', async () => {
+    const { luna, engine } = await connected();
+    await luna.gui.setPage('timeline');
+    await expect(luna.gui.setPage('mixer', { route: 'x' })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.setPage('dashboard', { route: '' })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.setPage('universe', { route: 'a b' })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    await expect(luna.gui.setPage('universe', { route: 'a#b' })).rejects.toMatchObject({ code: 'uasrv.invalid_value' });
+    expect(luna.gui.main.page.value).toBe('timeline');
+    expect(engine.pageRoutes).toEqual([]);
+  });
+
+  it('still takes the context type as a string, and sends no route when none is given', async () => {
+    const { luna, engine } = await connected();
+    await luna.gui.setPage('home', 'main');
+    await luna.gui.setPage('mixer', { contextType: 'main' });
+    const sent = engine.requests.filter((r) => r.path === '/gui/set_page').map((r) => r.data);
+    expect(sent).toEqual([{ page: 'home', context_type: 'main' }, { page: 'mixer', context_type: 'main' }]);
+  });
 });

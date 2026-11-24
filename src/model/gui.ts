@@ -29,9 +29,26 @@ import { suppressProgress, type ProgressSuppression, type SuppressProgressOption
  * A page a LUNA window shows. `lunaplay` is reported while LUNA Play shows but cannot be set:
  * {@link Gui.setPage} takes a {@link SettablePage} (fact 236).
  */
-export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | (string & {});
-/** The pages {@link Gui.setPage} can switch a window to (fact 236). */
-export type SettablePage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard';
+export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'catalog' | 'universe' | 'lunaplay' | (string & {});
+/**
+ * The pages {@link Gui.setPage} can switch a window to (fact 236). `catalog` and `universe`
+ * are in the main window only, and only in LUNA builds that have them; elsewhere LUNA
+ * answers `uasrv.not_implemented`.
+ */
+export type SettablePage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'catalog' | 'universe';
+/** Options for {@link Gui.setPage}. */
+export interface SetPageOptions {
+  /** The window's context: `main` (the default), `alt_0`, `alt_1`, ... */
+  contextType?: string;
+  /**
+   * A view inside the page for its document to open: the dashboard's `free_with_luna`, the
+   * catalog's `filter:free`, or for `universe` a path on the site (`index/showcase?kind=addon`:
+   * printable ASCII, no spaces, `\` or `#`). Only those three pages take a route; LUNA refuses
+   * one for another page, or an empty one, with `uasrv.invalid_value` before anything changes
+   * (fact 243).
+   */
+  route?: string;
+}
 export type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
 /** Where an installed Add On lives: see {@link AddOn.installedFrom}. */
 export type AddOnInstalledFrom = 'folder' | 'link' | 'built_in';
@@ -453,16 +470,23 @@ export class Gui extends Node {
   }
 
   /**
-   * Switch the main window (or another context's window) to a page, and resolve once the
-   * window's `page` shows it (fact 236). LUNA refuses a page it cannot switch to, `lunaplay`
-   * among them, with `uasrv.invalid_value`.
+   * Switch the main window (or another context's window) to a page, optionally at a view
+   * inside it, and resolve once the window's `page` shows it (fact 236). LUNA answers with no
+   * data, so the window's `page` is the confirmation. A minimised window is restored and
+   * switched a moment later, which this waits for. LUNA refuses a page it cannot switch to,
+   * `lunaplay` among them, with `uasrv.invalid_value`, and one this window or LUNA build
+   * lacks with `uasrv.not_implemented`.
+   *
+   * The second argument is the context type (`'main'`) or {@link SetPageOptions}.
    *
    * @example
    * await luna.gui.setPage('mixer');
    * luna.gui.main.page.value; // 'mixer'
+   * await luna.gui.setPage('universe', { route: 'index/showcase?kind=addon' });
    */
-  async setPage(page: SettablePage, contextType = 'main'): Promise<void> {
-    await this.post('set_page', { page, context_type: contextType });
+  async setPage(page: SettablePage, options: string | SetPageOptions = {}): Promise<void> {
+    const { contextType = 'main', route } = typeof options === 'string' ? { contextType: options } : options;
+    await this.post('set_page', route === undefined ? { page, context_type: contextType } : { page, context_type: contextType, route });
     const path = `/gui/windows/${contextType}`;
     const shown = this.client.store.cell<string>(path, 'page');
     await settle(() => shown.value === page, 'setPage', {

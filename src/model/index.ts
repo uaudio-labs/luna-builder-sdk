@@ -74,7 +74,7 @@ export type { WarpMarker, WarpType, SetWarpOptions } from './warps';
 export { Gui, AddOn, AddOnInstance, GuiWindow } from './gui';
 export { ADD_ON_CATEGORIES, isAddOnCategory, suggestAddOnCategories } from './add-on-categories';
 export type { AddOnCategory, AddOnCategoryInfo } from './add-on-categories';
-export type { GuiPage, SettablePage, AddOnTarget, AddOnInstalledFrom, ProgressTask, FileEntry, NestedFileEntry, PluginWindow } from './gui';
+export type { GuiPage, SettablePage, SetPageOptions, AddOnTarget, AddOnInstalledFrom, ProgressTask, FileEntry, NestedFileEntry, PluginWindow } from './gui';
 export type { MidiEvent, ClipNote } from './clip';
 export { MidiClip, pairNotes, decodeMidiData, encodeMidiData } from './midi';
 export type { MidiRow, Note, MidiRowData, MidiHost } from './midi';

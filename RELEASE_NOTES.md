@@ -11,10 +11,11 @@ it carries, in brief. `CHANGELOG.md` has the detail.
   `Luna.MockEngine` sessions start `latching` (was `latch`) (see `CHANGELOG.md`).
 - **Breaking:** `luna.session()` rejects with `Luna.RequestTimeout` when a session takes more
   than 15 s to load; pass `{ timeoutMs }` for longer (see `CHANGELOG.md`).
-- **Breaking:** `luna.gui.setPage()` takes only `'mixer' | 'timeline' | 'home' | 'addon' |
-  'dashboard'` and resolves with nothing once the page shows, not with LUNA's reply (see
-  `CHANGELOG.md`).
+- **Breaking:** `luna.gui.setPage()` takes a `Luna.SettablePage` instead of any string, and
+  resolves once the window shows the page (see `CHANGELOG.md`).
 - `luna.session({ wait: true })` waits for the user to open a session.
+- `luna.gui.setPage()` opens the catalog and Universe, and takes a `route` to open a page at a
+  view inside it, such as a Universe path.
 - Session files: `session.loadSources()`, `source.filePath()` and `reveal()`,
   `session.sourceUsage()` (which tracks and clips use each file), and `AudioSource.origin`,
   `format` and `isRender` to tell recordings, imports and bounces from renderings.

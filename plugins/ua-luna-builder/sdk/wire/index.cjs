@@ -1354,6 +1354,8 @@ var MockEngine = class _MockEngine {
   transactions = [];
   /** Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. */
   midiSent = [];
+  /** Every route `set_page` handed to a page, in order (fact 243). The mock only records them. */
+  pageRoutes = [];
   compiledClipFades;
   /** Per playlist path: published compiled-clip node names by start tick, and the next name. */
   compiled = /* @__PURE__ */ new Map();
@@ -1688,10 +1690,17 @@ var MockEngine = class _MockEngine {
         ...progressSuppressionCommands(),
         set_page: (data, engine) => {
           const body = data ?? {};
+          const refuse = (why) => new UAError("uasrv.invalid_value", `set_page: ${why}`, { cmd: "post", path: "/gui/set_page" });
+          if (body.route !== void 0 && body.route !== null) {
+            if (typeof body.route !== "string" || body.route === "") throw refuse("route must be a non-empty string");
+            if (!["dashboard", "catalog", "universe"].includes(body.page ?? "")) throw refuse(`page ${String(body.page)} takes no route`);
+            if (body.page === "universe" && /[\x00-\x20\x7f-\uffff\\#]/.test(body.route)) throw refuse("universe route is not a path");
+          }
           if (!["mixer", "timeline", "home", "addon", "dashboard", "catalog", "universe"].includes(body.page ?? "")) {
-            throw new UAError("uasrv.invalid_value", `set_page: no page ${String(body.page)}`, { cmd: "post", path: "/gui/set_page" });
+            throw refuse(`no page ${String(body.page)}`);
           }
           engine.setValue(`/gui/windows/${body.context_type ?? "main"}`, "page", body.page ?? "timeline");
+          if (typeof body.route === "string") engine.pageRoutes.push({ page: body.page ?? "", route: body.route, contextType: body.context_type ?? "main" });
           return null;
         },
         open_url: () => null,

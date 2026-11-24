@@ -237,7 +237,8 @@ What `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries can 
 - List installed Add Ons with their version and where each was installed from.
 - Install Add Ons from LUNA's showcase, a GitHub repo or a share link, and ask the user to
   uninstall one.
-- Switch LUNA's window to a page and wait until it shows (`luna.gui.setPage()`).
+- Switch LUNA's window to a page, the plug-in catalog and Universe included, optionally at a
+  view inside it (a route), and wait until it shows (`luna.gui.setPage()`).
 - Hold back LUNA's progress dialog while a page draws its own.
 - Read LUNA's error notices (`luna.errors`).
 

@@ -7,6 +7,8 @@ type GuiPage =
   | "home"
   | "addon"
   | "dashboard"
+  | "catalog"
+  | "universe"
   | "lunaplay"
   | string & object;
 ```

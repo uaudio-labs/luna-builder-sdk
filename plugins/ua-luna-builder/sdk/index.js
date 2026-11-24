@@ -1567,6 +1567,8 @@ var MockEngine = class _MockEngine {
   transactions = [];
   /** Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. */
   midiSent = [];
+  /** Every route `set_page` handed to a page, in order (fact 243). The mock only records them. */
+  pageRoutes = [];
   compiledClipFades;
   /** Per playlist path: published compiled-clip node names by start tick, and the next name. */
   compiled = /* @__PURE__ */ new Map();
@@ -1901,10 +1903,17 @@ var MockEngine = class _MockEngine {
         ...progressSuppressionCommands(),
         set_page: (data, engine) => {
           const body = data ?? {};
+          const refuse = (why) => new UAError("uasrv.invalid_value", `set_page: ${why}`, { cmd: "post", path: "/gui/set_page" });
+          if (body.route !== void 0 && body.route !== null) {
+            if (typeof body.route !== "string" || body.route === "") throw refuse("route must be a non-empty string");
+            if (!["dashboard", "catalog", "universe"].includes(body.page ?? "")) throw refuse(`page ${String(body.page)} takes no route`);
+            if (body.page === "universe" && /[\x00-\x20\x7f-\uffff\\#]/.test(body.route)) throw refuse("universe route is not a path");
+          }
           if (!["mixer", "timeline", "home", "addon", "dashboard", "catalog", "universe"].includes(body.page ?? "")) {
-            throw new UAError("uasrv.invalid_value", `set_page: no page ${String(body.page)}`, { cmd: "post", path: "/gui/set_page" });
+            throw refuse(`no page ${String(body.page)}`);
           }
           engine.setValue(`/gui/windows/${body.context_type ?? "main"}`, "page", body.page ?? "timeline");
+          if (typeof body.route === "string") engine.pageRoutes.push({ page: body.page ?? "", route: body.route, contextType: body.context_type ?? "main" });
           return null;
         },
         open_url: () => null,
@@ -14705,16 +14714,23 @@ var Gui = class extends Node {
     return this.windows.byId("main") ?? new GuiWindow(this.client, "/gui/windows/main");
   }
   /**
-   * Switch the main window (or another context's window) to a page, and resolve once the
-   * window's `page` shows it (fact 236). LUNA refuses a page it cannot switch to, `lunaplay`
-   * among them, with `uasrv.invalid_value`.
+   * Switch the main window (or another context's window) to a page, optionally at a view
+   * inside it, and resolve once the window's `page` shows it (fact 236). LUNA answers with no
+   * data, so the window's `page` is the confirmation. A minimised window is restored and
+   * switched a moment later, which this waits for. LUNA refuses a page it cannot switch to,
+   * `lunaplay` among them, with `uasrv.invalid_value`, and one this window or LUNA build
+   * lacks with `uasrv.not_implemented`.
+   *
+   * The second argument is the context type (`'main'`) or {@link SetPageOptions}.
    *
    * @example
    * await luna.gui.setPage('mixer');
    * luna.gui.main.page.value; // 'mixer'
+   * await luna.gui.setPage('universe', { route: 'index/showcase?kind=addon' });
    */
-  async setPage(page, contextType = "main") {
-    await this.post("set_page", { page, context_type: contextType });
+  async setPage(page, options = {}) {
+    const { contextType = "main", route } = typeof options === "string" ? { contextType: options } : options;
+    await this.post("set_page", route === void 0 ? { page, context_type: contextType } : { page, context_type: contextType, route });
     const path = `/gui/windows/${contextType}`;
     const shown = this.client.store.cell(path, "page");
     await settle(() => shown.value === page, "setPage", {

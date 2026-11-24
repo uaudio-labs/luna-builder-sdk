@@ -441,6 +441,12 @@ declare class MockEngine {
     readonly transactions: string[];
     /** Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. */
     readonly midiSent: MockMidiSent[];
+    /** Every route `set_page` handed to a page, in order (fact 243). The mock only records them. */
+    readonly pageRoutes: {
+        page: string;
+        route: string;
+        contextType: string;
+    }[];
     private readonly compiledClipFades;
     /** Per playlist path: published compiled-clip node names by start tick, and the next name. */
     private readonly compiled;

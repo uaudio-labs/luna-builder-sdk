@@ -228,6 +228,7 @@
 | [SelectionSnapshot](interfaces/SelectionSnapshot.md) | The six selection properties as LUNA holds them, for [Context.restore](classes/Context.md#restore). |
 | [SendMidiTrackTarget](interfaces/SendMidiTrackTarget.md) | A track entry for [SendMidi.sendNoteToTracks](classes/SendMidi.md#sendnotetotracks). |
 | [SessionPackageRow](interfaces/SessionPackageRow.md) | - |
+| [SetPageOptions](interfaces/SetPageOptions.md) | Options for [Gui.setPage](classes/Gui.md#setpage). |
 | [SettleOptions](interfaces/SettleOptions.md) | - |
 | [SetWarpOptions](interfaces/SetWarpOptions.md) | Options for [Warps.set](classes/Warps.md#set). |
 | [ShortcutsBinding](interfaces/ShortcutsBinding.md) | The listeners [bindShortcuts](functions/bindShortcuts.md) installed. |
@@ -320,7 +321,7 @@
 | [SecretStorage](type-aliases/SecretStorage.md) | Where [Secrets](classes/Secrets.md) keeps values: the OS credential store, or page memory. |
 | [SeekTarget](type-aliases/SeekTarget.md) | Where to seek: a tick, or a bar|beat|tick position (`beat` defaults to 1, `tick` to 0). |
 | [SessionType](type-aliases/SessionType.md) | One of [SESSION\_TYPES](variables/SESSION_TYPES.md). |
-| [SettablePage](type-aliases/SettablePage.md) | The pages [Gui.setPage](classes/Gui.md#setpage) can switch a window to (fact 236). |
+| [SettablePage](type-aliases/SettablePage.md) | The pages [Gui.setPage](classes/Gui.md#setpage) can switch a window to (fact 236). `catalog` and `universe` are in the main window only, and only in LUNA builds that have them; elsewhere LUNA answers `uasrv.not_implemented`. |
 | [ShortcutBindings](type-aliases/ShortcutBindings.md) | - |
 | [ShortcutCommand](type-aliases/ShortcutCommand.md) | The commands the standard shortcuts cover. |
 | [ShortcutKeyEvent](type-aliases/ShortcutKeyEvent.md) | The parts of a `KeyboardEvent` a binding matches on. |

@@ -39,6 +39,7 @@ new MockEngine(options): MockEngine;
 | <a id="nextdialogfiles"></a> `nextDialogFiles` | `public` | `string`[] | `[]` | What the next mock file dialog "selects"; empty means the user cancelled. |
 | <a id="offlinepackages"></a> `offlinePackages` | `readonly` | `Set`\<`string`\> | `undefined` | Packages whose file is missing: the query answers `file_online: false` for them. |
 | <a id="packagetags"></a> `packageTags` | `readonly` | `Map`\<`string`, `string`[]\> | `undefined` | Tags per session package, added with `/workspace/add_tag` or set here (fact 161). |
+| <a id="pageroutes"></a> `pageRoutes` | `readonly` | `object`[] | `[]` | Every route `set_page` handed to a page, in order (fact 243). The mock only records them. |
 | <a id="preferencefiles"></a> `preferenceFiles` | `readonly` | `Map`\<`string`, `Record`\<`string`, `unknown`\>\> | `undefined` | Preference contexts as LUNA keeps them on disk, one record per context (fact 232): a context is loaded into `/preferences/<context>` only when `init_preference` names it. Seed one to model values left by an earlier run. |
 | <a id="requests"></a> `requests` | `readonly` | `object`[] | `[]` | Every request any port made, oldest first. Useful for asserting what a model did. |
 | <a id="showcase"></a> `showcase` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The showcase `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
