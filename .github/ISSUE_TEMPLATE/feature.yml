@@ -1,0 +1,20 @@
+name: Feature request
+description: Something the LUNA Builder SDK or LUNA's Add On support cannot do yet.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Request
+      description: What you want an Add On to be able to do, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "`ua-builder doctor` output, LUNA version and OS. `ua-builder feedback` and LUNA fill this in."
+      render: text
+    validations:
+      required: false

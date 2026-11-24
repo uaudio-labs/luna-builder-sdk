@@ -1,0 +1,24 @@
+name: SDK improvement
+description: A workflow the SDK made harder than it should. Coding agents send these after a "LUNA BUILDER SDK IMPROVEMENT" line.
+title: "[Improvement] "
+labels: ["improvement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Something worked, but the LUNA Builder SDK made it harder than it should be: a missing API, an awkward idiom, boilerplate the SDK could absorb.
+  - type: textarea
+    id: description
+    attributes:
+      label: Improvement
+      description: What you were doing, what was awkward, and the API you wished for, written as a prompt that could be used to update the SDK.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "`ua-builder doctor` output, LUNA version and OS. `ua-builder feedback` and LUNA fill this in."
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,20 @@
+name: Bug
+description: Something in the LUNA Builder SDK, ua-builder or an Add On API does not work.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Include error messages and the smallest code that shows it.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "`ua-builder doctor` output, LUNA version and OS. `ua-builder feedback` and LUNA fill this in."
+      render: text
+    validations:
+      required: false

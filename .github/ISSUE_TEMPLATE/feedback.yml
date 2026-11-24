@@ -1,0 +1,19 @@
+name: Feedback
+description: Anything else about the LUNA Builder SDK or Add Ons in LUNA.
+title: "[Feedback] "
+labels: ["feedback"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Feedback
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "`ua-builder doctor` output, LUNA version and OS. `ua-builder feedback` and LUNA fill this in."
+      render: text
+    validations:
+      required: false
