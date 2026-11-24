@@ -55,6 +55,36 @@ Last path segment: the uid or name the engine addresses this node by.
 
 ## Methods
 
+### addTag()
+
+```ts
+addTag(packageUid, tag): Promise<void>;
+```
+
+Tag a session package, as a template or session is tagged for [templates](#templates) and
+[query](#query) to find (fact 161). LUNA writes the tag into the package's metadata, so it
+travels with it. Rejects with `uasrv.read_only_property` for a factory package and
+`device.database_error` for an unknown one.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+| `tag` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.workspace.addTag(session.sessionPackageUid.value!, 'brochure');
+```
+
+***
+
 ### command()
 
 ```ts
@@ -83,6 +113,75 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
+### deleteUnusedMedia()
+
+```ts
+deleteUnusedMedia(packageUid, options): Promise<UnusedMedia>;
+```
+
+Remove a package's unused audio files (LUNA's Delete Unused Media, fact 240). By default
+they go to the trash, in a "<session> (Unused Media)" folder; `toTrash: false` deletes them
+for good. `clearUndo` first clears the session's undo history, so files only undo kept go
+too; `deleteAutoBackups` also removes the auto-backups that are all that uses a file,
+where LUNA allows it. Answers what was removed.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+| `options` | \{ `clearUndo?`: `boolean`; `deleteAutoBackups?`: `boolean`; `toTrash?`: `boolean`; \} |
+| `options.clearUndo?` | `boolean` |
+| `options.deleteAutoBackups?` | `boolean` |
+| `options.toTrash?` | `boolean` |
+
+#### Returns
+
+`Promise`\<[`UnusedMedia`](../interfaces/UnusedMedia.md)\>
+
+#### Example
+
+```ts
+const done = await luna.workspace.deleteUnusedMedia(pkgUid, { toTrash: true });
+console.log(`${done.unusedCount} files moved to the trash`);
+```
 
 ***
 
@@ -219,6 +318,38 @@ Most recently opened packages, newest first.
 
 ***
 
+### recentList()
+
+```ts
+recentList(limit): Promise<RecentSessions>;
+```
+
+The most recently opened packages as a live list, newest first, with `openSessionUid` on
+the rows that are open now. It queries again whenever a session is opened, closed or
+switched to (LUNA moves `last_opened` then), and on `refresh()`. Call `dispose()` when
+done.
+
+#### Parameters
+
+| Parameter | Type | Default value |
+| ------ | ------ | ------ |
+| `limit` | `number` | `20` |
+
+#### Returns
+
+`Promise`\<[`RecentSessions`](RecentSessions.md)\>
+
+#### Example
+
+```ts
+const recent = await luna.workspace.recentList(10);
+const draw = () => list.replaceChildren(...recent.items.map((r) => row(r.name, r.openSessionUid !== undefined)));
+recent.onChange(draw);
+draw();
+```
+
+***
+
 ### reload()
 
 ```ts
@@ -260,6 +391,76 @@ Full-text search over session metadata.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### templates()
+
+```ts
+templates(options): Promise<SessionPackageRow[]>;
+```
+
+The session templates (`.lunatemplate` packages) on disk, for
+`sessions.createFromTemplate()`. A template's `uid` is stored inside the package, so it is
+the same on every machine and survives a rename.
+
+`tag` keeps the templates carrying that tag, and `factory` the ones LUNA ships (`true`)
+or the user's (`false`); LUNA filters both itself (fact 162). LUNA restamps its factory
+templates' uids when it is built, so a tag is the steadier way to find one of those.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`TemplateQueryOptions`](../interfaces/TemplateQueryOptions.md) |
+
+#### Returns
+
+`Promise`\<[`SessionPackageRow`](../interfaces/SessionPackageRow.md)[]\>
+
+#### Example
+
+```ts
+const template = (await luna.workspace.templates()).find((t) => t.uid === MY_TEMPLATE_UID);
+if (template) await luna.sessions.createFromTemplate({ templatePackageUid: template.uid, name: 'My Song' });
+const [brochure] = await luna.workspace.templates({ tag: 'brochure', factory: true });
+```
+
+***
+
+### unusedMedia()
+
+```ts
+unusedMedia(packageUid, options): Promise<UnusedMedia>;
+```
+
+What `deleteUnusedMedia` would remove from a package, without removing anything (LUNA's
+pre-flight, fact 240). `unusedUids` and `kept` need a LUNA that lists files; an older one
+answers the counts only and leaves both `undefined`.
+
+LUNA keeps a file that the session uses now, that undo or a saved version could bring
+back, or that only an auto-backup uses; `kept` gives the reason for each.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+| `options` | \{ `clearUndo?`: `boolean`; \} |
+| `options.clearUndo?` | `boolean` |
+
+#### Returns
+
+`Promise`\<[`UnusedMedia`](../interfaces/UnusedMedia.md)\>
+
+#### Example
+
+```ts
+const plan = await luna.workspace.unusedMedia(session.sessionPackageUid.value!);
+plan.unusedCount;                                  // files that would go
+plan.unusedUids?.map((uid) => sources.byId(uid)?.displayName.value);
+plan.kept?.filter((k) => k.reason === 'undo');     // freed by clearing undo
+```
 
 ***
 

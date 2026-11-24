@@ -3,6 +3,7 @@
  * `/sessions/<uid>/tracks/<id>` and `/sessions/<uid>/buses/<id>`.
  */
 import type { Client } from '../client/client';
+import { automationModeOrdinal, type AutomationModeName } from './automation';
 import type { Prop, WritableProp } from '../store/prop';
 import { Collection } from './collection';
 import type { Control } from './control';
@@ -13,7 +14,7 @@ import { Node } from './node';
 import { Output } from './output';
 
 export type AutomationMode = 'off' | 'read' | 'write' | 'touch' | 'latch';
-export type StemFormat = 'mono' | 'stereo' | string;
+export type StemFormat = 'mono' | 'stereo' | (string & {});
 
 export abstract class Channel extends Node {
   readonly uid: Prop<string>;
@@ -77,6 +78,19 @@ export abstract class Channel extends Node {
     if (!target) return undefined;
     await target.setPlugin(pluginId);
     return target;
+  }
+
+  /**
+   * Set this track's or bus's automation mode (`off | read | write | touch | latch`) in one
+   * undo step. `set_automode_on_tracks` takes track and bus uids alike (fact 167);
+   * {@link automationMode} follows on LUNA's push.
+   *
+   * @example
+   * await track.setAutomationMode('touch');
+   * await session.master!.setAutomationMode('read');
+   */
+  setAutomationMode(mode: AutomationModeName): Promise<unknown> {
+    return this.wire.post(`/sessions/${this.sessionUid}/set_automode_on_tracks`, { uid: this.sessionUid, tracks: [this.id], automation_mode: automationModeOrdinal(mode) });
   }
 
   /** Main output gain. */

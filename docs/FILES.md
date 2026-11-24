@@ -179,8 +179,8 @@ Luna.onPathDrop(({ paths }) => paths[0] && show(paths[0]));
 const saved = prefs.value('video', 'path').value;
 if (saved) await show(saved);
 
-// The bytes, when the page needs them (decode audio, read a header). XMLHttpRequest, not
-// fetch: on Windows the URL is file:///, which fetch() refuses.
+// The bytes, when the page needs them (decode audio, read a header). XMLHttpRequest works
+// on every LUNA version; before 3.1.2 the Windows URL is file:///, which fetch() refuses.
 function readBytes(url) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -200,11 +200,43 @@ const bytes = await readBytes(video.src);
   its first bytes (`MThd` for a Standard MIDI File).
 - The file is served to the Add On you name, and only to its pages. Ask again after every
   reload: LUNA forgets the files it served when it quits, so keep the path, not the URL.
-- On macOS the URL is `ua-content://` and answers byte ranges, so a long video seeks without
-  being read whole. On Windows it is `file:///`: media elements and XMLHttpRequest load it,
-  `fetch()` does not.
+- The URL is `ua-content://` on macOS and Windows and answers byte ranges, so a long video
+  seeks without being read whole. On Windows a file on a network share (a `\\server\share`
+  path) is not served. In LUNA before 3.1.2 the Windows URL is `file:///`: media elements and
+  XMLHttpRequest load it, `fetch()` does not.
 - Outside LUNA there are no paths: keep the File route (`<input type="file">`, HTML drop)
   there, and check `luna.gui.available()` before offering paths.
+
+## The session's own files
+
+A session's audio files are `session.sources`, one `Luna.AudioSource` each.
+
+```js
+const sources = await session.loadSources();      // loaded, with every file's properties
+const label = (s) => s.displayName.value ?? `Untitled ${s.id.slice(0, 6)}`;
+sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+```
+
+- **Names.** LUNA names some files with their own uid (fact 238). `displayName` is
+  `undefined` for those, so show your own label.
+- **Where a file is.** `session.sourcePath(source)` is the file's path on disk, read from
+  the session with no request. `await source.filePath()` gives the same path outside a
+  session. Recordings, imports and bounces are in `<package>/audio/<uid>.wav`. A clip
+  rendering (`source.isRender`) is in `<package>/renders/clips/<uid>.wav`, and LUNA remakes it
+  as needed (fact 239). `source.reveal()` shows the file in Finder or Explorer.
+- **Who uses a file.** `await session.sourceUsage()` lists the tracks and clips that use each
+  file, on every playlist, and updates as clips change. `usage.byId(source.id)?.trackUids`
+  gives the tracks; `isUsed()` says whether any clip uses the file.
+- **Dragging a file onto LUNA's timeline.** Call `Luna.startSourceDrag(event, { session,
+  source })` in a `dragstart` listener. LUNA places a clip from that file where it is dropped
+  and reuses the session's file rather than importing a copy (fact 241). Drag a clip's
+  `sourceUid`, not its rendering.
+- **Unused files.** `luna.workspace.unusedMedia(packageUid)` lists the files LUNA's Delete
+  Unused Media would remove, and why it keeps each of the others (`session`, `undo`,
+  `version`, `backup`). `deleteUnusedMedia(packageUid, { toTrash: true })` removes them
+  (fact 240). A LUNA from before the lists existed returns only the counts.
+- **The package.** `await session.package()` is the session's own `SessionPackage`: its
+  name, folder, favourite flag and comments.
 
 ## Inside LUNA today
 

@@ -54,7 +54,13 @@ npx ua-builder probe http://localhost:8790/         # read the served page's liv
 npx ua-builder install                              # link into LUNA's Add Ons folder -> Add Ons menu
 npx ua-builder pack                                 # .lunaaddon file (a zip) for distribution
 npx ua-builder doctor                               # what is reachable from here
+npx ua-builder feedback bug --title "..." --body "..."   # tell UA: improvement, bug, feature or feedback
 ```
+
+`ua-builder feedback` opens a prefilled issue on
+[github.com/uaudio-labs/luna-builder-sdk](https://github.com/uaudio-labs/luna-builder-sdk/issues)
+for you to check and submit; sending it needs a GitHub account. Coding agents offer to send
+their `LUNA BUILDER SDK IMPROVEMENT` notes the same way.
 
 ## Install for an agent
 
@@ -145,7 +151,8 @@ Every observable value is a `Prop`: read `.value`, subscribe with `.onChange(fn)
 write with `.set(v)` where allowed. Collections (`session.tracks`, `playlist.clips`)
 expose `.items`, `.byId(id)` and `.onChange(fn)`.
 
-From a script tag (required on Windows, where Add Ons load from `file://`):
+From a script tag (works everywhere, and required on Windows in LUNA before 3.1.2, where Add
+Ons loaded from `file://`):
 
 ```html
 <script src="luna.global.js"></script>
@@ -166,7 +173,7 @@ const luna = await Luna.connect({ port_: engine.port() });
 
 ```
 src/          the SDK source; everything public is exported from src/luna.ts as Luna.<Name>
-cli/          ua-builder new/serve/install/pack/doctor, built to dist/cli.js
+cli/          ua-builder new/serve/install/pack/doctor/feedback, built to dist/cli.js
 tests/        vitest: unit (Luna.MockEngine), live (a running LUNA)
 docs/         QUICKSTART.md, FILES.md, FILES-GUIDE.md, CLIPS.md, RECIPES.md, MANIFEST.md, PROTOCOL.md, EVIDENCE.md, llms.txt, api/
 skills/       create-add-on, add-feature, test-add-on, debug-connection, verify-add-on, edit-clips

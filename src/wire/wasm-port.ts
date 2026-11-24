@@ -116,10 +116,10 @@ export class WasmPort implements Port {
     return this.request('get', appendParams(path, params), '');
   }
 
-  async set(path: string, data: unknown): Promise<void> {
+  async set(path: string, data: unknown, params?: Record<string, string>): Promise<void> {
     // In a browser the page owns the microphone: arming is the moment to ask for it.
     if (data === true && RECORD_ENABLED.test(path)) this.engine.wantAudioInput();
-    await this.request('set', path, encodePayload(data));
+    await this.request('set', appendParams(path, params), encodePayload(data));
   }
 
   post(path: string, data?: unknown): Promise<unknown> {

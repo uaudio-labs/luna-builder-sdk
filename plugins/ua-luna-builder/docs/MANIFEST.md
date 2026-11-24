@@ -85,7 +85,7 @@ An entry missing any of these is dropped. One that can open as a `"window"` (the
 |---|---|---|
 | `id` | string | Unique across everything installed. Reverse-DNS by convention. Compared without case: `com.Example.Foo` and `com.example.foo` are the same Add On, and LUNA reports the id in lowercase (in `/gui/add_ons/<id>` too), so write it in lowercase. On macOS it also names the page's storage (see [How LUNA loads the page](#how-luna-loads-the-page)), so keep it the same from one version to the next. |
 | `title` | string | Display name: the menu item, and the panel header for `"browser"` and `"editor"`. Also unique; duplicates collapse into one. Newer LUNA releases also accept it as `name`, which wins when both are present, but releases that predate `name` read only `title` and drop an entry without it, so write `title`. `ua-builder` warns when an entry has both and they differ. LUNA reports it as the `name` property under `/gui/add_ons/<id>` (`name` on `luna.gui.addOns` items in the SDK). |
-| `html` or `url` | string | Exactly one; an entry with neither or both is dropped. `html` is a page shipped with the Add On, relative to the manifest folder (preferred, so the Add On stays relocatable) or absolute. `url` is a hosted page used as-is; you are responsible for it being well formed. It must be `https`, unless it is on this computer (a dev server such as `http://localhost:5173/`): LUNA drops an `http` one, and does not load an `https` one until the user allows its server (see [Network](#network)). Either may carry its own query string (`index.html?page=a`). |
+| `html` or `url` | string | Exactly one; an entry with neither or both is dropped. `html` is a page shipped with the Add On, relative to the manifest folder (preferred, so the Add On stays relocatable) or absolute. `url` is a hosted page used as-is; you are responsible for it being well formed. It must be `https`, unless it is on this computer (a dev server such as `http://localhost:5173/`): LUNA drops an `http` one, and does not load an `https` one until the user allows its server (see [Network](#network)). Either may carry its own query string (`index.html?page=a`). LUNA refuses to install a `.lunaaddon` file whose `html` page is missing, absolute, or outside the Add On folder. |
 
 ### Optional
 
@@ -223,6 +223,9 @@ On in the wrong menu rather than an error. `ua-builder` rejects it.
 - A LUNA from before this kept one window state for all sessions, in its preferences; that
   state is not carried into sessions, so each session starts with the window closed.
 - `false` (the default): the window and its menu item do not depend on a session.
+- An Add On that opens, creates or closes sessions itself must not be `show_with_session`:
+  its page unloads as the session it is in closes, before it can open the next one. See
+  [An Add On with a session of its own](#an-add-on-with-a-session-of-its-own).
 - A value that is not a boolean is ignored, so the default applies. `ua-builder` rejects it.
 - It has no effect on `"app"`, `"browser"` or `"editor"` entries.
 - LUNA reports it as the `show_with_session` property under `/gui/add_ons/<id>`
@@ -328,8 +331,8 @@ folder up to the folder that contains everything the page needs. With `".."`, a 
 - The `html` file has to be inside the resulting folder. If it is not, the offset is
   silently ignored and the page is served from its own folder instead.
 - It is ignored for `url` entries, and an empty string is the same as leaving it out.
-- It only affects how local resources are served on macOS (see below). On Windows it has no
-  effect, but it is harmless to set.
+- It applies on macOS and Windows alike (see "How LUNA loads the page" below). LUNA before
+  3.1.2 ignored it on Windows.
 
 ### Added by the builder SDK
 
@@ -456,20 +459,22 @@ nowhere else. `Luna.ADD_ON_CATEGORIES` holds this list in the SDK, and
   session; any other page gets a new one each time LUNA shows the Add On.
 - Spaces in an `html` path are percent-encoded, so folder and file names with spaces work. A
   `url` is otherwise used exactly as written; encode it yourself.
-- On macOS local pages are served from a custom scheme (not `file://`) so `fetch()` of local
-  resources works, but only inside the manifest folder or the `local_content_offset` folder;
-  a reference outside it fails to load. Keep resource references relative to the `html` file
-  so they resolve either way.
-- On macOS each local page is its own origin, belonging to this install of the Add On (see
+- Local pages are served from a custom scheme (`ua-content://`, not `file://`) on macOS and
+  Windows alike, so `fetch()` of local resources and module scripts work, but only inside the
+  manifest folder or the `local_content_offset` folder; a reference outside it fails to load.
+  Keep resource references relative to the `html` file so they resolve either way.
+- Each local page is its own origin, belonging to this install of the Add On (see
   "What an install keeps" below): its `localStorage`, IndexedDB, cookies and cache are its
   own, and no other Add On can read or change them, even one that declares the same `id`.
   They last across launches and edits to the installed files; a reinstall or an update
   starts with empty storage. Web storage is still not a place for secrets such as API keys;
   use `luna.secrets` (see "Secrets" below).
-- On Windows the page is loaded from `file://`, where module scripts are blocked: use the
-  script-tag bundle (`vendor/luna.global.js`), and bundle your own code to a classic script.
-  The `add-on-typescript` template (`ua-builder new --template add-on-typescript`) builds
-  TypeScript, and React or any other bundled library, into one (`dist/main.js`).
+- LUNA before 3.1.2 loaded the page from `file://` on Windows, where module scripts are
+  blocked and Add Ons do not get separate origins. An Add On that has to run there uses the
+  script-tag bundle (`vendor/luna.global.js`) and bundles its own code to a classic script,
+  which works on every version. The `add-on-typescript` template
+  (`ua-builder new --template add-on-typescript`) builds TypeScript, and React or any other
+  bundled library, into one (`dist/main.js`).
 - A `url` page is loaded from your server, so normal web rules apply (CORS, mixed content).
 
 The native bridge is minimal: native file drops, which deliver absolute **paths** rather
@@ -477,6 +482,33 @@ than `File`s, and secrets. Use them through `Luna.onPathDrop()` and `luna.secret
 directly; without the bridge, file drops reach the page as ordinary HTML `drop` events with
 `File`s (see [FILES.md](FILES.md) for which to use) and secrets stay in page memory.
 Everything else goes over the engine connection, including LUNA UI actions through `luna.gui`.
+
+## An Add On with a session of its own
+
+An Add On can keep one session of its own, a practice or demo session, and find it again
+each time it runs, by giving it a fixed package uid:
+
+```js
+const OWN = '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7';   // a UUID you make once, kept in your code
+
+async function ownSession() {
+  const row = (await luna.workspace.query()).find((r) => r.uid === OWN);
+  if (row?.online) return luna.sessions.open(OWN);
+  return luna.sessions.create({ name: 'My Add On', sessionPackageUid: OWN });
+}
+```
+
+- Look the uid up in the rows' `uid`: `workspace.query({ sessionPackageUid })` does not filter
+  the sessions list, it lists every package.
+- `online: false` means LUNA remembers the package but its file is gone (the user deleted or
+  moved it); creating it again under the same uid starts it afresh.
+- `sessionType: 'standalone'` with a `standaloneId` (your Add On's `id` is a good one) keeps
+  it in a standalone sessions folder of its own instead of with the user's sessions.
+- LUNA has one session open at a time: opening yours closes the user's. Ask first, save
+  theirs if they want (`session.save()`), and remember its package uid
+  (`session.sessionPackageUid.value`) to reopen it when they are done.
+- The Add On that switches sessions must not be `show_with_session`, or its page unloads as
+  the user's session closes. Use a `"window"` without it, or an `"app"`.
 
 ## Network
 

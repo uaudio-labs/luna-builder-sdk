@@ -1,16 +1,13 @@
 /** `ua-builder pack` zips the Add On folder into a `.lunaaddon`, leaving dotfiles and OS metadata out. */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { newAddOn } from '../../cli/new';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { isBuildOnly, isJunk, pack } from '../../cli/pack';
 import { bundlePath, parseArgs } from '../../cli/util';
 import { crc32, createZip } from '../../cli/zip';
-
-const dirs: string[] = [];
+import { quietly, removeTemps, scaffold } from '../helpers/cli';
 
 /** Every entry of a zip, read through its central directory, with file contents inflated. */
 function readZip(zip: Buffer): Map<string, Buffer | null> {
@@ -38,13 +35,6 @@ function readZip(zip: Buffer): Map<string, Buffer | null> {
   return out;
 }
 
-async function scaffold(...argv: string[]): Promise<{ parent: string; dir: string }> {
-  const parent = mkdtempSync(join(tmpdir(), 'ua-pack-'));
-  dirs.push(parent);
-  await quietly(() => newAddOn(parseArgs(['demo', '--dir', parent, ...argv])));
-  return { parent, dir: join(parent, 'demo') };
-}
-
 /** A TypeScript scaffold with the files `npm run build` would write, without running it. */
 async function builtTypeScript(): Promise<{ parent: string; dir: string }> {
   const scaffolded = await scaffold('--template', 'add-on-typescript');
@@ -54,27 +44,11 @@ async function builtTypeScript(): Promise<{ parent: string; dir: string }> {
   return scaffolded;
 }
 
-async function quietly<T>(run: () => Promise<T>): Promise<{ result: T; out: string }> {
-  const lines: string[] = [];
-  const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
-  const warn = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
-  const error = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
-  try {
-    return { result: await run(), out: lines.join('\n') };
-  } finally {
-    log.mockRestore();
-    warn.mockRestore();
-    error.mockRestore();
-  }
-}
-
 beforeAll(() => {
   if (!bundlePath()) throw new Error('run "npm run build" first: the scaffold vendors dist/luna.global.js');
 });
 
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+afterEach(removeTemps);
 
 describe('ua-builder pack', () => {
   it('names dotfiles and OS metadata files as junk, and nothing else', () => {

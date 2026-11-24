@@ -28,6 +28,7 @@ new MockEngine(options): MockEngine;
 | <a id="blessrequests"></a> `blessRequests` | `public` | `string`[] | `[]` | Every folder LUNA asked the user about (`/gui/add_blessed_folder`, `show_folder_dialog`), in order, whatever the answer. |
 | <a id="builtinaddons"></a> `builtInAddOns` | `public` | `string`[] | `[]` | Add On ids (lowercase) under `/gui/add_ons` that are built into LUNA, which `/gui/uninstall_add_on` refuses. |
 | <a id="folders"></a> `folders` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The disk `/gui/list_files` reads: each folder's absolute path to the names inside it, a trailing `/` marking a subfolder. A name starting with `.` is hidden, as in LUNA. **Example** `engine.folders['/Samples'] = ['kick.wav', 'Loops/', '.DS_Store'];` |
+| <a id="importedfiles"></a> `importedFiles` | `readonly` | `object`[] | `[]` | MIDI and video files `import_file` copied into packages (fact 163). |
 | <a id="importedpackages"></a> `importedPackages` | `public` | `string`[] | `[]` | Package ids in [showcase](#showcase) that were imported from a link, which `/gui/remove_add_on` removes (from here and from `showcase`); any other package is the showcase's own and is refused. |
 | <a id="installingpackages"></a> `installingPackages` | `public` | `string`[] | `[]` | Package ids `/gui/install_add_on` treats as already installing. |
 | <a id="installtokens"></a> `installTokens` | `public` | `Record`\<`string`, `string`\> | `{}` | Each installed Add On's install token, by lowercase id: 32 lowercase hex digits that LUNA gives an install (fact 114) and that end its page host (`<id>_t<token>`). The mock makes one up the first time an id needs it; set one to pin it. **Example** `engine.installTokens['com.example.demo'] = '0123456789abcdef0123456789abcdef';` |
@@ -36,8 +37,12 @@ new MockEngine(options): MockEngine;
 | <a id="mediaserved"></a> `mediaServed` | `public` | `object`[] | `[]` | Every file `/gui/serve_media_file` served, in order, by lowercase Add On id. |
 | <a id="midisent"></a> `midiSent` | `readonly` | [`MockMidiSent`](../interfaces/MockMidiSent.md)[] | `[]` | Live MIDI LUNA delivered through `/sessions/send_midi` and `send_midi_all_notes_off`, oldest first. |
 | <a id="nextdialogfiles"></a> `nextDialogFiles` | `public` | `string`[] | `[]` | What the next mock file dialog "selects"; empty means the user cancelled. |
+| <a id="offlinepackages"></a> `offlinePackages` | `readonly` | `Set`\<`string`\> | `undefined` | Packages whose file is missing: the query answers `file_online: false` for them. |
+| <a id="packagetags"></a> `packageTags` | `readonly` | `Map`\<`string`, `string`[]\> | `undefined` | Tags per session package, added with `/workspace/add_tag` or set here (fact 161). |
+| <a id="preferencefiles"></a> `preferenceFiles` | `readonly` | `Map`\<`string`, `Record`\<`string`, `unknown`\>\> | `undefined` | Preference contexts as LUNA keeps them on disk, one record per context (fact 232): a context is loaded into `/preferences/<context>` only when `init_preference` names it. Seed one to model values left by an earlier run. |
 | <a id="requests"></a> `requests` | `readonly` | `object`[] | `[]` | Every request any port made, oldest first. Useful for asserting what a model did. |
 | <a id="showcase"></a> `showcase` | `public` | `Record`\<`string`, `string`[]\> | `{}` | The showcase `/gui/install_add_on` installs from: each package id to the ids of the Add Ons in it, all lowercase. **Example** `engine.showcase['uaudio-labs.midi-notation'] = ['com.uaudio.midi-notation', 'com.uaudio.score-view'];` |
+| <a id="templatetracks"></a> `templateTracks` | `readonly` | `Map`\<`string`, `string`[]\> | `undefined` | Per template package, the tracks a session made from it starts with. |
 | <a id="touches"></a> `touches` | `readonly` | `string`[] | `[]` | `set_touch` calls, as `<control path>:on|off`, oldest first. |
 | <a id="transactions"></a> `transactions` | `readonly` | `string`[] | `[]` | Transaction commands seen: `begin`, `commit`, `abort`. |
 | <a id="uninstallanswer"></a> `uninstallAnswer` | `public` | `"remove"` \| `"cancel"` | `'remove'` | How the user answers LUNA's prompt for `/gui/uninstall_add_on`: `'remove'` (the default) takes the Add On out of `/gui/add_ons`, `'cancel'` leaves it. |
@@ -87,7 +92,65 @@ set grantedFolders(folders): void;
 
 `void`
 
+***
+
+### progressSuppressions
+
+#### Get Signature
+
+```ts
+get progressSuppressions(): ReadonlyMap<string, string>;
+```
+
+The `/gui` progress suppression handles held, uid (no dashes) to owner (fact 223).
+
+##### Returns
+
+`ReadonlyMap`\<`string`, `string`\>
+
 ## Methods
+
+### addAnalysis()
+
+```ts
+addAnalysis(
+   packageUid, 
+   sourceUid, 
+   kind, 
+   payload, 
+   options): void;
+```
+
+Add an analysis result to a source (fact 205): `<source>/analysis/<kind>` with `count`,
+`md5` and versions, and its stored result as `payload`, which a `file/data` read answers.
+`transients` pages by `index`/`count` like LUNA; the others answer whole. Pass the payload
+in LUNA's shape (fact 207), e.g. `{ data: { keyData: [{ key: 'C major', confidence: 0.9 }] } }`.
+Adding it again updates the node, as a re-analysis does (fact 206).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+| `sourceUid` | `string` |
+| `kind` | `string` |
+| `payload` | `Record`\<`string`, `unknown`\> |
+| `options` | \{ `count?`: `number`; `md5?`: `string` \| `null`; `sourcePath?`: `string`; \} |
+| `options.count?` | `number` |
+| `options.md5?` | `string` \| `null` |
+| `options.sourcePath?` | `string` |
+
+#### Returns
+
+`void`
+
+#### Example
+
+```ts
+engine.addAnalysis('pkg1', 'src1', 'instrument', { instrument: 'vocals', confidence: 0.8 });
+```
+
+***
 
 ### addAssignment()
 
@@ -183,17 +246,22 @@ engine.addChord('abc', 0, 'Am7');
 addDevice(id, options): void;
 ```
 
-Add a hardware device with `inputs` named inputs, the shape `luna.audioInputs()` reads
-(fact 76).
+Add a hardware device with `inputs` named inputs (uids `in_1`, `in_2`, ...) and `outputs`
+named outputs (`out_1`, ...), with the properties LUNA's input and output nodes publish
+(facts 76, 185, 189). Each input carries the four live analyses, off (fact 186). With
+`autoGain`, tracks routed to its inputs report `supports_auto_gain` (fact 194).
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `id` | `string` |
-| `options` | \{ `inputs?`: `string`[]; `online?`: `boolean`; `stemFormat?`: `string`; \} |
+| `options` | \{ `autoGain?`: `boolean`; `inputs?`: `string`[]; `ioType?`: `string`; `online?`: `boolean`; `outputs?`: `string`[]; `stemFormat?`: `string`; \} |
+| `options.autoGain?` | `boolean` |
 | `options.inputs?` | `string`[] |
+| `options.ioType?` | `string` |
 | `options.online?` | `boolean` |
+| `options.outputs?` | `string`[] |
 | `options.stemFormat?` | `string` |
 
 #### Returns
@@ -203,8 +271,101 @@ Add a hardware device with `inputs` named inputs, the shape `luna.audioInputs()`
 #### Example
 
 ```ts
-engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'] });
+engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'], outputs: ['Monitor'], autoGain: true });
 ```
+
+***
+
+### addDeviceInput()
+
+```ts
+addDeviceInput(
+   deviceId, 
+   name, 
+   options): string;
+```
+
+Plug an input into a device that exists (hotplug): LUNA pushes it as `added` (fact 185).
+Unplug one with `removeNode`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `deviceId` | `string` |
+| `name` | `string` |
+| `options` | \{ `channel?`: `number`; `ioType?`: `string`; `stemFormat?`: `string`; `uid?`: `string`; \} |
+| `options.channel?` | `number` |
+| `options.ioType?` | `string` |
+| `options.stemFormat?` | `string` |
+| `options.uid?` | `string` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+engine.addDeviceInput('Apollo', 'Hi-Z', { uid: 'hiz' });
+```
+
+***
+
+### addErrorNotice()
+
+```ts
+addErrorNotice(notice): string;
+```
+
+Raise an error notice in `/errors` (fact 235), as LUNA's error service does: `group` is
+stored as LUNA stores it, JSON text. Answers its uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `notice` | \{ `code`: `string`; `groups?`: `string`[]; `level?`: `string`; `payload?`: `string`; `timestamp?`: `number`; `title?`: `string`; `uid?`: `string`; \} |
+| `notice.code` | `string` |
+| `notice.groups?` | `string`[] |
+| `notice.level?` | `string` |
+| `notice.payload?` | `string` |
+| `notice.timestamp?` | `number` |
+| `notice.title?` | `string` |
+| `notice.uid?` | `string` |
+
+#### Returns
+
+`string`
+
+***
+
+### addLyric()
+
+```ts
+addLyric(session, line): number;
+```
+
+Add a lyric line to a session (fact 152): a ruler line at a tick, or with `sourceUid` a line
+transcribed from that source, at nanoseconds into it. `words` is stored as LUNA sends it, a
+JSON string. Answers the line's rowid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `session` | `string` |
+| `line` | \{ `length?`: `number`; `location`: `number`; `rowid?`: `number`; `sourceUid?`: `string`; `text`: `string`; `words?`: `object`[]; \} |
+| `line.length?` | `number` |
+| `line.location` | `number` |
+| `line.rowid?` | `number` |
+| `line.sourceUid?` | `string` |
+| `line.text` | `string` |
+| `line.words?` | `object`[] |
+
+#### Returns
+
+`number`
 
 ***
 
@@ -307,17 +468,26 @@ Create a node (and any missing ancestors). Pushes `added` to subscribers.
 addPackage(uid, options): void;
 ```
 
-Register a session package in the workspace.
+Register a session package in the workspace. `template` makes it a session template
+(`.lunatemplate`) that `new_session_from_template` copies, with `tracks` as the new
+session's tracks; `online: false` is one whose file is missing. `sessionType` is the
+row's `session_type` (`'default'`, `'standalone'`, ...), `directoryPath` its folder.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `uid` | `string` |
-| `options` | \{ `favorite?`: `boolean`; `lastOpened?`: `number`; `name?`: `string`; \} |
+| `options` | \{ `directoryPath?`: `string`; `factory?`: `boolean`; `favorite?`: `boolean`; `lastOpened?`: `number`; `name?`: `string`; `online?`: `boolean`; `sessionType?`: `string`; `template?`: `boolean`; `tracks?`: `string`[]; \} |
+| `options.directoryPath?` | `string` |
+| `options.factory?` | `boolean` |
 | `options.favorite?` | `boolean` |
 | `options.lastOpened?` | `number` |
 | `options.name?` | `string` |
+| `options.online?` | `boolean` |
+| `options.sessionType?` | `string` |
+| `options.template?` | `boolean` |
+| `options.tracks?` | `string`[] |
 
 #### Returns
 
@@ -340,13 +510,14 @@ when absent); `formats` the `[input, output]` stem formats it runs in (any when 
 | Parameter | Type |
 | ------ | ------ |
 | `pluginId` | `string` |
-| `options` | \{ `categories?`: `string`[]; `effectType?`: `string`; `favorite?`: `boolean`; `formats?`: \[`string`, `string`\][]; `manufacturer?`: `string`; `name?`: `string`; `version?`: `string`; \} |
+| `options` | \{ `categories?`: `string`[]; `effectType?`: `string`; `favorite?`: `boolean`; `formats?`: \[`string`, `string`\][]; `manufacturer?`: `string`; `name?`: `string`; `sdkType?`: `string`; `version?`: `string`; \} |
 | `options.categories?` | `string`[] |
 | `options.effectType?` | `string` |
 | `options.favorite?` | `boolean` |
 | `options.formats?` | \[`string`, `string`\][] |
 | `options.manufacturer?` | `string` |
 | `options.name?` | `string` |
+| `options.sdkType?` | `string` |
 | `options.version?` | `string` |
 
 #### Returns
@@ -373,7 +544,8 @@ its uid.
 | ------ | ------ |
 | `pluginId` | `string` |
 | `name` | `string` |
-| `options` | \{ `factory?`: `boolean`; `favorite?`: `boolean`; `tags?`: `string`[]; `uid?`: `string`; `version?`: `number`; \} |
+| `options` | \{ `description?`: `string`; `factory?`: `boolean`; `favorite?`: `boolean`; `tags?`: `string`[]; `uid?`: `string`; `version?`: `number`; \} |
+| `options.description?` | `string` |
 | `options.factory?` | `boolean` |
 | `options.favorite?` | `boolean` |
 | `options.tags?` | `string`[] |
@@ -462,12 +634,15 @@ pair per 125 samples at 48 kHz, one coarse pair per twelve fine (fact 72).
 | ------ | ------ |
 | `packageUid` | `string` |
 | `uid` | `string` |
-| `options` | \{ `analysis?`: `boolean`; `lengthNs?`: `number`; `name?`: `string`; `sampleRate?`: `number`; `stemFormat?`: `string`; \} |
+| `options` | \{ `analysis?`: `boolean`; `format?`: `string`; `lengthNs?`: `number`; `name?`: `string`; `origin?`: `number`; `sampleRate?`: `number`; `stemFormat?`: `string`; `unnamed?`: `boolean`; \} |
 | `options.analysis?` | `boolean` |
+| `options.format?` | `string` |
 | `options.lengthNs?` | `number` |
 | `options.name?` | `string` |
+| `options.origin?` | `number` |
 | `options.sampleRate?` | `number` |
 | `options.stemFormat?` | `string` |
+| `options.unnamed?` | `boolean` |
 
 #### Returns
 
@@ -517,12 +692,14 @@ it, or, with `trackNames`, a track per name, named as the preset saved them. Ret
 | Parameter | Type |
 | ------ | ------ |
 | `name` | `string` |
-| `options` | \{ `factory?`: `boolean`; `favorite?`: `boolean`; `tags?`: `string`[]; `trackNames?`: `string`[]; `trackType?`: `"instrument"` \| `"audio"` \| `"bus"`; `uid?`: `string`; \} |
+| `options` | \{ `description?`: `string`; `factory?`: `boolean`; `favorite?`: `boolean`; `plugins?`: `object`[]; `tags?`: `string`[]; `trackNames?`: `string`[]; `trackType?`: `"bus"` \| `"instrument"` \| `"audio"`; `uid?`: `string`; \} |
+| `options.description?` | `string` |
 | `options.factory?` | `boolean` |
 | `options.favorite?` | `boolean` |
+| `options.plugins?` | `object`[] |
 | `options.tags?` | `string`[] |
 | `options.trackNames?` | `string`[] |
-| `options.trackType?` | `"instrument"` \| `"audio"` \| `"bus"` |
+| `options.trackType?` | `"bus"` \| `"instrument"` \| `"audio"` |
 | `options.uid?` | `string` |
 
 #### Returns
@@ -639,6 +816,26 @@ Make the next `times` requests on `path` fail with `code`.
 
 ***
 
+### finishJob()
+
+```ts
+finishJob(uid): void;
+```
+
+End a job started under a `hold` plan (see [planNextJob](#plannextjob)).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `uid` | `string` |
+
+#### Returns
+
+`void`
+
+***
+
 ### finishRender()
 
 ```ts
@@ -653,11 +850,11 @@ Drive a render to a terminal state, the way LUNA's engine would (fact 44). With
 | Parameter | Type |
 | ------ | ------ |
 | `uid` | `string` |
-| `options` | \{ `error?`: `string`; `percent?`: `number`; `remove?`: `boolean`; `state?`: `"completed"` \| `"aborted"` \| `"failed"`; \} |
+| `options` | \{ `error?`: `string`; `percent?`: `number`; `remove?`: `boolean`; `state?`: `"completed"` \| `"failed"` \| `"aborted"`; \} |
 | `options.error?` | `string` |
 | `options.percent?` | `number` |
 | `options.remove?` | `boolean` |
-| `options.state?` | `"completed"` \| `"aborted"` \| `"failed"` |
+| `options.state?` | `"completed"` \| `"failed"` \| `"aborted"` |
 
 #### Returns
 
@@ -791,6 +988,38 @@ True when `uid` is a mock MIDI device's output port uid.
 
 ***
 
+### keepMedia()
+
+```ts
+keepMedia(
+   packageUid, 
+   uid, 
+   reason): void;
+```
+
+Make `delete_unused_media` keep a file of a package for `reason` (`'undo'`, `'version'`,
+`'backup'`, ...), as LUNA keeps one undo history or a saved version still uses (fact 240).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+| `uid` | `string` |
+| `reason` | `string` |
+
+#### Returns
+
+`void`
+
+#### Example
+
+```ts
+engine.keepMedia('pkg_abc', 'src3', 'undo');
+```
+
+***
+
 ### loadTrackPreset()
 
 ```ts
@@ -915,7 +1144,8 @@ overrideCommand(path, handler): void;
 ```
 
 Replace the handler of the command at `path` (for example
-`/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71).
+`/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71),
+or add a command the mock does not model to a node it has.
 
 #### Parameters
 
@@ -932,6 +1162,36 @@ Replace the handler of the command at `path` (for example
 
 ```ts
 engine.overrideCommand('/sessions/abc/delete_clip', () => null);
+engine.overrideCommand('/workspace/some_new_command', (data) => ({ ok: true }));
+```
+
+***
+
+### planNextJob()
+
+```ts
+planNextJob(plan): void;
+```
+
+How the next job the mock starts ends (facts 200-202): `completed` (default), `empty`
+(LUNA's `failed` with `job.no_result`), `failed` with `error`, or `instant`, where the job
+is added, finished and removed in one turn, as LUNA's cached-analysis path can (fact 202).
+`hold` keeps it running until [finishJob](#finishjob) or a cancel.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `plan` | [`MockJobPlan`](../interfaces/MockJobPlan.md) |
+
+#### Returns
+
+`void`
+
+#### Example
+
+```ts
+engine.planNextJob({ outcome: 'failed', error: 'job.provider_unavailable' });
 ```
 
 ***
@@ -1147,6 +1407,57 @@ Remove a node and its subtree. Pushes `removed` to subscribers.
 
 ***
 
+### resetWebClient()
+
+```ts
+resetWebClient(owner): void;
+```
+
+An embedded LUNA page (`dashboard`, `luna_play`, ...) reloading: drops its and every legacy suppression (fact 224).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `owner` | `string` |
+
+#### Returns
+
+`void`
+
+***
+
+### setActiveAudioEngine()
+
+```ts
+setActiveAudioEngine(info): void;
+```
+
+Change the root's `active_audio_engine` (fact 190), as LUNA does when the driver or the
+audio setting changes.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `info` | \{ `audio_engine_type`: `string`; `devices`: `unknown`[]; `enabled`: `boolean`; `outputs?`: `unknown`[]; \} |
+| `info.audio_engine_type` | `string` |
+| `info.devices` | `unknown`[] |
+| `info.enabled` | `boolean` |
+| `info.outputs?` | `unknown`[] |
+
+#### Returns
+
+`void`
+
+#### Example
+
+```ts
+engine.setActiveAudioEngine({ enabled: false, audio_engine_type: '', devices: [] });
+```
+
+***
+
 ### setAssistantEnabled()
 
 ```ts
@@ -1164,6 +1475,71 @@ Connect or disconnect UA Assistant, which preset recommendations need (fact 121)
 #### Returns
 
 `void`
+
+***
+
+### setCommandEnabled()
+
+```ts
+setCommandEnabled(
+   nodePath, 
+   command, 
+   enabled): void;
+```
+
+Publish whether `command` on `nodePath` is enabled, as LUNA does at
+`<nodePath>/<command>/enabled` (fact 234), and push changes. Posting the command is not
+affected: LUNA's own handlers decide what a disabled command does.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `nodePath` | `string` |
+| `command` | `string` |
+| `enabled` | `boolean` |
+
+#### Returns
+
+`void`
+
+***
+
+### setInputAnalysis()
+
+```ts
+setInputAnalysis(
+   deviceId, 
+   inputUid, 
+   results): boolean;
+```
+
+Publish analysis results on a device input, as LUNA does when a result is due (fact 187).
+A result for an analysis that is off is dropped, as LUNA has nothing running to produce it;
+returns whether anything was published. A signal-level peak also reaches any Auto Gain
+channel listening to a track on that input (fact 191).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `deviceId` | `string` |
+| `inputUid` | `string` |
+| `results` | \{ `instrument?`: `string` \| `null`; `signalLevelPeak?`: `number`; `stereoDetect?`: `boolean`; `tempo?`: `number`; \} |
+| `results.instrument?` | `string` \| `null` |
+| `results.signalLevelPeak?` | `number` |
+| `results.stereoDetect?` | `boolean` |
+| `results.tempo?` | `number` |
+
+#### Returns
+
+`boolean`
+
+#### Example
+
+```ts
+engine.setInputAnalysis('Apollo', 'in_1', { signalLevelPeak: 0.5, tempo: 120 });
+```
 
 ***
 
@@ -1225,6 +1601,39 @@ Engine-side property change: updates the tree and pushes to every subscribed por
 #### Returns
 
 `void`
+
+***
+
+### startJob()
+
+```ts
+startJob(spec): string;
+```
+
+Start a job under `/jobs/<uid>` as deviced's Job_Service does (fact 200): the node appears
+(status `queued`) a turn after the command answers, runs and reports progress a turn at a
+time, then publishes its error and terminal status and is removed in the same turn.
+`work` runs just before it ends and answers whether anything was found. Returns the uid.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `spec` | \{ `jobType`: `string`; `sessionUid`: `string`; `targetUid?`: `string`; `work?`: () => `boolean`; \} |
+| `spec.jobType` | `string` |
+| `spec.sessionUid` | `string` |
+| `spec.targetUid?` | `string` |
+| `spec.work?` | () => `boolean` |
+
+#### Returns
+
+`string`
+
+#### Example
+
+```ts
+const uid = engine.startJob({ sessionUid: 'abc', jobType: 'chord_extraction' });
+```
 
 ***
 

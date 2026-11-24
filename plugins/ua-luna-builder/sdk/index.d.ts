@@ -89,8 +89,12 @@ interface Port {
     readonly connected: boolean;
     /** Read a node or property. Resolves to the reply `data`. */
     get(path: string, options?: GetOptions): Promise<unknown>;
-    /** Write a property. Resolves when the engine acknowledges. */
-    set(path: string, data: unknown): Promise<void>;
+    /**
+     * Write a property. Resolves when the engine acknowledges. `params` are request parameters
+     * sent beside the write as query parameters, for a write the engine qualifies by them
+     * (`name_modified=true` on a track rename, fact 165); most writes have none.
+     */
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     /** Invoke a command. Resolves to the reply `data` (often `null`). */
     post(path: string, data?: unknown): Promise<unknown>;
     /**
@@ -267,7 +271,7 @@ declare class WebSocketPort implements Port {
      */
     open(): Promise<void>;
     get(path: string, options?: GetOptions): Promise<unknown>;
-    set(path: string, data: unknown): Promise<void>;
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     post(path: string, data?: unknown): Promise<unknown>;
     subscribe(path: string, handler: EventHandler, options?: SubscribeOptions): Unsubscribe;
     onStatus(listener: StatusListener): Unsubscribe;
@@ -289,6 +293,14 @@ interface MockNodeSpec {
     properties?: Record<string, unknown>;
     readOnly?: string[];
     commands?: Record<string, CommandHandler>;
+}
+/** How {@link MockEngine.startJob} ends the next job; see {@link MockEngine.planNextJob}. */
+interface MockJobPlan {
+    outcome?: 'completed' | 'empty' | 'failed' | 'instant' | undefined;
+    /** The `job.*` error a `failed` job reports. Default `job.internal`. */
+    error?: string;
+    /** Keep the job running until `engine.finishJob(uid)` or a cancel. */
+    hold?: boolean;
 }
 /** A row for {@link MockEngine.midiEdit}. */
 interface MockMidiRow {
@@ -328,6 +340,11 @@ interface MockEngineOptions {
      * clips. Default `true`; `false` models a LUNA from before they were added (fact 116).
      */
     compiledClipFades?: boolean;
+    /**
+     * Publish LUNA's Auto Gain service at `/auto_gain`. Default `true`; `false` models a LUNA
+     * whose Auto Gain feature is off, where the node does not exist (fact 191).
+     */
+    autoGain?: boolean;
 }
 declare class MockEngine {
     private readonly nodes;
@@ -486,6 +503,7 @@ declare class MockEngine {
         formats?: [string, string][];
         favorite?: boolean;
         version?: string;
+        sdkType?: string;
     }): void;
     /** `/plugins/query` (fact 127), with LUNA's slot rules. Categories pass through untranslated. */
     queryPlugins(data: unknown): {
@@ -501,6 +519,7 @@ declare class MockEngine {
         favorite?: boolean;
         version?: number;
         tags?: string[];
+        description?: string;
     }): string;
     /**
      * `/presets/query` (facts 98, 120, 132). A plugin's presets, or a device type's; with
@@ -525,11 +544,20 @@ declare class MockEngine {
         factory?: boolean;
         favorite?: boolean;
         tags?: string[];
+        description?: string;
+        plugins?: {
+            plugin_id: string;
+            name: string;
+        }[];
     }): string;
     /** Add a group of track preset tags, as {@link addPresetTagGroup} does for a plugin. */
     addTrackPresetTagGroup(name: string, tags: string[], options?: {
         category?: string;
     }): string;
+    private static readonly SLOT_STATE;
+    private slotState;
+    private applySlotState;
+    private clearSlot;
     /**
      * `post /presets/devices/track/load` (fact 132): a track preset or an instrument plugin's
      * preset onto a track. The track records the preset and takes its name unless its
@@ -561,12 +589,139 @@ declare class MockEngine {
      * whose `uid` is given (fact 122).
      */
     private ensurePresetPlugin;
-    /** Register a session package in the workspace. */
+    /**
+     * Add an analysis result to a source (fact 205): `<source>/analysis/<kind>` with `count`,
+     * `md5` and versions, and its stored result as `payload`, which a `file/data` read answers.
+     * `transients` pages by `index`/`count` like LUNA; the others answer whole. Pass the payload
+     * in LUNA's shape (fact 207), e.g. `{ data: { keyData: [{ key: 'C major', confidence: 0.9 }] } }`.
+     * Adding it again updates the node, as a re-analysis does (fact 206).
+     *
+     * @example
+     * engine.addAnalysis('pkg1', 'src1', 'instrument', { instrument: 'vocals', confidence: 0.8 });
+     */
+    addAnalysis(packageUid: string, sourceUid: string, kind: string, payload: Record<string, unknown>, options?: {
+        count?: number;
+        md5?: string | null;
+        sourcePath?: string;
+    }): void;
+    /** A `file/data` read of a non-overview analysis: LUNA answers nothing without a count (fact 205). */
+    private analysisPage;
+    /**
+     * How the next job the mock starts ends (facts 200-202): `completed` (default), `empty`
+     * (LUNA's `failed` with `job.no_result`), `failed` with `error`, or `instant`, where the job
+     * is added, finished and removed in one turn, as LUNA's cached-analysis path can (fact 202).
+     * `hold` keeps it running until {@link finishJob} or a cancel.
+     *
+     * @example
+     * engine.planNextJob({ outcome: 'failed', error: 'job.provider_unavailable' });
+     */
+    planNextJob(plan: MockJobPlan): void;
+    /**
+     * Start a job under `/jobs/<uid>` as deviced's Job_Service does (fact 200): the node appears
+     * (status `queued`) a turn after the command answers, runs and reports progress a turn at a
+     * time, then publishes its error and terminal status and is removed in the same turn.
+     * `work` runs just before it ends and answers whether anything was found. Returns the uid.
+     *
+     * @example
+     * const uid = engine.startJob({ sessionUid: 'abc', jobType: 'chord_extraction' });
+     */
+    startJob(spec: {
+        sessionUid: string;
+        jobType: string;
+        targetUid?: string;
+        work?: () => boolean;
+    }): string;
+    /** End a job started under a `hold` plan (see {@link planNextJob}). */
+    finishJob(uid: string): void;
+    private readonly jobPlans;
+    private readonly jobFinishers;
+    /**
+     * `extract_chords` and `extract_lyrics` on the session's main context (facts 203, 204): a
+     * clip, or the context's selected playlists; the job targets the clip's track. What they
+     * find is the mock's stand-in, not a detector's: chords `C G Am F` a bar apart over the clip,
+     * and one transcribed line per second of source.
+     */
+    private installExtractionCommands;
+    /**
+     * Add a lyric line to a session (fact 152): a ruler line at a tick, or with `sourceUid` a line
+     * transcribed from that source, at nanoseconds into it. `words` is stored as LUNA sends it, a
+     * JSON string. Answers the line's rowid.
+     */
+    addLyric(session: string, line: {
+        location: number;
+        text: string;
+        length?: number;
+        sourceUid?: string;
+        words?: {
+            word: string;
+            offset: number;
+            length: number;
+        }[];
+        rowid?: number;
+    }): number;
+    /**
+     * Register a session package in the workspace. `template` makes it a session template
+     * (`.lunatemplate`) that `new_session_from_template` copies, with `tracks` as the new
+     * session's tracks; `online: false` is one whose file is missing. `sessionType` is the
+     * row's `session_type` (`'default'`, `'standalone'`, ...), `directoryPath` its folder.
+     */
     addPackage(uid: string, options?: {
         name?: string;
         lastOpened?: number;
         favorite?: boolean;
+        factory?: boolean;
+        template?: boolean;
+        tracks?: string[];
+        online?: boolean;
+        directoryPath?: string;
+        sessionType?: string;
     }): void;
+    /**
+     * Make `delete_unused_media` keep a file of a package for `reason` (`'undo'`, `'version'`,
+     * `'backup'`, ...), as LUNA keeps one undo history or a saved version still uses (fact 240).
+     *
+     * @example engine.keepMedia('pkg_abc', 'src3', 'undo');
+     */
+    keepMedia(packageUid: string, uid: string, reason: string): void;
+    /**
+     * Publish whether `command` on `nodePath` is enabled, as LUNA does at
+     * `<nodePath>/<command>/enabled` (fact 234), and push changes. Posting the command is not
+     * affected: LUNA's own handlers decide what a disabled command does.
+     */
+    setCommandEnabled(nodePath: string, command: string, enabled: boolean): void;
+    /**
+     * Raise an error notice in `/errors` (fact 235), as LUNA's error service does: `group` is
+     * stored as LUNA stores it, JSON text. Answers its uid.
+     */
+    addErrorNotice(notice: {
+        level?: string;
+        code: string;
+        title?: string;
+        payload?: string;
+        groups?: string[];
+        uid?: string;
+        timestamp?: number;
+    }): string;
+    /** Per template package, the tracks a session made from it starts with. */
+    readonly templateTracks: Map<string, string[]>;
+    /**
+     * Preference contexts as LUNA keeps them on disk, one record per context (fact 232): a
+     * context is loaded into `/preferences/<context>` only when `init_preference` names it.
+     * Seed one to model values left by an earlier run.
+     */
+    readonly preferenceFiles: Map<string, Record<string, unknown>>;
+    /** Packages whose file is missing: the query answers `file_online: false` for them. */
+    readonly offlinePackages: Set<string>;
+    /** Tags per session package, added with `/workspace/add_tag` or set here (fact 161). */
+    readonly packageTags: Map<string, string[]>;
+    /** MIDI and video files `import_file` copied into packages (fact 163). */
+    readonly importedFiles: {
+        pkg: string;
+        uid: string;
+        type: 'midi' | 'video';
+        name: string;
+        path: string;
+    }[];
     /** A new client connection. */
     port(): MockPort;
     /** Create a node (and any missing ancestors). Pushes `added` to subscribers. */
@@ -649,10 +804,12 @@ declare class MockEngine {
     private readonly recommenders;
     /**
      * Replace the handler of the command at `path` (for example
-     * `/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71).
+     * `/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71),
+     * or add a command the mock does not model to a node it has.
      *
      * @example
      * engine.overrideCommand('/sessions/abc/delete_clip', () => null);
+     * engine.overrideCommand('/workspace/some_new_command', (data) => ({ ok: true }));
      */
     overrideCommand(path: string, handler: CommandHandler): void;
     /** Make the next `times` requests on `path` fail with `code`. */
@@ -673,6 +830,10 @@ declare class MockEngine {
         trackType?: string;
         stemFormat?: string;
     }): void;
+    /** The `/gui` progress suppression handles held, uid (no dashes) to owner (fact 223). */
+    get progressSuppressions(): ReadonlyMap<string, string>;
+    /** An embedded LUNA page (`dashboard`, `luna_play`, ...) reloading: drops its and every legacy suppression (fact 224). */
+    resetWebClient(owner: string): void;
     /**
      * Add a source audio file to a session package's workspace folder. With `analysis`, it also
      * carries a fine and a coarse overview, sized from its length the way LUNA's is: one fine
@@ -680,23 +841,86 @@ declare class MockEngine {
      */
     addSource(packageUid: string, uid: string, options?: {
         name?: string;
+        unnamed?: boolean;
         stemFormat?: string;
         lengthNs?: number;
         sampleRate?: number;
         analysis?: boolean;
+        origin?: number;
+        format?: string;
     }): void;
     /**
-     * Add a hardware device with `inputs` named inputs, the shape `luna.audioInputs()` reads
-     * (fact 76).
+     * Add a hardware device with `inputs` named inputs (uids `in_1`, `in_2`, ...) and `outputs`
+     * named outputs (`out_1`, ...), with the properties LUNA's input and output nodes publish
+     * (facts 76, 185, 189). Each input carries the four live analyses, off (fact 186). With
+     * `autoGain`, tracks routed to its inputs report `supports_auto_gain` (fact 194).
      *
      * @example
-     * engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'] });
+     * engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'], outputs: ['Monitor'], autoGain: true });
      */
     addDevice(id: string, options?: {
         inputs?: string[];
+        outputs?: string[];
         stemFormat?: string;
         online?: boolean;
+        autoGain?: boolean;
+        ioType?: string;
     }): void;
+    /**
+     * Plug an input into a device that exists (hotplug): LUNA pushes it as `added` (fact 185).
+     * Unplug one with `removeNode`.
+     *
+     * @example
+     * engine.addDeviceInput('Apollo', 'Hi-Z', { uid: 'hiz' });
+     */
+    addDeviceInput(deviceId: string, name: string, options?: {
+        uid?: string;
+        stemFormat?: string;
+        channel?: number;
+        ioType?: string;
+    }): string;
+    /**
+     * Publish analysis results on a device input, as LUNA does when a result is due (fact 187).
+     * A result for an analysis that is off is dropped, as LUNA has nothing running to produce it;
+     * returns whether anything was published. A signal-level peak also reaches any Auto Gain
+     * channel listening to a track on that input (fact 191).
+     *
+     * @example
+     * engine.setInputAnalysis('Apollo', 'in_1', { signalLevelPeak: 0.5, tempo: 120 });
+     */
+    setInputAnalysis(deviceId: string, inputUid: string, results: {
+        signalLevelPeak?: number;
+        tempo?: number;
+        instrument?: string | null;
+        stereoDetect?: boolean;
+    }): boolean;
+    /**
+     * Change the root's `active_audio_engine` (fact 190), as LUNA does when the driver or the
+     * audio setting changes.
+     *
+     * @example
+     * engine.setActiveAudioEngine({ enabled: false, audio_engine_type: '', devices: [] });
+     */
+    setActiveAudioEngine(info: {
+        enabled: boolean;
+        audio_engine_type: string;
+        devices: unknown[];
+        outputs?: unknown[];
+    }): void;
+    /** Devices whose inputs support Auto Gain (`addDevice({ autoGain })`). */
+    private readonly autoGainDevices;
+    /** True when a track in any session is routed to the input `uid` (fact 185). */
+    private inputUsed;
+    /** The device input path a track is routed to, if it names one. */
+    private inputOfChannel;
+    /** After a routing change: every input's `in_use`, and the track's `supports_auto_gain` (facts 185, 194). */
+    private routingChanged;
+    /** An analysis switch moved: LUNA republishes the result at its no-result value (facts 186-187). */
+    private analysisSwitched;
+    /** LUNA itself moving an input's signal-level switch (Auto Gain, fact 188): pushed to every client. */
+    private switchSignalLevel;
+    /** `/auto_gain`, its `channels` and its commands (facts 191-193). */
+    private addAutoGainService;
     /**
      * Add a MIDI device under LUNA's device (`/devices/<LUNA_DEVICE_UID>/midi`, fact 123). The
      * first call also adds LUNA's device, the `midi` folder, and the `All` and `None` entries
@@ -879,7 +1103,7 @@ declare class MockPort implements Port {
     private readonly statusListeners;
     get connected(): boolean;
     get(path: string, options?: GetOptions): Promise<unknown>;
-    set(path: string, data: unknown): Promise<void>;
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     post(path: string, data?: unknown): Promise<unknown>;
     subscribe(path: string, handler: EventHandler, _options?: SubscribeOptions): Unsubscribe;
     onStatus(listener: StatusListener): Unsubscribe;
@@ -1047,7 +1271,7 @@ declare class WasmPort implements Port {
     /** Engine descriptor for logs. */
     get url(): string;
     get(path: string, options?: GetOptions): Promise<unknown>;
-    set(path: string, data: unknown): Promise<void>;
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     post(path: string, data?: unknown): Promise<unknown>;
     subscribe(path: string, handler: EventHandler, options?: SubscribeOptions): Unsubscribe;
     onStatus(listener: StatusListener): Unsubscribe;
@@ -1295,7 +1519,7 @@ declare class Store {
      * Write a property: the cell takes `value` at once, and `wire` (default `value`) is what is
      * sent, for a value whose wire form differs, such as a number that must go as a float literal.
      */
-    set(nodePath: string, property: string, value: unknown, wire?: unknown): Promise<void>;
+    set(nodePath: string, property: string, value: unknown, wire?: unknown, params?: Record<string, string>): Promise<void>;
     /** Raw event tap, called before cells are written. For delta-stream properties. */
     onEvent(listener: (event: Event$1) => void): Unsubscribe;
     /** Drop a subtree from the mirror (after a `removed`, or when a view is disposed). */
@@ -1323,6 +1547,7 @@ declare class Store {
  * @example
  * const beats = location.tick / Luna.TICKS_PER_BEAT;
  * const displayTick = Math.floor((location.tick % Luna.TICKS_PER_BEAT) / Luna.TICKS_PER_DISPLAY_TICK);
+ * const grid = Luna.triplet(Luna.THIRTY_SECOND_NOTE);   // note lengths, in engine ticks
  */
 declare const DISPLAY_TICKS_PER_BEAT = 960;
 declare const TICKS_PER_DISPLAY_TICK = 100000000;
@@ -1332,6 +1557,27 @@ declare const HALF_NOTE: number;
 declare const QUARTER_NOTE: number;
 declare const EIGHTH_NOTE: number;
 declare const SIXTEENTH_NOTE: number;
+declare const THIRTY_SECOND_NOTE: number;
+declare const SIXTY_FOURTH_NOTE: number;
+declare const ONE_TWENTY_EIGHTH_NOTE: number;
+/**
+ * The dotted length of a note: one and a half times it. Takes and gives engine ticks, so it
+ * composes with the note constants for a grid or a quantize value.
+ *
+ * @example
+ * Luna.dotted(Luna.QUARTER_NOTE);              // 144e9, a dotted quarter
+ * Luna.dotted(Luna.dotted(Luna.EIGHTH_NOTE));  // not double-dotted: 1.5 * 1.5 * an eighth
+ */
+declare function dotted(note: number): number;
+/**
+ * The triplet length of a note: two thirds of it, so three fill the time of two. Takes and
+ * gives engine ticks (whole numbers for every note constant here, 128th included).
+ *
+ * @example
+ * Luna.triplet(Luna.EIGHTH_NOTE);    // 32e9, three of them per beat
+ * const grid = Luna.triplet(Luna.SIXTEENTH_NOTE);
+ */
+declare function triplet(note: number): number;
 /**
  * A bar|beat position as the engine reports it in `location.bar_beat`, and as
  * `timeline.barBeat()` returns it. `tick` is in **engine** ticks (the remainder within the
@@ -1394,6 +1640,210 @@ declare function formatMinSec(seconds: number | undefined, options?: {
     fraction?: number;
 }): string;
 
+/** The analysis node names LUNA uses (fact 205). */
+type AnalysisKind = 'overview' | 'overview_coarse' | 'key' | 'tempo' | 'instrument' | 'transients' | 'chord';
+/**
+ * One analysis of a source. `count` and `md5` change when the analysis does: a recording's
+ * overview `count` grows as LUNA writes it (its `md5` stays `null` until the take is stored),
+ * and a finished analysis gets its digest (facts 205, 206).
+ *
+ * @example
+ * await source.analysis.tempo.load();
+ * if (source.analysis.tempo.count.value) console.log(await source.analysis.tempo.read());
+ */
+declare class AnalysisNode extends Node {
+    /** Which analysis this is. */
+    readonly kind: AnalysisKind;
+    /** How many entries the result holds (overview pairs, transients, chord segments, guesses). */
+    readonly count: Prop<number>;
+    /** Digest of the stored result; `null` while a recording still writes it. Key a cache on it. */
+    readonly md5: Prop<string | null>;
+    readonly version: Prop<number>;
+    readonly versionMinor: Prop<number>;
+    /**
+     * The stored result as LUNA sends it (`{ version, version_minor, index, count, data, ... }`),
+     * or `undefined` when there is none. LUNA answers nothing unless a count is asked for, so
+     * this asks for all of it unless `count` is given (fact 205).
+     *
+     * @example
+     * const raw = await source.analysis.chord.readRaw();
+     */
+    readRaw(options?: {
+        index?: number;
+        count?: number;
+    }): Promise<Record<string, unknown> | undefined>;
+}
+/** A key guess, best first. */
+interface KeyCandidate {
+    /** The key as the detector names it, e.g. `C major`. */
+    key: string;
+    confidence: number;
+}
+/** `analysis/key`: the detector's key guesses (fact 207). */
+interface KeyAnalysisResult {
+    candidates: KeyCandidate[];
+    /** The whole stored result, for fields the SDK does not name. */
+    raw: Record<string, unknown>;
+}
+/** A tempo guess, best first. */
+interface TempoCandidate {
+    bpm: number;
+    /** The detector's `tickPerBeat`, verbatim. */
+    ticksPerBeat: number | undefined;
+    /** The detector's `clamped` flag: the tempo was held inside its range. */
+    clamped: boolean | undefined;
+    /** The guess as stored, including its per-beat arrays. */
+    raw: Record<string, unknown>;
+}
+/** `analysis/tempo` (fact 207). */
+interface TempoAnalysisResult {
+    candidates: TempoCandidate[];
+    /** Seconds per unit of the integer timestamps in the guesses; absent before minor version 2. */
+    timeUnitS: number | undefined;
+    sampleRate: number | undefined;
+    tempoIsConstant: boolean | undefined;
+    raw: Record<string, unknown>;
+}
+/** `analysis/instrument` (fact 207). */
+interface InstrumentAnalysisResult {
+    /** The class the detector chose, e.g. `vocals`; `''` when it had none. */
+    instrument: string;
+    confidence: number;
+    /** Every class the detector could answer; absent before minor version 2. */
+    classes: string[] | undefined;
+    /** Index of {@link instrument} in {@link classes}. */
+    classIdIndex: number | undefined;
+    raw: Record<string, unknown>;
+}
+/** One page of `analysis/transients` (fact 207). */
+interface TransientAnalysisResult {
+    /** The first transient in this page. */
+    index: number;
+    /** Transients in this page. */
+    count: number;
+    /** Positions from the source's start, in {@link timeUnitS} units (nanoseconds when that is absent). */
+    locations: number[];
+    /** Level of each transient. */
+    levels: number[];
+    timeUnitS: number | undefined;
+    sampleRate: number | undefined;
+    raw: Record<string, unknown>;
+}
+/** One detected chord over a stretch of the source. */
+interface ChordSegment {
+    /** The detector's chord label, verbatim (`N` is its "no chord"). */
+    name: string;
+    /** Seconds from the source's start. */
+    start: number;
+    end: number;
+}
+/** `analysis/chord`: what chord detection found in the source (fact 207). */
+interface ChordAnalysisResult {
+    /** The key the detector settled on, when it reports one. */
+    key: string | undefined;
+    segments: ChordSegment[];
+    raw: Record<string, unknown>;
+}
+/**
+ * `analysis/key`.
+ *
+ * @example
+ * const best = (await source.analysis.key.read())?.candidates[0]?.key;
+ */
+declare class KeyAnalysis extends AnalysisNode {
+    /** @example const r = await source.analysis.key.read(); */
+    read(): Promise<KeyAnalysisResult | undefined>;
+}
+/**
+ * `analysis/tempo`.
+ *
+ * @example
+ * const bpm = (await source.analysis.tempo.read())?.candidates[0]?.bpm;
+ */
+declare class TempoAnalysis extends AnalysisNode {
+    /** @example const r = await source.analysis.tempo.read(); */
+    read(): Promise<TempoAnalysisResult | undefined>;
+}
+/**
+ * `analysis/instrument`.
+ *
+ * @example
+ * const what = (await source.analysis.instrument.read())?.instrument;
+ */
+declare class InstrumentAnalysis extends AnalysisNode {
+    /** @example const r = await source.analysis.instrument.read(); */
+    read(): Promise<InstrumentAnalysisResult | undefined>;
+}
+/**
+ * `analysis/transients`, read a page at a time like the overview.
+ *
+ * @example
+ * const page = await source.analysis.transients.read({ index: 0, count: 512 });
+ */
+declare class TransientAnalysis extends AnalysisNode {
+    /**
+     * One page; without `count`, all of them.
+     *
+     * @example const all = await source.analysis.transients.read();
+     */
+    read(options?: {
+        index?: number;
+        count?: number;
+    }): Promise<TransientAnalysisResult | undefined>;
+}
+/**
+ * `analysis/chord`: written by chord detection (`session.musical.chords.detect()`), next to
+ * the chords it puts on the ruler.
+ *
+ * @example
+ * const segs = (await source.analysis.chord.read())?.segments ?? [];
+ */
+declare class ChordAnalysis extends AnalysisNode {
+    /** @example const r = await source.analysis.chord.read(); */
+    read(): Promise<ChordAnalysisResult | undefined>;
+}
+/**
+ * `source.analysis`: every analysis LUNA keeps for one source.
+ *
+ * @example
+ * await source.analysis.load();
+ * source.analysis.kinds.value;                 // e.g. ['overview', 'overview_coarse', 'key']
+ */
+declare class SourceAnalysis {
+    private readonly client;
+    readonly overview: AnalysisNode;
+    readonly overviewCoarse: AnalysisNode;
+    readonly key: KeyAnalysis;
+    readonly tempo: TempoAnalysis;
+    readonly instrument: InstrumentAnalysis;
+    readonly transients: TransientAnalysis;
+    readonly chord: ChordAnalysis;
+    /** The analyses LUNA has for this source, by node name. Includes kinds the SDK does not name. */
+    readonly kinds: Prop<string[]>;
+    /** `<source>/analysis`. */
+    readonly path: string;
+    /**
+     * Read every analysis node's `count`, `md5` and versions once.
+     *
+     * @example await source.analysis.load();
+     */
+    load(): Promise<void>;
+    /**
+     * Subscribe so the analysis props follow LUNA: a new analysis appearing, a count growing, a
+     * digest changing. Call `release` when done.
+     *
+     * @example
+     * const w = source.analysis.watch();
+     * await w.ready;
+     * source.analysis.overview.count.onChange(() => redraw());
+     * // later: w.release();
+     */
+    watch(): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
+}
+
 /** `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. */
 type OverviewKind = 'fine' | 'coarse';
 interface OverviewOptions {
@@ -1432,6 +1882,64 @@ declare class AudioSource extends Node {
     readonly length: Prop<number>;
     readonly sampleRate: Prop<number>;
     readonly created: Prop<unknown>;
+    /**
+     * The name to show: `name`, or `undefined` when the file has none. LUNA names some sources
+     * with their own uid (fact 238); a blank name, or one that is the uid (with or without dashes
+     * or an extension), counts as none. Show your own label then, such as the clip's name.
+     *
+     * @example
+     * row.textContent = source.displayName.value ?? `Untitled (${source.seconds?.toFixed(1)} s)`;
+     */
+    readonly displayName: Prop<string | undefined>;
+    /**
+     * Where the file came from, LUNA's number for it (fact 239): see {@link SourceOrigin}.
+     * `undefined` on a LUNA that does not publish it.
+     */
+    readonly origin: Prop<number | undefined>;
+    /** LUNA's audio file format name, e.g. `wav` (fact 239). */
+    readonly format: Prop<string | undefined>;
+    /** True when LUNA named the file (see {@link displayName}). */
+    get hasName(): boolean;
+    /**
+     * True for a clip rendering (LUNA's own pass of a clip through its clip effects, time
+     * stretch or sample-rate conversion), which LUNA keeps under `renders/clips/` and remakes as
+     * needed, rather than a recording, import or bounce (fact 239).
+     *
+     * @example const files = sources.items.filter((s) => !s.isRender);
+     */
+    get isRender(): boolean;
+    /** The session package uid this file belongs to, from its path. */
+    get packageUid(): string;
+    /**
+     * The file's absolute path on disk (fact 239): `<package>/audio/<uid>.wav`, or
+     * `<package>/renders/clips/<uid>.wav` for a rendering. Reads the package's folder from the
+     * workspace once and keeps it. `undefined` when the package is unknown.
+     *
+     * Inside a session, `session.sourcePath(source)` answers the same without a read, which a
+     * drag needs (see `Luna.startSourceDrag`).
+     *
+     * @example
+     * const path = await source.filePath();
+     */
+    filePath(): Promise<string | undefined>;
+    /**
+     * Show the file in Finder or Explorer (`luna.gui.revealPath`). Rejects with `unavailable`
+     * when the path is unknown.
+     *
+     * @example revealButton.onclick = () => void source.reveal();
+     */
+    reveal(): Promise<void>;
+    /**
+     * Every analysis LUNA keeps for this file (key, tempo, instrument, transients, chord and the
+     * overviews), with live `count` and `md5` props (fact 205). Created on first use.
+     *
+     * @example
+     * const w = source.analysis.watch();
+     * await w.ready;
+     * source.analysis.overview.count.onChange(() => redraw(source.analysis.overview.count.value));
+     */
+    get analysis(): SourceAnalysis;
+    private analyses;
     get channelCount(): number;
     /** Duration in seconds. */
     get seconds(): number | undefined;
@@ -1457,6 +1965,34 @@ declare class AudioSource extends Node {
      */
     overview(options?: OverviewOptions | number): Promise<Overview | undefined>;
 }
+/**
+ * Where a source file came from: LUNA's `origin` numbers (fact 239). Only the renderings are
+ * kept outside the package's `audio/` folder.
+ */
+declare const SourceOrigin: {
+    readonly Unknown: 0;
+    readonly Recording: 1;
+    readonly Import: 2;
+    readonly Consolidate: 3;
+    readonly TrackFreeze: 4;
+    readonly Bounce: 5;
+    readonly Sync: 6;
+    readonly Staging: 7;
+    readonly ClipRendering: 8;
+    readonly ClipRenderingIntermediate: 9;
+};
+/**
+ * `name` unless it is blank or the file's own uid (fact 238), else `undefined`.
+ *
+ * @example Luna.sourceDisplayName('Vocal.wav', 'f87c…') // 'Vocal.wav'
+ */
+declare function sourceDisplayName(name: string | undefined | null, uid: string): string | undefined;
+/**
+ * The path of a source file inside its session package (fact 239).
+ *
+ * @example Luna.sourceFilePath('/Music/Song/Song.luna', uid, false) // '/Music/Song/Song.luna/audio/<uid>.wav'
+ */
+declare function sourceFilePath(packagePath: string, uid: string, isRender: boolean): string;
 /** Nanoseconds per fine overview pair: 125 samples at 48 kHz (fact 72). */
 declare const OVERVIEW_PAIR_NS: number;
 /** Fine pairs per coarse pair. */
@@ -1465,6 +2001,74 @@ declare const COARSE_PAIRS_PER_FINE = 12;
 declare const COARSE_PAIR_NS: number;
 /** Nanoseconds one pair of this analysis covers. */
 declare function pairNs(kind: OverviewKind): number;
+
+/**
+ * Which tracks and clips use each source file of a session, kept current as clips are added,
+ * moved between files, rendered or deleted, and as tracks switch playlists. From
+ * `session.sourceUsage()`.
+ *
+ * A clip uses a file through its `sourceUid` and, once LUNA has rendered it, its
+ * `renderSourceUid` too (fact 73). Every playlist counts, not only the active ones: LUNA keeps
+ * a file a hidden take uses, so `active` says whether the clip is on its track's playing
+ * playlist.
+ *
+ * @example
+ * const usage = await session.sourceUsage();
+ * const draw = () => {
+ *   for (const src of sources.items) {
+ *     const used = usage.byId(src.id);
+ *     console.log(src.displayName.value, used ? used.trackUids.length : 0, 'tracks');
+ *   }
+ * };
+ * usage.onChange(draw);
+ * draw();
+ * usage.dispose();   // when the page no longer shows it
+ */
+
+/** One clip's use of one file. */
+interface SourceUse {
+    readonly sourceUid: string;
+    readonly clipUid: string;
+    readonly playlistUid: string;
+    /** The track the playlist belongs to. */
+    readonly trackUid: string | undefined;
+    /** True when the file is the clip's rendering (`renderSourceUid`), not its source. */
+    readonly asRender: boolean;
+    /** True when the playlist is its track's active (playing) one. */
+    readonly active: boolean;
+}
+/** Every use of one file. */
+interface SourceUsageEntry {
+    /** The source file's uid. */
+    readonly id: string;
+    readonly uses: readonly SourceUse[];
+    /** The distinct tracks among {@link uses}, in session order of first use. */
+    readonly trackUids: readonly string[];
+}
+declare class SourceUsage implements List<SourceUsageEntry> {
+    private readonly session;
+    private entries;
+    private byUid;
+    private readonly listeners;
+    private readonly releases;
+    private readonly perPlaylist;
+    private queued;
+    private disposed;
+    /** Files in use, each with its uses. A file no clip uses is not listed. */
+    get items(): readonly SourceUsageEntry[];
+    get value(): readonly SourceUsageEntry[];
+    /** The uses of one file, or `undefined` when no clip uses it. */
+    byId(sourceUid: string): SourceUsageEntry | undefined;
+    /** True when some clip, on any playlist, uses the file. */
+    isUsed(sourceUid: string): boolean;
+    /** Called whenever the usage changes. */
+    onChange(listener: () => void): Unsubscribe;
+    /** Stop following the session. */
+    dispose(): void;
+    private followPlaylists;
+    private schedule;
+    private recompute;
+}
 
 /**
  * A live list of child Nodes under one parent path. Members are created from the parent's
@@ -1546,6 +2150,21 @@ declare class Collection<T extends Node> implements List<T> {
     };
     /** Called when members are added or removed. */
     onChange(listener: () => void): Unsubscribe;
+    /**
+     * Called when members are added or removed, or when any of the named props of any member
+     * changes: one listener for "redraw the list". The per-member subscriptions follow the
+     * list, so a member added later is covered and a removed one is let go. Several changes in
+     * the same turn call the listener once.
+     *
+     * `props` are the member's prop fields by name (`'name'`, `'length'`), not wire names.
+     *
+     * @example
+     * const sources = await session.loadSources();
+     * const stop = sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+     */
+    onAnyChange(listener: () => void, options?: {
+        props?: ReadonlyArray<PropKey<T>>;
+    }): Unsubscribe;
     /** Rebuild members if the child-name cell moved since the last sync. */
     private ensureSynced;
     /** Rebuild `members` from the child-name cell; keeps existing instances, disposes removed. */
@@ -1554,6 +2173,204 @@ declare class Collection<T extends Node> implements List<T> {
     private arrived;
     /** Notify if the members a listener can see differ from those it was last told about. */
     private announce;
+}
+/** The names of a member's fields that are props, for {@link Collection.onAnyChange}. */
+type PropKey<T> = {
+    [K in keyof T]: T[K] extends {
+        onChange(listener: () => void): Unsubscribe;
+        readonly value: unknown;
+    } ? K : never;
+}[keyof T] & string;
+
+interface SessionPackageRow {
+    uid: string;
+    name: string;
+    path: string;
+    online: boolean;
+    sessionType: number | string;
+    factory: boolean;
+    favorite: boolean;
+    /** Milliseconds since the epoch. */
+    created: number;
+    /** Seconds since the epoch, as the engine reports it. */
+    modified: number;
+    /** Milliseconds since the epoch. */
+    lastOpened: number;
+    tags: string[];
+}
+interface QueryOptions {
+    table?: 'sessions' | 'versions' | 'tutorials';
+    /**
+     * The package whose versions or tutorials to list. LUNA ignores it for the `'sessions'`
+     * table, which always answers every package: find one there by its row's `uid` (fact 237).
+     */
+    sessionPackageUid?: string;
+    factory?: boolean;
+    favorite?: boolean;
+    tags?: string[];
+    /** Match any tag rather than all. */
+    anyTag?: boolean;
+    search?: string;
+    orderBy?: 'created' | 'last_opened' | 'modified' | 'name' | (string & {});
+    orderAs?: 'asc' | 'desc';
+    lastOpenedMin?: number;
+    limit?: number;
+}
+/** Filters for {@link Workspace.templates}. */
+interface TemplateQueryOptions {
+    /** Only templates carrying this tag. */
+    tag?: string;
+    /** `true` for LUNA's own templates only, `false` for the user's only. */
+    factory?: boolean;
+}
+/** One session package as a live node. */
+declare class SessionPackage extends Node {
+    readonly uid: Prop<string>;
+    readonly fileName: Prop<string>;
+    readonly directoryPath: Prop<string>;
+    readonly sessionType: Prop<string>;
+    readonly factory: Prop<boolean>;
+    readonly favorite: WritableProp<boolean>;
+    readonly comments: WritableProp<string>;
+    readonly created: Prop<number>;
+    readonly modified: Prop<number>;
+    readonly lastOpened: Prop<number>;
+    /** Display name without the `.luna` or `.lunatemplate` extension. */
+    get name(): string;
+}
+declare class Workspace extends Node {
+    /** All packages. Large; prefer {@link query} or {@link recent} unless you need live updates. */
+    readonly packages: Collection<SessionPackage>;
+    /** Query the workspace database. Columnar on the wire; rows here. */
+    query(options?: QueryOptions): Promise<SessionPackageRow[]>;
+    /** Most recently opened packages, newest first. */
+    recent(limit?: number): Promise<SessionPackageRow[]>;
+    /**
+     * The session templates (`.lunatemplate` packages) on disk, for
+     * `sessions.createFromTemplate()`. A template's `uid` is stored inside the package, so it is
+     * the same on every machine and survives a rename.
+     *
+     * `tag` keeps the templates carrying that tag, and `factory` the ones LUNA ships (`true`)
+     * or the user's (`false`); LUNA filters both itself (fact 162). LUNA restamps its factory
+     * templates' uids when it is built, so a tag is the steadier way to find one of those.
+     *
+     * @example
+     * const template = (await luna.workspace.templates()).find((t) => t.uid === MY_TEMPLATE_UID);
+     * if (template) await luna.sessions.createFromTemplate({ templatePackageUid: template.uid, name: 'My Song' });
+     * const [brochure] = await luna.workspace.templates({ tag: 'brochure', factory: true });
+     */
+    templates(options?: TemplateQueryOptions): Promise<SessionPackageRow[]>;
+    /**
+     * Tag a session package, as a template or session is tagged for {@link templates} and
+     * {@link query} to find (fact 161). LUNA writes the tag into the package's metadata, so it
+     * travels with it. Rejects with `uasrv.read_only_property` for a factory package and
+     * `device.database_error` for an unknown one.
+     *
+     * @example await luna.workspace.addTag(session.sessionPackageUid.value!, 'brochure');
+     */
+    addTag(packageUid: string, tag: string): Promise<void>;
+    /**
+     * The most recently opened packages as a live list, newest first, with `openSessionUid` on
+     * the rows that are open now. It queries again whenever a session is opened, closed or
+     * switched to (LUNA moves `last_opened` then), and on `refresh()`. Call `dispose()` when
+     * done.
+     *
+     * @example
+     * const recent = await luna.workspace.recentList(10);
+     * const draw = () => list.replaceChildren(...recent.items.map((r) => row(r.name, r.openSessionUid !== undefined)));
+     * recent.onChange(draw);
+     * draw();
+     */
+    recentList(limit?: number): Promise<RecentSessions>;
+    /**
+     * What `deleteUnusedMedia` would remove from a package, without removing anything (LUNA's
+     * pre-flight, fact 240). `unusedUids` and `kept` need a LUNA that lists files; an older one
+     * answers the counts only and leaves both `undefined`.
+     *
+     * LUNA keeps a file that the session uses now, that undo or a saved version could bring
+     * back, or that only an auto-backup uses; `kept` gives the reason for each.
+     *
+     * @example
+     * const plan = await luna.workspace.unusedMedia(session.sessionPackageUid.value!);
+     * plan.unusedCount;                                  // files that would go
+     * plan.unusedUids?.map((uid) => sources.byId(uid)?.displayName.value);
+     * plan.kept?.filter((k) => k.reason === 'undo');     // freed by clearing undo
+     */
+    unusedMedia(packageUid: string, options?: {
+        clearUndo?: boolean;
+    }): Promise<UnusedMedia>;
+    /**
+     * Remove a package's unused audio files (LUNA's Delete Unused Media, fact 240). By default
+     * they go to the trash, in a "<session> (Unused Media)" folder; `toTrash: false` deletes them
+     * for good. `clearUndo` first clears the session's undo history, so files only undo kept go
+     * too; `deleteAutoBackups` also removes the auto-backups that are all that uses a file,
+     * where LUNA allows it. Answers what was removed.
+     *
+     * @example
+     * const done = await luna.workspace.deleteUnusedMedia(pkgUid, { toTrash: true });
+     * console.log(`${done.unusedCount} files moved to the trash`);
+     */
+    deleteUnusedMedia(packageUid: string, options?: {
+        toTrash?: boolean;
+        clearUndo?: boolean;
+        deleteAutoBackups?: boolean;
+    }): Promise<UnusedMedia>;
+    /** Full-text search over session metadata. */
+    search(text: string): Promise<unknown>;
+    protected release(): void;
+}
+/** Why LUNA keeps a file that {@link Workspace.unusedMedia} does not offer to remove. */
+type KeptReason = 'session' | 'undo' | 'version' | 'backup' | 'origin' | 'move_failed' | (string & {});
+/** The answer of {@link Workspace.unusedMedia} and {@link Workspace.deleteUnusedMedia}. */
+interface UnusedMedia {
+    /** Audio files in the package's folder. */
+    readonly totalFiles: number;
+    /** Files removed, or that would be in a pre-flight. */
+    readonly unusedCount: number;
+    /** Files only auto-backups use. */
+    readonly onlyInBackupsCount: number;
+    /** The uids counted by `unusedCount`; `undefined` on a LUNA that does not list them. */
+    readonly unusedUids: readonly string[] | undefined;
+    /** Every other file and why it stays; `undefined` on a LUNA that does not list them. */
+    readonly kept: readonly {
+        readonly uid: string;
+        readonly reason: KeptReason;
+    }[] | undefined;
+}
+/** A {@link Workspace.recentList} row: the package, and the open session showing it, if any. */
+interface RecentSessionRow extends SessionPackageRow {
+    /** The uid of the open session of this package, or `undefined` when it is not open. */
+    readonly openSessionUid: string | undefined;
+}
+/**
+ * The live list {@link Workspace.recentList} answers. `byId` takes a package uid with or
+ * without dashes.
+ *
+ * @example
+ * const recent = await luna.workspace.recentList(10);
+ * recent.items[0]?.name;
+ * await recent.refresh();
+ * recent.dispose();
+ */
+declare class RecentSessions implements List<RecentSessionRow> {
+    private readonly workspace;
+    readonly limit: number;
+    private rows;
+    private readonly listeners;
+    private readonly releases;
+    private timer;
+    private generation;
+    private disposed;
+    get items(): readonly RecentSessionRow[];
+    get value(): readonly RecentSessionRow[];
+    byId(packageUid: string): RecentSessionRow | undefined;
+    onChange(listener: () => void): Unsubscribe;
+    /** Query again now. */
+    refresh(): Promise<void>;
+    /** Stop following. */
+    dispose(): void;
+    /** LUNA writes `last_opened` as a session opens; query a moment after the change, once. */
+    private schedule;
 }
 
 declare const AUTOMATION_MODES: readonly ["off", "read", "write", "touch", "latch"];
@@ -1617,6 +2434,35 @@ declare class Automation extends Collection<BreakpointNode> {
      * await track.gain.automation.setValue(0, -3);
      */
     setValue(tick: number, value: number): Promise<void>;
+    /**
+     * Write `value` over `[start, stop)` (`write_control_values`, fact 227): breakpoints in the
+     * range go, and LUNA adds anchors so the curve outside it keeps its shape (one at `start - 1`
+     * holding the old value, a step to `value` at `start` and `stop - 1`, and one at `stop` back
+     * to the old value). `start === stop` writes a single point. One undo step. The value goes as
+     * a float literal (fact 82). Resolves once the lane shows the write.
+     *
+     * @example
+     * await track.gain.automation.writeRange(-12, { start: Luna.WHOLE_NOTE, stop: Luna.WHOLE_NOTE * 2 });
+     */
+    writeRange(value: number, range: {
+        start: number;
+        stop: number;
+    }): Promise<void>;
+    /**
+     * Add `delta` to the curve over `[start, stop)` (`trim_control_values`, fact 227): every
+     * breakpoint in the range moves by `delta`, LUNA adds anchors at the edges so the curve
+     * outside keeps its shape, and on a mixer output it puts that output's `gain_trim` back to 0.
+     * With no breakpoints yet, the control's value plus `delta` becomes a plateau. One undo step.
+     * Resolves once the lane has changed.
+     *
+     * @example
+     * await track.gain.automation.trimRange(3, { start: 0, stop: Luna.WHOLE_NOTE * 4 }); // +3 dB
+     */
+    trimRange(delta: number, range: {
+        start: number;
+        stop: number;
+    }): Promise<void>;
+    private uidOrThrow;
 }
 
 /** A fader taper name as LUNA writes it in a control's `taper` property. */
@@ -1705,7 +2551,19 @@ declare class Taper {
     marks(options?: TaperMarksOptions): number[];
 }
 
-type ControlType = 'gain' | 'pan' | 'pan_left' | 'pan_right' | 'mute' | 'record_mute' | 'solo' | 'solo_safe' | 'parameter' | 'pre_fader' | 'enabled' | 'gain_trim' | 'latency_offset' | 'mix_to_mono' | string;
+/**
+ * Every control type LUNA defines, as it writes them in `control_type` (`UA::ControlTypeToString`).
+ * The list mirrors LUNA's and must track it; {@link ControlType} stays open (`| string`) so a
+ * type a later LUNA adds still reads.
+ *
+ * @example
+ * Luna.CONTROL_TYPES.includes(control.controlType.value as Luna.KnownControlType);
+ */
+declare const CONTROL_TYPES: readonly ["gain", "pan", "pan_left", "pan_right", "mute", "record_mute", "solo", "solo_safe", "parameter", "audio_source", "pre_fader", "enabled", "gain_trim", "input_trim_left", "input_trim_right", "input_trim_invert_left", "input_trim_invert_right", "input_trim_mono", "input_trim_invert_mono", "input_trim_link", "sidechain_input_trim", "latency_offset", "mix_to_mono", "preamp_gain", "preamp_hiz", "preamp_invert", "preamp_48v", "preamp_limitor", "preamp_compressor", "preamp_max_compressor", "preamp_tone", "preamp_pad", "preamp_low_cut"];
+/** One of {@link CONTROL_TYPES}. */
+type KnownControlType = (typeof CONTROL_TYPES)[number];
+/** A control's `control_type`: one LUNA defines ({@link CONTROL_TYPES}), or a newer one. */
+type ControlType = KnownControlType | (string & {});
 declare class Control extends Node {
     /** Owning session uid; needed for automation commands. Derived from the path when omitted. */
     readonly sessionUid: string;
@@ -1826,6 +2684,90 @@ declare class Controls extends Collection<Control> {
     get(name: string): Control;
 }
 
+/**
+ * Insert slots, LUNA's extensions and plug-in formats: pure helpers over slot names and
+ * plug-in ids (fact 181). The id lists mirror LUNA's own and must be kept in step with it; an id LUNA
+ * adds later is not recognised until the SDK learns it.
+ */
+
+/**
+ * The prefix of LUNA's synthetic alias plug-in ids. LUNA shows an extension slot inside an
+ * ordinary effect chain as a plug-in id `alias.<slot>`: a channel's console plug-in (LUNA
+ * Channel, a summing console) appears among its `effect_N` inserts as `alias.console`.
+ */
+declare const INSERT_ALIAS_PREFIX = "alias.";
+/**
+ * Whether a slot is one of the record FX slots (`record_fx_0`, `record_fx_1`, ...): the
+ * inserts LUNA prints into a recording, as opposed to the `effect_N` playback inserts.
+ *
+ * @example
+ * Luna.isRecordFxSlot('record_fx_0');   // true
+ * Luna.isRecordFxSlot('effect_0');      // false
+ * const recordFx = track.effects.items.filter((e) => Luna.isRecordFxSlot(e.id));
+ */
+declare function isRecordFxSlot(slot: string): boolean;
+/**
+ * Whether a plug-in id is one of LUNA's synthetic `alias.<slot>` ids rather than a real
+ * plug-in. Today LUNA makes only `alias.console`, but it reads any `alias.<slot>` whose slot it
+ * knows, and so does this.
+ *
+ * @example
+ * Luna.isInsertAliasPluginId('alias.console');           // true
+ * Luna.isInsertAliasPluginId('com.uaudio.uadx.1176');    // false
+ */
+declare function isInsertAliasPluginId(pluginId: string): boolean;
+/**
+ * The slot an alias plug-in id stands for, so a chain's `alias.console` entry can be shown
+ * as the channel's console slot: `alias.console` gives `'console'`. Any other id, an alias
+ * included whose slot LUNA does not know, gives `undefined`.
+ *
+ * @example
+ * for (const slot of track.effects.items) {
+ *   const target = Luna.insertSlotForAlias(slot.pluginId.value ?? '');
+ *   if (target) showAsLink(slot, track.effects.byId(target));   // the console plug-in
+ * }
+ */
+declare function insertSlotForAlias(pluginId: string): InsertSlot | undefined;
+/** LUNA Channel's plug-in id. */
+declare const LUNA_CHANNEL_PLUGIN_ID = "uaudio_luna_channel";
+/**
+ * The plug-in ids of LUNA's extensions: plug-ins LUNA hosts as part of itself (the summing
+ * consoles, tape, the sampler, the hardware insert, LUNA Channel), whose window is LUNA's own.
+ * This list mirrors LUNA's and must track it: an extension added in a later LUNA is not in it
+ * until the SDK is updated.
+ */
+declare const LUNA_EXTENSION_PLUGIN_IDS: readonly string[];
+/**
+ * Whether a plug-in id is one of {@link LUNA_EXTENSION_PLUGIN_IDS}. The test is by exact id,
+ * so the list must track LUNA's.
+ *
+ * @example
+ * Luna.isLunaExtensionPluginId('uaudio_luna_channel');    // true
+ * Luna.isLunaExtensionPluginId('com.uaudio.uadx.1176');   // false
+ * const plugins = slots.filter((e) => !Luna.isLunaExtensionPluginId(e.pluginId.value ?? ''));
+ */
+declare function isLunaExtensionPluginId(pluginId: string): boolean;
+/**
+ * A plug-in format, as LUNA names its SDK types: third-party `vst`, `vst3`, `au` and `aax`,
+ * UA's `uad2` and `uadx`, and the server-hosted `cloud` and `localml` clip effects. A plug-in's
+ * reported format (`plugin.sdkType`, {@link PluginSdkType}) is one of these, or `''`.
+ */
+type PluginFormat = 'vst' | 'vst3' | 'au' | 'aax' | 'uad2' | 'uadx' | 'cloud' | 'localml';
+/**
+ * A plug-in's format guessed from its id, with the patterns LUNA itself uses: `.vst.`,
+ * `.vst3.` or `.au.` anywhere in the id, a `cloud:` or `localml:` prefix, a `UAD ` prefix for
+ * UAD-2, and `uadx` for anything else. It is a heuristic: an id that matches none of them is
+ * reported as `uadx`, as LUNA does, and LUNA may treat a `cloud:` effect as unavailable when
+ * cloud clip effects are off. Prefer the format LUNA reports for an installed plug-in
+ * (`Plugin.sdkType`) where you have it.
+ *
+ * @example
+ * Luna.pluginFormat('com.fabfilter.vst3.ProQ3');   // 'vst3'
+ * Luna.pluginFormat('UAD 1176LN');                 // 'uad2'
+ * Luna.pluginFormat('com.uaudio.uadx.1176');       // 'uadx'
+ */
+declare function pluginFormat(pluginId: string): PluginFormat;
+
 interface PluginManifest {
     manufacturer?: string;
     name?: string;
@@ -1885,6 +2827,11 @@ interface PluginRow {
     categories: string[];
     favorite: boolean;
 }
+/**
+ * A plugin's format as LUNA reports it (`sdk_type`, fact 177): a {@link PluginFormat}, or `''`
+ * when LUNA cannot tell (a `cloud:` plugin while cloud clip effects are off).
+ */
+type PluginSdkType = PluginFormat | '';
 declare class Plugin extends Node {
     readonly pluginId: Prop<string>;
     readonly name: Prop<string>;
@@ -1896,6 +2843,15 @@ declare class Plugin extends Node {
     readonly authorized: Prop<boolean | null>;
     readonly manifest: Prop<PluginManifest>;
     readonly defaultPresetUid: Prop<string | null>;
+    /**
+     * The plugin's format as LUNA decides it (`sdk_type`, fact 177). Prefer it to reading the
+     * id: a UA-made VST3 or AU wrapper is `'uadx'` although its id says `.vst3.` or `.au.`.
+     * `undefined` until loaded, and on a LUNA that does not report it.
+     *
+     * @example
+     * const thirdParty = luna.plugins.items.filter((p) => ['vst', 'vst3', 'au'].includes(p.sdkType.value ?? ''));
+     */
+    readonly sdkType: Prop<PluginSdkType>;
     get manufacturer(): string | undefined;
     /**
      * Whether it is installed at `minVersion` or later, as LUNA checks an Add On's
@@ -1946,7 +2902,12 @@ declare class Plugins extends Collection<Plugin> {
     rescan(): Promise<unknown>;
 }
 
-type InsertSlot = 'console' | 'reserved_0' | `effect_${number}` | `record_fx_${number}` | 'sidechain_filter' | string;
+/**
+ * An insert slot's name, as LUNA writes it in `insert_type` and in the effect's path.
+ * `'instrument'` is an instrument track's instrument slot (`effects/instrument`), ahead of the
+ * `effect_N` inserts. {@link isRecordFxSlot} and {@link insertSlotForAlias} help with the rest.
+ */
+type InsertSlot = 'console' | 'instrument' | 'reserved_0' | `effect_${number}` | `record_fx_${number}` | 'sidechain_filter' | (string & {});
 /** The engine reports a missing plugin with this error string. */
 declare const PLUGIN_ERROR_MISSING = "mixer.missing_plug-in";
 declare class Effect extends Node {
@@ -2056,6 +3017,46 @@ declare class Effect extends Node {
     waitForPlugin(timeoutMs?: number, pluginId?: string): Promise<void>;
     /** Set IN (true) or bypass (false) through the engine's undoable, group-aware path. */
     setIn(on: boolean, contextType?: string): Promise<unknown>;
+    /**
+     * Power the plugin in this slot on or off (`plugin_power`) through the edit context's
+     * `set_inserts_power`, as LUNA's insert power switch does: one undo step, fanned out over the
+     * channel's mix group, and a frozen slot is left alone (fact 171). Power is not bypass (see
+     * {@link setIn}): every loaded plugin has it, instruments included. Resolves once
+     * {@link pluginPower} shows it; for a frozen slot, on LUNA's reply.
+     *
+     * @example
+     * await slot.setPower(false);
+     * slot.pluginPower.value; // false
+     */
+    setPower(on: boolean, contextType?: string): Promise<void>;
+    /**
+     * Move the plugin in this slot to `destination`, on this channel or another of the session,
+     * with its state, parameters, automation and preset, in one undo step (`move_insert`,
+     * fact 173). An occupied `effect_N` destination makes room: LUNA shuffles its neighbours
+     * toward the nearest empty slot. Resolves once `destination` shows the plugin.
+     *
+     * The SDK refuses (code `invalid_slot`) a move between slots of different kinds, such as the
+     * `console` slot and an `effect_N` slot: LUNA does not check, and such a move corrupts the
+     * channel's chain. It refuses an empty source with `empty_slot`, since LUNA would clear the
+     * destination.
+     *
+     * @example
+     * await track.effects.byId('effect_0')!.moveTo(track.effects.byId('effect_3')!);
+     */
+    moveTo(destination: Effect, options?: {
+        timeoutMs?: number;
+    }): Promise<void>;
+    /**
+     * Copy the plugin in this slot, with its state, parameters, automation and preset, to
+     * `destination`, leaving this slot as it is. See {@link moveTo} for the rules.
+     *
+     * @example
+     * await vocal.effects.byId('effect_0')!.copyTo(backing.effects.byId('effect_0')!);
+     */
+    copyTo(destination: Effect, options?: {
+        timeoutMs?: number;
+    }): Promise<void>;
+    private transfer;
     /**
      * Open this plugin's editor window in LUNA, as clicking it in LUNA's mixer does, or bring
      * it to the front. Resolves once {@link editorOpen} shows it; LUNA's reply alone proves
@@ -2269,7 +3270,7 @@ declare class Output extends Node {
 }
 
 type AutomationMode = 'off' | 'read' | 'write' | 'touch' | 'latch';
-type StemFormat = 'mono' | 'stereo' | string;
+type StemFormat = 'mono' | 'stereo' | (string & {});
 declare abstract class Channel extends Node {
     /** Uid of the owning session, for session-level commands that name this channel. */
     readonly sessionUid: string;
@@ -2297,6 +3298,16 @@ declare abstract class Channel extends Node {
     get loadedEffects(): Effect[];
     /** Load a plugin into the first empty effect slot (or a named slot). */
     insert(pluginId: string, slot?: string): Promise<Effect | undefined>;
+    /**
+     * Set this track's or bus's automation mode (`off | read | write | touch | latch`) in one
+     * undo step. `set_automode_on_tracks` takes track and bus uids alike (fact 167);
+     * {@link automationMode} follows on LUNA's push.
+     *
+     * @example
+     * await track.setAutomationMode('touch');
+     * await session.master!.setAutomationMode('read');
+     */
+    setAutomationMode(mode: AutomationModeName): Promise<unknown>;
     /** Main output gain. */
     get gain(): Control;
     /** Main output pan. */
@@ -2310,6 +3321,418 @@ declare abstract class Channel extends Node {
     protected release(): void;
 }
 
+/**
+ * The preset library: the `/presets` node's `query` command over the workspace database
+ * (fact 98). Presets are addressed by uid; `find` turns a plugin id and a preset name
+ * into that uid so it can be passed to {@link Effect.setPlugin} or {@link Effect.loadPreset}.
+ *
+ * Preset selection, as LUNA's own plugin pages offer it, is three things over one plugin's
+ * presets: search text that filters by name, tags picked from the plugin's tag groups, and
+ * recommendations that UA Assistant ranks from the same search text (facts 120-121).
+ * {@link Presets.selection} keeps all three current for a page.
+ *
+ * @example
+ * const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
+ * await slot.setPlugin('uaudio_qi', { presetName: preset?.name, presetUid: preset?.uid });
+ */
+
+interface PresetRow {
+    uid: string;
+    name: string;
+    version: number;
+    favorite: boolean;
+    factory: boolean;
+    path: string;
+    /** The preset's tags. Present only when the query asked for them (`withTags`). */
+    tags?: string[];
+    /**
+     * True for an instrument plugin's preset listed among track presets, false for a track
+     * preset. Present only when the query asked for them (`includeInstrumentPresets`, fact 132).
+     */
+    isInstrumentPreset?: boolean;
+    /**
+     * For an instrument preset, the plugin it belongs to: the instrument whose factory or user
+     * preset folder holds it (fact 132). Absent when no installed instrument's folder does.
+     */
+    pluginId?: string;
+    /** That plugin's name, for example `Moog Minimoog Synth`. */
+    pluginName?: string;
+    /**
+     * The preset's description, `''` when it has none. Present only when the query asked for
+     * it (`withDescriptions`, fact 175).
+     */
+    description?: string;
+}
+/** One plugin a track preset uses, from {@link Presets.trackPresetPlugins}. */
+interface TrackPresetPlugin {
+    pluginId: string;
+    /** The name the preset saved, which may differ from the installed plugin's. */
+    name: string;
+}
+interface PresetQueryOptions {
+    /** The plugin whose presets to list. One of `pluginId` or `deviceTypeId` is required. */
+    pluginId?: string;
+    /** A device type (for example `track`) instead of a plugin. */
+    deviceTypeId?: string;
+    /** Case-insensitive substring to match against preset names. */
+    search?: string;
+    /** Only presets carrying these tags: all of them, or any with `matchAnyTag` (fact 120). */
+    tags?: string | readonly string[];
+    /** With several `tags`, match presets carrying any of them rather than all. */
+    matchAnyTag?: boolean;
+    /** Include each preset's tags in the rows. */
+    withTags?: boolean;
+    /** Include each preset's `description`: one more read per plugin or device type listed (fact 175). */
+    withDescriptions?: boolean;
+    /** Only favorites. */
+    favorite?: boolean;
+    /** Maximum number of rows. */
+    limit?: number;
+    /**
+     * With `deviceTypeId: 'track'`, also list the presets of every installed instrument plugin,
+     * marked `isInstrumentPreset`. An `Instrument` tag then selects instrument track presets and
+     * every instrument preset; the other tags must match either kind (fact 132).
+     */
+    includeInstrumentPresets?: boolean;
+}
+/**
+ * The categories LUNA's track preset browser offers. They are ordinary preset tags, which
+ * LUNA writes when a track preset is saved (fact 132). No category means all of them.
+ */
+declare const TRACK_PRESET_CATEGORIES: readonly ["Audio", "Instrument", "Bus", "Multi-Track"];
+type TrackPresetCategory = (typeof TRACK_PRESET_CATEGORIES)[number];
+/**
+ * A named group of a plugin's preset tags, for example Paradise's `TYPE`, `GENRE` and
+ * `DESCRIPTION`. LUNA keeps them as categories holding sub-categories holding tags (fact 120);
+ * a group is one sub-category.
+ */
+interface PresetTagGroup {
+    /** The sub-category uid. */
+    uid: string;
+    /** The sub-category name, for example `GENRE`. */
+    name: string;
+    /** The category it sits in, for example `Default`. */
+    category: string;
+    categoryUid: string;
+    /** Tags in LUNA's order. */
+    tags: string[];
+}
+/** One preset UA Assistant recommends for a search, best first (fact 121). */
+interface PresetRecommendation {
+    uid: string;
+    name: string;
+    /** The assistant's reciprocal-rank-fusion score, which orders the answer; higher is better. Compare within one answer only. */
+    score: number;
+    /** The keyword half of the hybrid search, when the assistant reports it. */
+    keywordScore?: number;
+    /** The semantic half of the hybrid search, when the assistant reports it; -1 when the preset was found by keyword alone. */
+    semanticScore?: number;
+}
+declare class Presets extends Node {
+    private instrumentList;
+    /**
+     * Query the preset database (fact 98). Columnar on the wire; rows here. Search and tags
+     * combine: a row must match both (fact 120).
+     *
+     * @example
+     * const rows = await luna.presets.query({ pluginId: 'uaudio_qi', search: 'EQ' });
+     * rows[0]?.uid; rows[0]?.name; rows[0]?.factory;
+     * const clean = await luna.presets.query({ pluginId, tags: ['Clean', 'Jazz'], withTags: true });
+     * clean[0]?.tags; // ['Clean', 'Jazz', ...]
+     */
+    query(options?: PresetQueryOptions): Promise<PresetRow[]>;
+    /**
+     * Fill each row's `description` from its preset node (fact 175): the query does not
+     * return it, so read each owner's `presets` folder once, description only.
+     */
+    private describeRows;
+    /**
+     * Mark a preset a favorite, or not (fact 175): a write of its `favorite`, which LUNA keeps
+     * per owner. A plugin's preset is under its plugin: pass `pluginId` (the one you queried
+     * with), or a row that carries one (an instrument preset in a track query). Anything else is
+     * taken as a track preset. A row passed in has its `favorite` updated once LUNA accepts.
+     *
+     * @example
+     * const [row] = await luna.presets.query({ pluginId: 'uaudio_qi', search: 'Vocal' });
+     * await luna.presets.setFavorite(row, true, { pluginId: 'uaudio_qi' });
+     * const [track] = await luna.presets.query({ deviceTypeId: 'track', search: 'Bass Rig' });
+     * await luna.presets.setFavorite(track, true);
+     */
+    setFavorite(preset: string | (Pick<PresetRow, 'uid'> & Partial<Pick<PresetRow, 'pluginId' | 'favorite'>>), favorite: boolean, options?: {
+        pluginId?: string;
+        deviceTypeId?: string;
+    }): Promise<void>;
+    /**
+     * The plugins a track preset uses, as LUNA's preset browser checks them before applying
+     * one (fact 176): read from the preset's package, `/workspace/sessions/<uid>`. Resolves to
+     * `undefined` when LUNA reports no list (not a track preset, or an older LUNA): that means
+     * unknown, not "no plugins".
+     *
+     * @example
+     * const needs = await luna.presets.trackPresetPlugins(row);
+     * const missing = needs?.filter((p) => !luna.plugins.byId(p.pluginId)?.installed.value) ?? [];
+     */
+    trackPresetPlugins(preset: string | Pick<PresetRow, 'uid'>): Promise<TrackPresetPlugin[] | undefined>;
+    /** Give each instrument preset its plugin, by the preset folder that holds it (fact 132). */
+    private namePlugins;
+    /**
+     * The installed instruments with their preset folders, read once and kept: LUNA's own
+     * browser asks for the same list. {@link forgetInstruments} reads it again next time.
+     */
+    private instruments;
+    /** Read the installed instruments again on the next query, for example after one was installed. */
+    forgetInstruments(): void;
+    /**
+     * The plugin's preset name exactly `name` (case-insensitive), or `undefined`. When the
+     * library holds a user preset and a factory preset of the same name, the user one wins,
+     * matching what LUNA's preset browser opens.
+     *
+     * @example
+     * const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
+     * preset?.uid;
+     */
+    find(pluginId: string, name: string): Promise<PresetRow | undefined>;
+    /**
+     * The plugin's tag groups, in LUNA's order (fact 120). Empty for a plugin whose presets
+     * are not tagged.
+     *
+     * @example
+     * const groups = await luna.presets.tagGroups('uaudio_paradise_guitar_studio');
+     * groups.map((g) => g.name); // ['TYPE', 'GENRE', 'DESCRIPTION']
+     */
+    tagGroups(pluginId: string): Promise<PresetTagGroup[]>;
+    /**
+     * The tag groups LUNA's track preset browser shows: the track presets' own groups and every
+     * installed instrument plugin's, merged by group name, without the category tags (`Audio`,
+     * `Instrument`, `Bus`, `Multi-Track`), which {@link TRACK_PRESET_CATEGORIES} lists (fact 132).
+     *
+     * @example
+     * const groups = await luna.presets.trackTagGroups();
+     * groups.map((g) => g.name); // ['GENRE', 'TYPE', ...]
+     */
+    trackTagGroups(): Promise<PresetTagGroup[]>;
+    private groupsAt;
+    /**
+     * Presets UA Assistant recommends for free text, best first, five at most (fact 121). Needs
+     * UA Assistant connected to LUNA ({@link Assistant.enabled}), and an instance of the plugin
+     * created since it connected, which is when LUNA builds the plugin's search index. Otherwise
+     * this rejects with the engine's code: `ua.unknown` (no assistant),
+     * `assistant.preset_search_not_initialized_error` (no index yet), or
+     * `assistant.input_classifier_rejected` (text the assistant will not search on). Empty text
+     * resolves to `[]` without asking.
+     *
+     * @example
+     * const recs = await luna.presets.recommend('uaudio_paradise_guitar_studio', 'warm jazz clean');
+     * await slot.loadPreset(recs[0].uid);
+     */
+    recommend(pluginId: string, text: string): Promise<PresetRecommendation[]>;
+    /**
+     * A live preset selection over one plugin: set `search` and `tags`, read `presets` and
+     * `recommendations`. Requests are debounced and a reply that a newer one overtook is
+     * dropped, so the lists always match the inputs. Recommendations come from the search text,
+     * keep only presets carrying the selected tags (so with tags selected there can be fewer
+     * than the assistant's five), and stay empty while UA Assistant is not connected. A refused
+     * request leaves them empty and its code in `recommendationError`. Call `dispose()` when done.
+     *
+     * @example
+     * const sel = luna.presets.selection('uaudio_paradise_guitar_studio');
+     * await sel.ready();
+     * sel.groups.value;                       // tag groups for the chips
+     * await sel.search.set('warm');
+     * await sel.toggleTag('Clean');
+     * await sel.settled();
+     * sel.presets.items.map((p) => p.name);   // names containing "warm", tagged Clean
+     * sel.recommendations.items[0]?.name;     // the assistant's best match, tagged Clean
+     * await slot.loadPreset(sel.presets.items[0].uid);
+     * sel.dispose();
+     */
+    selection(pluginId: string, options?: PresetSelectionOptions): PresetSelection;
+    /**
+     * A live selection over track presets, as LUNA's track preset browser offers them: a
+     * `category` (one of {@link TRACK_PRESET_CATEGORIES}, or `null` for all), tags, and search
+     * text. With no category or `Instrument`, installed instrument plugins' presets are listed
+     * too, marked `isInstrumentPreset` (fact 132). Pass a row to {@link Session.newTrackFromPreset}
+     * to make a track from it, or to {@link Track.loadPreset} to apply it to a track. Call
+     * `dispose()` when done.
+     *
+     * @example
+     * const sel = luna.presets.trackSelection({ category: 'Instrument' });
+     * await sel.ready();
+     * await sel.search.set('piano');
+     * await sel.settled();
+     * const [track] = await session.newTrackFromPreset(sel.presets.items[0]);
+     * await track.loadPreset(sel.presets.items[1]);   // replace it with another
+     * sel.dispose();
+     */
+    trackSelection(options?: TrackPresetSelectionOptions): TrackPresetSelection;
+}
+/**
+ * `/assistant`: whether UA Assistant is connected to LUNA. Preset recommendations need it
+ * (fact 121). Call `watch()` to follow it.
+ *
+ * @example
+ * const { ready } = luna.assistant.watch();
+ * await ready;
+ * luna.assistant.enabled.value; // true while UA Assistant is connected
+ */
+declare class Assistant extends Node {
+    /** True while UA Assistant is connected to LUNA. */
+    readonly enabled: Prop<boolean>;
+}
+interface PresetSelectionOptions {
+    /** Most rows in `presets`. Default: all of them. */
+    limit?: number;
+    /** Most rows in `recommendations`. Default 5. */
+    maxRecommendations?: number;
+    /** Ask UA Assistant for recommendations. Default true. */
+    recommend?: boolean;
+    /** Quiet time after a change before the list is queried, in ms. Default 100. */
+    queryDelayMs?: number;
+    /** Quiet time after a change before recommendations are asked for, in ms. Default 300. */
+    recommendDelayMs?: number;
+}
+interface TrackPresetSelectionOptions {
+    /** The category to start on. Default `null`: all of them. */
+    category?: TrackPresetCategory | null;
+    /** Most rows in `presets`. Default: all of them. */
+    limit?: number;
+    /** Quiet time after a change before the list is queried, in ms. Default 100. */
+    queryDelayMs?: number;
+}
+/**
+ * What {@link PresetSelection} and {@link TrackPresetSelection} share: search text and tags
+ * in, a list of presets out. Requests are debounced, and a reply that a newer request
+ * overtook is dropped.
+ */
+declare abstract class PresetSelectionBase {
+    protected readonly client: Client;
+    private readonly base;
+    /** Search text. Filters `presets` by name; for a plugin's presets, it is also what recommendations are asked for. */
+    readonly search: WritableProp<string>;
+    /** Selected tags. */
+    readonly tags: WritableProp<readonly string[]>;
+    /** The tag groups, once {@link ready}. */
+    readonly groups: Prop<readonly PresetTagGroup[]>;
+    /** Presets matching the search text and tags, with their tags. */
+    readonly presets: List<PresetRow>;
+    /** True while a request is in flight or waiting. */
+    readonly loading: Prop<boolean>;
+    /** The last list query's failure, or `null`. */
+    readonly error: Prop<UAError | null>;
+    protected readonly searchCell: Cell<string>;
+    protected readonly tagsCell: Cell<readonly string[]>;
+    private readonly groupsCell;
+    private readonly presetsCell;
+    private readonly loadingCell;
+    private readonly errorCell;
+    protected readonly presetsApi: Presets;
+    protected readonly releases: Unsubscribe[];
+    private readonly timers;
+    private readonly gens;
+    private inFlight;
+    private waiters;
+    private readyPromise;
+    private isDisposed;
+    protected constructor(client: Client, base: {
+        limit?: number;
+        queryDelayMs?: number;
+    });
+    /** The tag groups to offer. */
+    protected abstract loadGroups(): Promise<PresetTagGroup[]>;
+    /** The list query for the current inputs, without `limit`. */
+    protected abstract listQuery(): PresetQueryOptions;
+    /** A writable input over `cell`: setting a new value queries again. */
+    protected input<T>(cell: Cell<T>): WritableProp<T>;
+    /**
+     * Read the tag groups and the first list (and, for a plugin's presets, start following UA
+     * Assistant's connection). Idempotent.
+     *
+     * @example
+     * await sel.ready();
+     */
+    ready(): Promise<void>;
+    protected start(): Promise<void>;
+    /**
+     * Add `tag` to the selection, or remove it if selected.
+     *
+     * @example
+     * await sel.toggleTag('Clean');
+     */
+    toggleTag(tag: string): Promise<void>;
+    /** Clear the search text and the selected tags. */
+    clear(): Promise<void>;
+    /** Query again with the current inputs, for example after presets were saved or deleted. */
+    refresh(): void;
+    /**
+     * Resolves once nothing is waiting or in flight and the lists match the inputs.
+     *
+     * @example
+     * await sel.search.set('lion');
+     * await sel.settled();
+     */
+    settled(): Promise<void>;
+    /** Stop following and drop pending requests. */
+    dispose(): void;
+    get disposed(): boolean;
+    protected get started(): boolean;
+    private get idle();
+    /** An input moved: query again after the quiet time. */
+    protected changed(): void;
+    /**
+     * Run `job` after `delayMs`, replacing a pending job under the same `key`. `current()` turns
+     * false once a newer job for the key is scheduled, so a stale reply can be dropped.
+     */
+    protected schedule(key: string, delayMs: number, job: (current: () => boolean) => Promise<void>): void;
+    private runQuery;
+    /** Count `work` as in flight until it settles. */
+    protected track<T>(work: Promise<T>): Promise<T>;
+    private wake;
+}
+/** Created by {@link Presets.selection}. */
+declare class PresetSelection extends PresetSelectionBase {
+    readonly pluginId: string;
+    private readonly options;
+    /** Match presets carrying any selected tag rather than all of them. Default false. */
+    readonly matchAnyTag: WritableProp<boolean>;
+    /** UA Assistant's picks for the search text, among presets carrying the tags. Best first. */
+    readonly recommendations: List<PresetRecommendation>;
+    /** True while UA Assistant is connected, so recommendations can come. */
+    readonly recommendationsAvailable: Prop<boolean>;
+    /** The last recommendation request's failure, or `null`. */
+    readonly recommendationError: Prop<UAError | null>;
+    private readonly anyCell;
+    private readonly recsCell;
+    private readonly recErrorCell;
+    /** Uids carrying the selected tags, by tag selection, for filtering recommendations. */
+    private taggedUids;
+    /** Query again with the current inputs, for example after presets were saved or deleted. */
+    refresh(): void;
+    protected start(): Promise<void>;
+    protected loadGroups(): Promise<PresetTagGroup[]>;
+    protected listQuery(): PresetQueryOptions;
+    protected changed(): void;
+    private get wantsRecommendations();
+    private scheduleRecommendations;
+    private runRecommendations;
+    /** Every preset uid carrying `tags`, ignoring the search text. Cached per tag selection. */
+    private tagged;
+}
+/** Created by {@link Presets.trackSelection}. */
+declare class TrackPresetSelection extends PresetSelectionBase {
+    /**
+     * The category, one of {@link TRACK_PRESET_CATEGORIES}, or `null` for all of them. With
+     * `null` or `Instrument`, instrument plugins' presets are listed too (fact 132).
+     */
+    readonly category: WritableProp<TrackPresetCategory | null>;
+    private readonly categoryCell;
+    /** Query again with the current inputs, and read the installed instruments again. */
+    refresh(): void;
+    /** True when the current category lists instrument plugins' presets as well. */
+    get includesInstrumentPresets(): boolean;
+    protected loadGroups(): Promise<PresetTagGroup[]>;
+    protected listQuery(): PresetQueryOptions;
+}
+
 type BusType = 'master' | 'aux' | 'input' | 'talkback' | 'loopback' | 'headphone' | `cue_${number}` | string;
 /**
  * A bus's folder mode (fact 136). `'summing'`: a folder track whose children's main outputs go
@@ -2320,6 +3743,10 @@ type FolderMode = 'none' | 'summing' | 'container';
 declare class Bus extends Channel {
     readonly busType: Prop<BusType>;
     readonly folderMode: Prop<FolderMode>;
+    /** The uid of the track preset last applied to this bus, or null (fact 169). */
+    readonly presetUid: Prop<string | null>;
+    /** That preset's name, or null. */
+    readonly presetName: Prop<string | null>;
     get isMaster(): boolean;
     /** A folder is an aux bus whose folder mode is not `none`. */
     get isFolder(): boolean;
@@ -2335,6 +3762,44 @@ declare class Bus extends Channel {
      * await drums.setFolderMode('summing'); // its tracks now play through it
      */
     setFolderMode(mode: FolderMode): Promise<void>;
+    /**
+     * Delete this bus in one undo step (`delete_bus`), and resolve once it has left
+     * `session.buses` (fact 168). A folder's contents stay where they were, now outside it; use
+     * {@link deleteWithContents} to take them too. Sends and outputs that fed the bus are kept,
+     * marked `device.missing_bus` (fact 83).
+     *
+     * @throws {UAError} `device.database_error` for the master bus, `uasrv.invalid_type` for a
+     * cue bus or one LUNA does not know.
+     * @example
+     * const fx = await session.newBus({ name: 'Scratch FX' });
+     * await fx.delete();
+     */
+    delete(): Promise<void>;
+    /**
+     * Delete this folder and everything inside it, nested folders included, in one undo step
+     * (`buses/delete_folder_with_contents`), and resolve once all of it has left the session
+     * (fact 168).
+     *
+     * @throws {UAError} `uasrv.invalid_value` when this bus is not a folder (or LUNA does not
+     * know it).
+     * @example
+     * const drums = session.folders.find((f) => f.name.value === 'Drums');
+     * await drums?.deleteWithContents();
+     */
+    deleteWithContents(): Promise<void>;
+    /**
+     * Apply a track preset to this bus in one undo step, as LUNA's bus header PRESETS > Assign
+     * does: `/presets/devices/track/load` with `is_bus` (fact 169). The preset's plugins, sends
+     * and mixer settings replace the bus's; {@link presetUid} follows. A plugin's preset is
+     * refused on a bus (`uasrv.invalid_type`).
+     *
+     * @example
+     * const [row] = await luna.presets.query({ deviceTypeId: 'track', tags: ['Bus'] });
+     * await bus.loadPreset(row);
+     */
+    loadPreset(preset: string | Pick<PresetRow, 'uid'>): Promise<void>;
+    /** Resolve once none of `ids` is listed as a track or bus of the session. */
+    private settleGone;
 }
 
 /**
@@ -2392,7 +3857,7 @@ interface Note {
 /** The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). */
 interface MidiRowData {
     /** `update` is a whole table; `added`, `changed` and `deleted` are deltas. */
-    operation: 'update' | 'added' | 'changed' | 'deleted' | string;
+    operation: 'update' | 'added' | 'changed' | 'deleted' | (string & {});
     row_ids: number[];
     enabled?: boolean[];
     midi_data?: number[];
@@ -2729,6 +4194,101 @@ declare class CompiledClips extends Collection<CompiledClip> {
     private enabled;
 }
 
+/** Who placed a warp marker: the user (0 on the wire) or LUNA's own analysis (1). */
+type WarpType = 'user' | 'engine';
+/** One warp marker as plain data, for {@link Warps.markers}. */
+interface WarpMarker {
+    /** The marker's row id, which {@link Warps.set} takes to move it. */
+    readonly rowid: number;
+    /** Clip-relative position, ticks. */
+    readonly start: number;
+    /** Offset into the source file, nanoseconds. */
+    readonly sourceStart: number;
+    readonly type: WarpType | undefined;
+}
+/** Options for {@link Warps.set}. */
+interface SetWarpOptions {
+    /** Clip-relative position, ticks. */
+    start: number;
+    /** Offset into the source file, nanoseconds. */
+    sourceStart: number;
+    /** Move the marker with this row id instead of adding one. */
+    rowid?: number;
+    /** Ticks added to `start` before LUNA stores it. */
+    move?: number;
+    /** Edit context whose edit groups follow the new marker. Default `main`. */
+    contextType?: string;
+}
+/**
+ * LUNA's warp transient zone (feature key `warp_transient_zone_size`, 30 ms by default): a new
+ * marker whose source point is this close to an existing one's reuses it (fact 230).
+ */
+declare const WARP_TRANSIENT_ZONE_NS = 30000000;
+/** One warp marker node. */
+declare class Warp extends Node {
+    /** Clip-relative position, ticks. */
+    readonly start: Prop<number>;
+    /** Offset into the source file, nanoseconds. */
+    readonly sourceStart: Prop<number>;
+    /** Where LUNA first put the marker, ticks. */
+    readonly startOriginal: Prop<number>;
+    /** Where in the source LUNA first put the marker, nanoseconds. */
+    readonly sourceStartOriginal: Prop<number>;
+    /** `user` or `engine`, from the wire's 0 or 1. */
+    readonly type: Prop<WarpType | undefined>;
+    /** The row id, from the node name. */
+    get rowid(): number;
+}
+/** The `warps` folder of a clip. */
+declare class Warps extends Collection<Warp> {
+    private readonly clipPath;
+    private readonly sessionUid;
+    private get clipUid();
+    private get playlistUid();
+    /**
+     * The markers as plain data, sorted by `start`; ones whose properties have not loaded are
+     * left out.
+     *
+     * @example
+     * for (const w of clip.warps.markers) drawMarker(clip.start.value! + w.start);
+     */
+    get markers(): WarpMarker[];
+    private post;
+    private settled;
+    /**
+     * Add a marker pinning clip tick `start` to `sourceStart` ns, or with `rowid` move that
+     * marker there (`set_warp`, fact 230); the marker becomes a `user` one. Where an existing
+     * marker's source point is within {@link WARP_TRANSIENT_ZONE_NS} of `sourceStart`, LUNA
+     * keeps that marker and adds none. Two markers at one tick or one source point are refused
+     * (`uasrv.invalid_object`). One undo step. Resolves to the marker once the list shows it.
+     *
+     * @example
+     * const w = await clip.warps.set({ start: Luna.QUARTER_NOTE, sourceStart: 600_000_000 });
+     * await clip.warps.set({ rowid: w.rowid, start: Luna.QUARTER_NOTE * 2, sourceStart: 600_000_000 });
+     */
+    set(options: SetWarpOptions): Promise<WarpMarker>;
+    /**
+     * Delete the marker at clip tick `start`, or with `stop` every marker strictly between the
+     * two: LUNA leaves markers at `start` and at `stop` alone (`delete_warp`, fact 231). One undo
+     * step. Resolves once they are gone.
+     *
+     * @example
+     * await clip.warps.delete(Luna.QUARTER_NOTE);
+     * await clip.warps.delete(0, Luna.WHOLE_NOTE); // the ones inside, not at 0 or the bar
+     */
+    delete(start: number, stop?: number): Promise<void>;
+    /**
+     * Remove the clip's time stretch (`remove_tce`, fact 231): every marker goes and LUNA sets
+     * the clip's `stop` so it plays its source span at the session tempo. One undo step. An
+     * audio clip only: LUNA refuses others with `uasrv.invalid_object`. Resolves once the
+     * markers are gone; the clip's new `stop` arrives by push.
+     *
+     * @example
+     * await clip.warps.removeTimeStretch();
+     */
+    removeTimeStretch(): Promise<void>;
+}
+
 type ClipType = 'audio' | 'video' | 'midi';
 /** The engine sends clip_type as 0/1/2 or as a string; normalise to the string form. */
 declare function clipTypeFrom(raw: unknown): ClipType | undefined;
@@ -2774,6 +4334,8 @@ declare class Clip extends Node {
     private midiClip;
     private deleting;
     private contextView;
+    private controlsFolder;
+    private warpList;
     readonly uid: Prop<string>;
     readonly name: WritableProp<string>;
     /** Timeline start, ticks. */
@@ -2823,6 +4385,35 @@ declare class Clip extends Node {
      * playlist.clips.onChange(() => draw(playlist.clips.items.map((c) => c.snapshot())));
      */
     snapshot(): ClipSnapshot;
+    /**
+     * The clip's own controls (`<clip>/controls/<type>`). LUNA gives every clip a `gain` one
+     * (fact 228); see {@link gainControl}.
+     *
+     * @example
+     * await clip.controls.load();
+     * clip.controls.items.map((c) => c.controlType.value); // ['gain']
+     */
+    get controls(): Controls;
+    /**
+     * The clip gain control (fact 228): its `automation` lane is the clip-gain envelope, in dB,
+     * with ticks relative to the clip's start, edited with the usual breakpoint verbs. Its value
+     * follows {@link gain}. {@link clipGainAt} evaluates the lane as LUNA does.
+     *
+     * @example
+     * await clip.gainControl.load();
+     * const lane = clip.gainControl.automation;
+     * await lane.insert([{ tick: 0, value: 0 }, { tick: Luna.WHOLE_NOTE, value: -144 }]); // fade to silence
+     * Luna.clipGainAt(lane.breakpoints, Luna.HALF_NOTE); // -72
+     */
+    get gainControl(): Control;
+    /**
+     * The clip's warp markers (facts 229-231). Call `load()` before reading.
+     *
+     * @example
+     * await clip.warps.load();
+     * clip.warps.markers; // [{ rowid, start, sourceStart, type }]
+     */
+    get warps(): Warps;
     /** The playlist this clip sits on, taken from its path. */
     get playlistUid(): string;
     /** Length on the timeline, ticks. */
@@ -2997,6 +4588,140 @@ declare class Clip extends Node {
     protected release(): void;
 }
 
+/** A job as LUNA last reported it. Frozen; safe to keep. */
+interface JobSnapshot {
+    readonly uid: string;
+    /** Nil uuid (32 zeros) when the job belongs to no session. */
+    readonly sessionUid: string;
+    /** `lyric_transcription` or `chord_extraction`. */
+    readonly jobType: string;
+    /** `queued | running | canceling | completed | failed | canceled`. */
+    readonly status: string;
+    /** Machine key such as `processing` or `downloading`; `''` when none. */
+    readonly stage: string;
+    /** A `job.*` code such as `job.provider_unavailable`; `''` when none. */
+    readonly error: string;
+    /** A `job.warning.*` code; `''` when none. */
+    readonly warning: string;
+    /** The track the job works on, when LUNA names one. */
+    readonly targetUid: string | undefined;
+    readonly cancellable: boolean;
+    /** 0..100, as LUNA reports it. */
+    readonly percentComplete: number;
+}
+/** How a job that did what it was asked ended. */
+interface JobResult extends JobSnapshot {
+    /**
+     * True when the job worked and found nothing (no chords, no lyrics). LUNA reports that as
+     * `failed` with the error `job.no_result` and calls it "not a failure" (fact 200), so the
+     * SDK resolves it rather than rejecting.
+     */
+    readonly empty: boolean;
+}
+/** What a launch is matched on (fact 201). */
+interface JobCriteria {
+    sessionUid: string;
+    jobType: string;
+    /** The **track** the job targets; leave out when LUNA picks it from the selection. */
+    targetUid?: string;
+}
+/** Status values after which nothing more happens to a job. */
+declare function isTerminalJobStatus(status: string | undefined): boolean;
+/** How long a {@link JobRun} waits: for LUNA to start the job, and for it to finish. */
+interface JobRunOptions {
+    /** How long to wait for LUNA to start the job. Default 30 s. */
+    startTimeoutMs?: number;
+    /** How long to wait for it to finish. Default 30 min. */
+    timeoutMs?: number;
+}
+/**
+ * One launched job, followed from the command that started it to its end: what
+ * `session.musical.chords.detect()` and `session.lyrics.transcribe()` return. Await it (or
+ * {@link done}) for the outcome; read {@link progress} and {@link snapshot} on the way.
+ *
+ * It resolves when the job completes, and with `empty: true` when it worked and found nothing.
+ * It rejects with a {@link UAError} whose `code` is the job's error (`job.provider_unavailable`,
+ * ...), `canceled`, `removed` (LUNA dropped the job without an ending, e.g. its session closed),
+ * `no_effect` (LUNA took the command but no job started), `timeout` (the job did not end in
+ * time, the code `Luna.RequestTimeout` carries too), or the launch command's own error.
+ *
+ * @example
+ * const run = session.lyrics.transcribe({ clip });
+ * run.progress.onChange(() => console.log(Math.round((run.progress.value ?? 0) * 100), '%'));
+ * try {
+ *   const result = await run;
+ *   console.log(result.empty ? 'nothing sung' : 'lyrics ready');
+ * } catch (err) {
+ *   console.warn((err as Luna.UAError).code);
+ * }
+ */
+declare class JobRun implements PromiseLike<JobResult> {
+    private readonly client;
+    private readonly criteria;
+    /** The job's latest snapshot; `undefined` until LUNA starts it. */
+    readonly snapshot: Prop<JobSnapshot>;
+    /** 0..1 from the job's `percent_complete`, ready for a `<progress>` element. */
+    readonly progress: Prop<number>;
+    private readonly snapCell;
+    private readonly progressCell;
+    private readonly outcome;
+    private resolve;
+    private reject;
+    private pinned;
+    private finished;
+    private readonly minSeq;
+    private readonly releaseTracker;
+    private startTimer;
+    private doneTimer;
+    /** The job's uid once LUNA has started it. */
+    get uid(): string | undefined;
+    /**
+     * The outcome: resolves with the job's last snapshot, rejects as described on the class.
+     * Calling it after the job ended answers at once.
+     *
+     * @example
+     * const { empty } = await session.musical.chords.detect().done();
+     */
+    done(): Promise<JobResult>;
+    /**
+     * Lets `await run` work: a `JobRun` is a `PromiseLike` of its {@link JobResult}.
+     *
+     * @example
+     * const result = await session.musical.chords.detect({ clip });
+     */
+    then<A = JobResult, B = never>(onFulfilled?: ((value: JobResult) => A | PromiseLike<A>) | null, onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null): Promise<A | B>;
+    /**
+     * Ask LUNA to cancel the job. LUNA refuses once the job is no longer cancellable; the run
+     * then ends however the job does. A cancel accepted ends the run with code `canceled`.
+     *
+     * @example
+     * const run = session.lyrics.transcribe();
+     * cancelButton.onclick = () => run.cancel().catch(() => undefined);
+     */
+    cancel(): Promise<void>;
+    private fail;
+    private finish;
+}
+/** What a chord detection or lyric transcription works on. */
+interface ExtractionOptions extends JobRunOptions {
+    /**
+     * The clip to analyse, as a `Clip` or its uid. Without one LUNA uses the edit context's
+     * selection (one track for chords).
+     */
+    clip?: {
+        readonly id: string;
+        readonly path: string;
+        readonly uid?: Prop<string>;
+    } | string;
+    /**
+     * The clip's track, which the job is matched on (fact 201). Found from a `Clip` itself; give
+     * it with a bare clip uid so a concurrent job on another track cannot be taken for this one.
+     */
+    trackUid?: string;
+    /** The edit context whose selection is used without a clip. Default `main`. */
+    context?: string;
+}
+
 /** A chord name split the way LUNA spells chords: root, type suffix, slash bass. */
 interface ParsedChord {
     /** `C`, `F#`, `Bb`. */
@@ -3058,6 +4783,22 @@ declare class Chord extends Node {
     delete(): Promise<void>;
 }
 declare class Chords extends Collection<Chord> {
+    private readonly sessionUid;
+    /**
+     * Detect the chords in a clip, or in the edit context's selection (one track), and write
+     * them onto this ruler, as LUNA's Detect Chords does: `extract_chords`, which runs as a
+     * `chord_extraction` job (facts 200, 203). The chords land here as they are written; the
+     * returned {@link JobRun} reports progress and resolves when the job completes, with
+     * `empty: true` when nothing was found. LUNA also keeps what it found per source in
+     * `source.analysis.chord`.
+     *
+     * @example
+     * const run = session.musical.chords.detect({ clip });
+     * run.progress.onChange(() => (bar.value = run.progress.value ?? 0));
+     * await run;
+     * session.musical.chords.sorted.map((c) => c.name.value);
+     */
+    detect(options?: ExtractionOptions): JobRun;
     /** Chords in timeline order. */
     get sorted(): Chord[];
     /** The chord sounding at `tick`: the last one at or before it. */
@@ -3262,6 +5003,32 @@ declare class Musical {
      * key && `${key.sharpsAndFlats.value} ${key.isMinor.value ? 'minor' : 'major'}`;
      */
     keySignatureAt(tick: number): KeySignature | undefined;
+    /**
+     * Delete the time signature that starts at `bar` and resolve once it has left
+     * {@link timeSignatures}. The signatures after it keep their bar numbers and move to the
+     * ticks the earlier signature now gives them, as LUNA's ruler does (fact 154). One undo
+     * entry. Rejects with `not_found` when no loaded signature starts at `bar` (LUNA answers
+     * success and changes nothing), and with `out_of_range` for the session's first signature,
+     * which every bar is counted from.
+     *
+     * @example
+     * await session.musical.ready();
+     * await session.musical.setTimeSignature(3, 4, 9);
+     * await session.musical.deleteTimeSignature(9);   // back to the signature before bar 9
+     */
+    deleteTimeSignature(bar: number): Promise<void>;
+    /**
+     * Delete the key signature at `tick` and resolve once it has left {@link keySignatures}.
+     * One undo entry. Rejects with `out_of_range` for tick 0, the session's key, which LUNA
+     * refuses to delete (change it with {@link setKeySignature}), and with `not_found` when no
+     * loaded key signature is at `tick` (fact 154).
+     *
+     * @example
+     * await session.musical.ready();
+     * const key = session.musical.keySignatureAt(session.transport.tick);
+     * if (key && key.tick.value !== 0) await session.musical.deleteKeySignature(key.tick.value!);
+     */
+    deleteKeySignature(tick: number): Promise<void>;
     /** Move bar one to `tick`. */
     setBarOne(tick: number): Promise<unknown>;
     private settleChords;
@@ -3651,6 +5418,88 @@ declare class RecordTakes implements List<RecordTake> {
     private notify;
 }
 
+/** One MIDI operation. Ranges are LUNA's; anything outside them is refused before it is sent. */
+type MidiOperation = 
+/** Set every note's velocity, 1-127. */
+{
+    type: 'velocity';
+    value: number;
+}
+/** Scale every velocity by `percent`, 1-200, clamped to 1-127. */
+ | {
+    type: 'velocityPercent';
+    percent: number;
+}
+/**
+ * Make every note this long, counted from its start through the time signatures: whole
+ * bars, beats and engine ticks (fewer than a beat, in whole display ticks). Omitted parts
+ * are 0.
+ */
+ | {
+    type: 'duration';
+    bars?: number;
+    beats?: number;
+    ticks?: number;
+}
+/** Scale every length by `percent` (1 or more; 50 halves, 200 doubles). */
+ | {
+    type: 'durationPercent';
+    percent: number;
+}
+/** Scale every length by exactly `numerator / denominator`, rounded to the nearest tick (`1/3` and back round-trips). */
+ | {
+    type: 'durationScale';
+    numerator: number;
+    denominator: number;
+}
+/** Stretch each note to the next note start in its clip, or to the next beat. */
+ | {
+    type: 'legato';
+}
+/** Make every note 100 display ticks long. */
+ | {
+    type: 'staccato';
+}
+/** Mirror the notes' timing inside the selected range. */
+ | {
+    type: 'reverse';
+}
+/** Move every pitch by `semitones`, -24 to 24, clamped to 0-127. */
+ | {
+    type: 'transpose';
+    semitones: number;
+}
+/**
+ * Mirror the pitches: `'range'` (default) around the middle of the lowest and highest,
+ * `'first'` around the first note, `'root'` around the scale root nearest the middle. With
+ * `scale`, in scale degrees rather than semitones: `root` 0-11 (C = 0) and `mask`, a 12-bit
+ * pitch-class set (bit N = pitch class N) that includes the root; `'root'` needs one.
+ */
+ | {
+    type: 'invert';
+    around?: 'range' | 'first' | 'root';
+    scale?: {
+        root: number;
+        mask: number;
+    };
+};
+
+/** One control and its value for {@link Context.writeControlValues} / {@link Context.trimControlValues}. */
+interface ControlValue {
+    /** The control, or its `uid`. A `Control` must have its `uid` loaded. */
+    control: Control | string;
+    /** Absolute value for a write, delta for a trim; in the control's native unit (dB for gain). */
+    value: number;
+}
+/**
+ * The tick range of a write or trim: `[start, stop)`. Give both or neither; with neither, LUNA
+ * uses the context's selection (fact 227).
+ */
+interface ControlValueRange {
+    start?: number;
+    stop?: number;
+}
+
 type ContextType = 'main' | 'editor' | `alt_${number}` | string;
 /** One playlist's selected notes as LUNA stores them: `[pitch, start, stop, rowid]` in absolute ticks. */
 interface SelectedNotes {
@@ -3688,6 +5537,16 @@ declare class Context extends Node {
     readonly hiddenTracks: Prop<string[] | null>;
     /** Zoom. */
     readonly pixelsPerTick: WritableProp<number>;
+    /**
+     * The tick at the left edge of this window's timeline view, with {@link pixelsPerTick} the
+     * horizontal scroll (fact 159). Stored with the session, not undoable; `undefined` until
+     * something has set it. A page that draws its own timeline can share its scroll through it.
+     *
+     * @example
+     * const x = (tick: number) => (tick - (ctx.timelineViewStartTick.value ?? 0)) * ctx.pixelsPerTick.value!;
+     * await ctx.timelineViewStartTick.set(Luna.WHOLE_NOTE * 8);
+     */
+    readonly timelineViewStartTick: WritableProp<number>;
     readonly gridEnable: WritableProp<boolean>;
     /** Grid size such as `1_4`, `1_8`, `bar`. */
     readonly grid: WritableProp<string>;
@@ -3742,6 +5601,8 @@ declare class Context extends Node {
     /** Re-read the six selection properties (they also arrive as events). */
     refreshSelection(): Promise<unknown>;
     /** Run one of the context's edit commands (`copy`, `paste`, `duplicate`, `select_all`, ...). */
+    /** A context's commands live under its `commands` node. */
+    protected commandPath(command: string): string;
     run(command: string, payload?: Record<string, unknown>): Promise<unknown>;
     /**
      * Widen the selected range to everything on the selected tracks' playlists (clips, notes,
@@ -3763,6 +5624,167 @@ declare class Context extends Node {
     separateClips(): Promise<unknown>;
     consolidate(): Promise<unknown>;
     muteClips(): Promise<unknown>;
+    /**
+     * Write an absolute value per control over `[start, stop)`, or over this context's selection
+     * when the range is left out (`write_control_values`, fact 227). One undo step for all of
+     * them. Resolves on LUNA's reply, which comes after the write; the lanes update by push.
+     * An unknown control uid rejects with `device.database_error`.
+     *
+     * @example
+     * await session.context.writeControlValues(
+     *   [{ control: vocal.gain, value: -12 }, { control: guitar.gain, value: -9 }],
+     *   { start: 0, stop: Luna.WHOLE_NOTE * 2 },
+     * );
+     */
+    writeControlValues(controls: readonly ControlValue[], range?: ControlValueRange): Promise<void>;
+    /**
+     * Add a delta per control over `[start, stop)`, or over this context's selection when the
+     * range is left out (`trim_control_values`, fact 227). One undo step for all of them.
+     * Resolves on LUNA's reply; the lanes update by push.
+     *
+     * @example
+     * await session.context.trimControlValues([{ control: vocal.gain, value: 3 }], { start: 0, stop: Luna.WHOLE_NOTE });
+     */
+    trimControlValues(controls: readonly ControlValue[], range?: ControlValueRange): Promise<void>;
+    /**
+     * Apply one of LUNA's MIDI operations to what this context selects (fact 158): the selected
+     * notes with focus `notes`, the MIDI on the selected tracks in the range with `timeline`.
+     * One undo entry. Resolves when LUNA answers; the edits arrive as MIDI table changes and
+     * the selected notes follow. With nothing to act on LUNA changes nothing and answers
+     * success. Rejects with `out_of_range` before sending for a value outside LUNA's range.
+     *
+     * @example
+     * await ctx.selectNotes(playlist.id, rows);
+     * await ctx.midiOperation({ type: 'transpose', semitones: -12 });
+     * await ctx.midiOperation({ type: 'duration', beats: 1 });
+     * await ctx.midiOperation({ type: 'invert', around: 'root', scale: { root: 0, mask: 0b101010110101 } });
+     */
+    midiOperation(op: MidiOperation): Promise<void>;
+}
+
+/** One word of a lyric line. `offset` and `length` are in the line's units, from its start. */
+interface LyricWord {
+    word: string;
+    offset: number;
+    length: number;
+}
+/** Options for {@link Lyrics.add}. */
+interface AddLyricOptions {
+    /** How long the line lasts, in the line's units. Default 0, as LUNA's ruler makes them. */
+    length?: number;
+    /**
+     * Add the line to a recording's lyrics instead of the ruler: `location` and `length` are
+     * then nanoseconds from that audio source's start (fact 152).
+     */
+    sourceUid?: string;
+}
+declare class Lyric extends Node {
+    readonly rowid: Prop<number>;
+    /** Where the line starts: a tick for a ruler line, nanoseconds into its source for a transcribed one. */
+    readonly location: Prop<number>;
+    /** How long the line lasts, in the same units as {@link location}. */
+    readonly length: Prop<number>;
+    readonly text: Prop<string>;
+    /** The audio source a transcribed line came from; LUNA's nil uid for a ruler line. */
+    readonly sourceUid: Prop<string>;
+    /** The line's words with their timing, when LUNA has it (a transcribed line). */
+    readonly words: Prop<LyricWord[]>;
+    /**
+     * Whether the line was transcribed from a recording: it names a source, and its
+     * {@link location} is nanoseconds into that source rather than a tick.
+     *
+     * @example
+     * const lines = session.lyrics.sorted.filter((l) => !l.transcribed);   // the ruler's, in ticks
+     */
+    get transcribed(): boolean;
+    private get row();
+    private get sessionUid();
+    private edit;
+    /**
+     * Change the line's text and resolve once LUNA shows it. One undo entry. The words and their
+     * timings are left as they were. Rejects with `out_of_range` for an empty string (LUNA would
+     * ignore it); to remove a line, {@link delete} it.
+     *
+     * @example await line.setText('Here comes the sun');
+     */
+    setText(text: string): Promise<void>;
+    /**
+     * Move the line to `location`, in its own units: a tick for a ruler line, nanoseconds into
+     * its source for a transcribed one. Another line of the same kind already at `location` is
+     * replaced, as in LUNA (fact 153). One undo entry.
+     *
+     * @example await line.moveTo(line.location.value! + Luna.WHOLE_NOTE);
+     */
+    moveTo(location: number): Promise<void>;
+    /**
+     * Delete this line and resolve once it has left {@link Lyrics}. One undo entry.
+     *
+     * @example await line.delete();
+     */
+    delete(): Promise<void>;
+}
+/** Options for {@link Lyrics.transcribe}. */
+interface TranscribeOptions extends ExtractionOptions {
+    /** A name from {@link Lyrics.providers}; LUNA's default when left out. */
+    provider?: string;
+    /**
+     * Also put the lines on the lyric ruler, in ticks, over the clip or selected range
+     * (`add_to_session`, fact 204). Default false: only the transcribed lines, in nanoseconds
+     * into the source.
+     */
+    addToRuler?: boolean;
+}
+/** The lyric transcription services LUNA offers (`/lyric_transcription`, fact 204). */
+interface LyricProviders {
+    /** Whether any provider can run now. */
+    available: boolean;
+    /** Provider names to pass as `provider`. */
+    providers: string[];
+    /** The one LUNA uses when none is named. */
+    defaultProvider: string;
+}
+declare class Lyrics extends Collection<Lyric> {
+    private readonly sessionUid;
+    /**
+     * Transcribe the lyrics of a clip, or of the edit context's selection, as LUNA's Transcribe
+     * Lyrics does: `extract_lyrics`, which runs as a `lyric_transcription` job (facts 200, 204).
+     * The transcribed lines arrive in this list, each naming its source and placed in
+     * nanoseconds into it (fact 152); with `addToRuler` LUNA also writes ruler lines in ticks.
+     * The returned {@link JobRun} reports progress and resolves when the job completes, with
+     * `empty: true` when there was nothing to transcribe.
+     *
+     * @example
+     * const run = session.lyrics.transcribe({ clip, provider: (await session.lyrics.providers()).defaultProvider });
+     * await run;
+     * session.lyrics.sorted.filter((l) => l.sourceUid.value === clip.sourceUid.value).map((l) => l.text.value);
+     */
+    transcribe(options?: TranscribeOptions): JobRun;
+    /**
+     * Read which transcription providers LUNA has. LUNA computes these when asked and pushes
+     * no change (fact 204), so this is a read, not a prop.
+     *
+     * @example
+     * const { available, providers, defaultProvider } = await session.lyrics.providers();
+     */
+    providers(): Promise<LyricProviders>;
+    /**
+     * The lines by {@link Lyric.location}. Ruler and transcribed lines are in different units,
+     * so sort within one kind.
+     *
+     * @example
+     * session.lyrics.sorted.filter((l) => l.sourceUid.value === source.id).map((l) => l.text.value);
+     */
+    get sorted(): Lyric[];
+    /**
+     * Add a line at `location` and resolve to it once it is listed. A ruler line by default,
+     * at a tick; with `sourceUid`, a line of that recording's lyrics, at nanoseconds into it.
+     * A line of the same kind already at `location` is replaced, as in LUNA (fact 153). One
+     * undo entry.
+     *
+     * @example
+     * const line = await session.lyrics.add(Luna.WHOLE_NOTE * 8, 'Second verse');
+     */
+    add(location: number, text: string, options?: AddLyricOptions): Promise<Lyric>;
 }
 
 declare class Marker extends Node {
@@ -3817,6 +5839,135 @@ declare class Markers extends Collection<Marker> {
     get sorted(): Marker[];
     /** The last marker at or before `tick`. */
     at(tick: number): Marker | undefined;
+}
+
+/** What a group links: timeline edits, mix moves, plugin changes, send changes. */
+type GroupAttribute = 'edit' | 'mix' | 'plugin' | 'send';
+/** The attributes in LUNA's own order, which is how it writes `group_attributes` (fact 215). */
+declare const GROUP_ATTRIBUTES: readonly GroupAttribute[];
+/**
+ * A track, a bus, or its uid: anything with an `id`, or the id itself.
+ *
+ * @example
+ * await group.addMembers([vocal, 'bus_7']);
+ */
+type ChannelRef = {
+    readonly id: string;
+} | string;
+interface NewGroupOptions {
+    /** At least one. */
+    attributes: readonly GroupAttribute[];
+    /** Default: LUNA's localized `New Group`. */
+    name?: string;
+    /** Tracks and buses to put in it. */
+    members?: readonly ChannelRef[];
+    /** Number the name when another group has it, as LUNA's own menu does. Default false. */
+    makeNameUnique?: boolean;
+}
+interface AffectedTracksOptions {
+    /** The edit context whose selection and group switches apply. Default `main`. */
+    contextType?: string;
+}
+/**
+ * One group.
+ *
+ * @example
+ * const g = session.groups.byId(uid)!;
+ * g.name.value; g.attributes.value; g.members.value;
+ */
+declare class Group extends Node {
+    private readonly sessionUid;
+    readonly name: Prop<string>;
+    /** Parsed from LUNA's `group_attributes` CSV, in the order `edit, mix, plugin, send`. */
+    readonly attributes: Prop<readonly GroupAttribute[]>;
+    /** Display order among the session's groups, from 1. */
+    readonly order: Prop<number>;
+    /**
+     * Uids of the tracks and buses in the group, each once, in the order they joined. Loaded
+     * with the group; follows `addMembers`, `removeMembers` and LUNA's own edits.
+     *
+     * @example
+     * g.members.onChange(() => render(g.members.value ?? []));
+     */
+    readonly members: Prop<readonly string[]>;
+    private readonly rows;
+    private get session();
+    private waitFor;
+    /**
+     * Add tracks or buses to this group in one undo step, and resolve once they show in
+     * {@link members}.
+     *
+     * @example
+     * await group.addMembers([track, bus.id]);
+     */
+    addMembers(channels: readonly ChannelRef[]): Promise<void>;
+    /**
+     * Take tracks or buses out of this group in one undo step, and resolve once they have left
+     * {@link members}. One that is not in it is ignored.
+     *
+     * @example
+     * await group.removeMembers([track]);
+     */
+    removeMembers(channels: readonly ChannelRef[]): Promise<void>;
+    /**
+     * Delete this group (its tracks and buses stay) and resolve once it has left
+     * `session.groups`.
+     *
+     * @example
+     * await group.delete();
+     */
+    delete(): Promise<void>;
+    protected release(): void;
+}
+/**
+ * The session's groups. Not loaded by `session.ready()`: call {@link load} first.
+ *
+ * @example
+ * await session.groups.load();
+ * session.groups.sorted.map((g) => g.name.value);
+ */
+declare class Groups extends Collection<Group> {
+    private readonly sessionUid;
+    /**
+     * Read the groups and each group's members.
+     *
+     * @example
+     * await session.groups.load();
+     */
+    load(): Promise<void>;
+    /** Groups in LUNA's display order. */
+    get sorted(): Group[];
+    /**
+     * Make a group in one undo step, enabled in every edit context, and resolve to it once it
+     * and its members are in this list (fact 215).
+     *
+     * @example
+     * const g = await session.groups.add({ name: 'Drums', attributes: ['mix', 'edit'], members: [kick, snare] });
+     */
+    add(options: NewGroupOptions): Promise<Group>;
+    /**
+     * Move `groups` (in the order given) to just after `after`, or to the front when `after`
+     * is `null` or left out, and resolve once LUNA shows the new order. LUNA answers the same
+     * whether or not it moved anything, so a move it refused rejects with `no_effect`
+     * (fact 217).
+     *
+     * @example
+     * await session.groups.reorder([vocals], { after: drums });
+     * await session.groups.reorder([drums]);            // to the front
+     */
+    reorder(groups: readonly (Group | string)[], options?: {
+        after?: Group | string | null;
+    }): Promise<void>;
+    /**
+     * The tracks and buses an operation on `track` would reach (fact 218): the edit context's
+     * selection when it holds `track`, else `track` alone, plus every member of each group that
+     * holds `track` and shares an attribute with `attributes`. Reads only; changes nothing. The
+     * uids come in no particular order.
+     *
+     * @example
+     * const uids = await session.groups.affectedTracks(track, 'mix');
+     */
+    affectedTracks(track: ChannelRef, attributes: GroupAttribute | readonly GroupAttribute[], options?: AffectedTracksOptions): Promise<string[]>;
 }
 
 /** Options for an edit of session storage. */
@@ -4044,372 +6195,276 @@ declare class Playlist extends Node {
     protected release(): void;
 }
 
-/**
- * The preset library: the `/presets` node's `query` command over the workspace database
- * (fact 98). Presets are addressed by uid; `find` turns a plugin id and a preset name
- * into that uid so it can be passed to {@link Effect.setPlugin} or {@link Effect.loadPreset}.
- *
- * Preset selection, as LUNA's own plugin pages offer it, is three things over one plugin's
- * presets: search text that filters by name, tags picked from the plugin's tag groups, and
- * recommendations that UA Assistant ranks from the same search text (facts 120-121).
- * {@link Presets.selection} keeps all three current for a page.
- *
- * @example
- * const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
- * await slot.setPlugin('uaudio_qi', { presetName: preset?.name, presetUid: preset?.uid });
- */
+declare class PreferenceContext {
+    private readonly client;
+    /** The `/preferences` context the values live in. */
+    readonly name: string;
+    private readonly initialised;
+    /**
+     * The value stored under `key`, or `undefined` when there is none. LUNA reads a context
+     * from disk only when a preference in it is initialised (fact 232), so this initialises
+     * `key` first; an existing value is kept.
+     *
+     * @example
+     * const last = await prefs.get<string>('lastPreset');
+     */
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    /**
+     * Store `value` (any JSON) under `key`. LUNA writes it to disk at once (fact 232). Store
+     * `null` to clear it; LUNA has no way to remove a preference.
+     *
+     * @example
+     * await prefs.set('lastPreset', preset.uid);
+     */
+    set(key: string, value: unknown): Promise<void>;
+    private init;
+}
 
-interface PresetRow {
-    uid: string;
-    name: string;
-    version: number;
-    favorite: boolean;
-    factory: boolean;
-    path: string;
-    /** The preset's tags. Present only when the query asked for them (`withTags`). */
-    tags?: string[];
-    /**
-     * True for an instrument plugin's preset listed among track presets, false for a track
-     * preset. Present only when the query asked for them (`includeInstrumentPresets`, fact 132).
-     */
-    isInstrumentPreset?: boolean;
-    /**
-     * For an instrument preset, the plugin it belongs to: the instrument whose factory or user
-     * preset folder holds it (fact 132). Absent when no installed instrument's folder does.
-     */
-    pluginId?: string;
-    /** That plugin's name, for example `Moog Minimoog Synth`. */
-    pluginName?: string;
-}
-interface PresetQueryOptions {
-    /** The plugin whose presets to list. One of `pluginId` or `deviceTypeId` is required. */
-    pluginId?: string;
-    /** A device type (for example `track`) instead of a plugin. */
-    deviceTypeId?: string;
-    /** Case-insensitive substring to match against preset names. */
-    search?: string;
-    /** Only presets carrying these tags: all of them, or any with `matchAnyTag` (fact 120). */
-    tags?: string | readonly string[];
-    /** With several `tags`, match presets carrying any of them rather than all. */
-    matchAnyTag?: boolean;
-    /** Include each preset's tags in the rows. */
-    withTags?: boolean;
-    /** Only favorites. */
-    favorite?: boolean;
-    /** Maximum number of rows. */
-    limit?: number;
-    /**
-     * With `deviceTypeId: 'track'`, also list the presets of every installed instrument plugin,
-     * marked `isInstrumentPreset`. An `Instrument` tag then selects instrument track presets and
-     * every instrument preset; the other tags must match either kind (fact 132).
-     */
-    includeInstrumentPresets?: boolean;
-}
 /**
- * The categories LUNA's track preset browser offers. They are ordinary preset tags, which
- * LUNA writes when a track preset is saved (fact 132). No category means all of them.
+ * A live analysis LUNA can run on a device input (fact 186). The value is the prefix of the
+ * engine's `<kind>_analysis_enabled` switch.
  */
-declare const TRACK_PRESET_CATEGORIES: readonly ["Audio", "Instrument", "Bus", "Multi-Track"];
-type TrackPresetCategory = (typeof TRACK_PRESET_CATEGORIES)[number];
+type InputAnalysisKind = 'signal_level' | 'tempo' | 'instrument' | 'stereo_detect';
+/** The analysis kinds, in a stable order. */
+declare const INPUT_ANALYSIS_KINDS: readonly InputAnalysisKind[];
 /**
- * A named group of a plugin's preset tags, for example Paradise's `TYPE`, `GENRE` and
- * `DESCRIPTION`. LUNA keeps them as categories holding sub-categories holding tags (fact 120);
- * a group is one sub-category.
- */
-interface PresetTagGroup {
-    /** The sub-category uid. */
-    uid: string;
-    /** The sub-category name, for example `GENRE`. */
-    name: string;
-    /** The category it sits in, for example `Default`. */
-    category: string;
-    categoryUid: string;
-    /** Tags in LUNA's order. */
-    tags: string[];
-}
-/** One preset UA Assistant recommends for a search, best first (fact 121). */
-interface PresetRecommendation {
-    uid: string;
-    name: string;
-    /** The assistant's reciprocal-rank-fusion score, which orders the answer; higher is better. Compare within one answer only. */
-    score: number;
-    /** The keyword half of the hybrid search, when the assistant reports it. */
-    keywordScore?: number;
-    /** The semantic half of the hybrid search, when the assistant reports it; -1 when the preset was found by keyword alone. */
-    semanticScore?: number;
-}
-declare class Presets extends Node {
-    private instrumentList;
-    /**
-     * Query the preset database (fact 98). Columnar on the wire; rows here. Search and tags
-     * combine: a row must match both (fact 120).
-     *
-     * @example
-     * const rows = await luna.presets.query({ pluginId: 'uaudio_qi', search: 'EQ' });
-     * rows[0]?.uid; rows[0]?.name; rows[0]?.factory;
-     * const clean = await luna.presets.query({ pluginId, tags: ['Clean', 'Jazz'], withTags: true });
-     * clean[0]?.tags; // ['Clean', 'Jazz', ...]
-     */
-    query(options?: PresetQueryOptions): Promise<PresetRow[]>;
-    /** Give each instrument preset its plugin, by the preset folder that holds it (fact 132). */
-    private namePlugins;
-    /**
-     * The installed instruments with their preset folders, read once and kept: LUNA's own
-     * browser asks for the same list. {@link forgetInstruments} reads it again next time.
-     */
-    private instruments;
-    /** Read the installed instruments again on the next query, for example after one was installed. */
-    forgetInstruments(): void;
-    /**
-     * The plugin's preset name exactly `name` (case-insensitive), or `undefined`. When the
-     * library holds a user preset and a factory preset of the same name, the user one wins,
-     * matching what LUNA's preset browser opens.
-     *
-     * @example
-     * const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
-     * preset?.uid;
-     */
-    find(pluginId: string, name: string): Promise<PresetRow | undefined>;
-    /**
-     * The plugin's tag groups, in LUNA's order (fact 120). Empty for a plugin whose presets
-     * are not tagged.
-     *
-     * @example
-     * const groups = await luna.presets.tagGroups('uaudio_paradise_guitar_studio');
-     * groups.map((g) => g.name); // ['TYPE', 'GENRE', 'DESCRIPTION']
-     */
-    tagGroups(pluginId: string): Promise<PresetTagGroup[]>;
-    /**
-     * The tag groups LUNA's track preset browser shows: the track presets' own groups and every
-     * installed instrument plugin's, merged by group name, without the category tags (`Audio`,
-     * `Instrument`, `Bus`, `Multi-Track`), which {@link TRACK_PRESET_CATEGORIES} lists (fact 132).
-     *
-     * @example
-     * const groups = await luna.presets.trackTagGroups();
-     * groups.map((g) => g.name); // ['GENRE', 'TYPE', ...]
-     */
-    trackTagGroups(): Promise<PresetTagGroup[]>;
-    private groupsAt;
-    /**
-     * Presets UA Assistant recommends for free text, best first, five at most (fact 121). Needs
-     * UA Assistant connected to LUNA ({@link Assistant.enabled}), and an instance of the plugin
-     * created since it connected, which is when LUNA builds the plugin's search index. Otherwise
-     * this rejects with the engine's code: `ua.unknown` (no assistant),
-     * `assistant.preset_search_not_initialized_error` (no index yet), or
-     * `assistant.input_classifier_rejected` (text the assistant will not search on). Empty text
-     * resolves to `[]` without asking.
-     *
-     * @example
-     * const recs = await luna.presets.recommend('uaudio_paradise_guitar_studio', 'warm jazz clean');
-     * await slot.loadPreset(recs[0].uid);
-     */
-    recommend(pluginId: string, text: string): Promise<PresetRecommendation[]>;
-    /**
-     * A live preset selection over one plugin: set `search` and `tags`, read `presets` and
-     * `recommendations`. Requests are debounced and a reply that a newer one overtook is
-     * dropped, so the lists always match the inputs. Recommendations come from the search text,
-     * keep only presets carrying the selected tags (so with tags selected there can be fewer
-     * than the assistant's five), and stay empty while UA Assistant is not connected. A refused
-     * request leaves them empty and its code in `recommendationError`. Call `dispose()` when done.
-     *
-     * @example
-     * const sel = luna.presets.selection('uaudio_paradise_guitar_studio');
-     * await sel.ready();
-     * sel.groups.value;                       // tag groups for the chips
-     * await sel.search.set('warm');
-     * await sel.toggleTag('Clean');
-     * await sel.settled();
-     * sel.presets.items.map((p) => p.name);   // names containing "warm", tagged Clean
-     * sel.recommendations.items[0]?.name;     // the assistant's best match, tagged Clean
-     * await slot.loadPreset(sel.presets.items[0].uid);
-     * sel.dispose();
-     */
-    selection(pluginId: string, options?: PresetSelectionOptions): PresetSelection;
-    /**
-     * A live selection over track presets, as LUNA's track preset browser offers them: a
-     * `category` (one of {@link TRACK_PRESET_CATEGORIES}, or `null` for all), tags, and search
-     * text. With no category or `Instrument`, installed instrument plugins' presets are listed
-     * too, marked `isInstrumentPreset` (fact 132). Pass a row to {@link Session.newTrackFromPreset}
-     * to make a track from it, or to {@link Track.loadPreset} to apply it to a track. Call
-     * `dispose()` when done.
-     *
-     * @example
-     * const sel = luna.presets.trackSelection({ category: 'Instrument' });
-     * await sel.ready();
-     * await sel.search.set('piano');
-     * await sel.settled();
-     * const [track] = await session.newTrackFromPreset(sel.presets.items[0]);
-     * await track.loadPreset(sel.presets.items[1]);   // replace it with another
-     * sel.dispose();
-     */
-    trackSelection(options?: TrackPresetSelectionOptions): TrackPresetSelection;
-}
-/**
- * `/assistant`: whether UA Assistant is connected to LUNA. Preset recommendations need it
- * (fact 121). Call `watch()` to follow it.
+ * `/devices/<device>/inputs/<uid>`: one input of an audio device, the thing a track's
+ * `inputNodeUid` points at (facts 76, 185). All of its properties are read-only.
+ *
+ * The props follow the engine while the input is watched: `device.inputs.watch()` follows every
+ * input of the device (hotplug, `in_use`, analysis results); {@link watchAnalysis} watches this
+ * one input while it holds an analysis on.
  *
  * @example
- * const { ready } = luna.assistant.watch();
- * await ready;
- * luna.assistant.enabled.value; // true while UA Assistant is connected
+ * const input = device.inputs.items[0];
+ * console.log(input.name.value, input.stemFormat.value, input.deviceChannels.value);
+ * await track.inputNodeUid.set(input.id);
  */
-declare class Assistant extends Node {
-    /** True while UA Assistant is connected to LUNA. */
-    readonly enabled: Prop<boolean>;
-}
-interface PresetSelectionOptions {
-    /** Most rows in `presets`. Default: all of them. */
-    limit?: number;
-    /** Most rows in `recommendations`. Default 5. */
-    maxRecommendations?: number;
-    /** Ask UA Assistant for recommendations. Default true. */
-    recommend?: boolean;
-    /** Quiet time after a change before the list is queried, in ms. Default 100. */
-    queryDelayMs?: number;
-    /** Quiet time after a change before recommendations are asked for, in ms. Default 300. */
-    recommendDelayMs?: number;
-}
-interface TrackPresetSelectionOptions {
-    /** The category to start on. Default `null`: all of them. */
-    category?: TrackPresetCategory | null;
-    /** Most rows in `presets`. Default: all of them. */
-    limit?: number;
-    /** Quiet time after a change before the list is queried, in ms. Default 100. */
-    queryDelayMs?: number;
+declare class DeviceInput extends Node {
+    /** The input's uid; the same as {@link Node.id}. */
+    readonly uid: Prop<string>;
+    readonly name: Prop<string>;
+    /** The engine's object type, `input`. */
+    readonly type: Prop<string>;
+    /** `mono` or `stereo`. */
+    readonly stemFormat: Prop<StemFormat>;
+    /** Uid of the device the input belongs to (`device_id`). */
+    readonly deviceId: Prop<string>;
+    readonly deviceName: Prop<string>;
+    /** The device's channel numbers this input reads, from 0 (`device_channels`). */
+    readonly deviceChannels: Prop<number[]>;
+    /** The hardware's channel index list (`ChannelIndex`), as the driver reports it. */
+    readonly channelIndex: Prop<number[]>;
+    /** The hardware's I/O types (`IOType`), for example `["Mic"]`; empty for a plain driver. */
+    readonly ioType: Prop<string[]>;
+    /** True while a track in any open session records from this input (fact 185). */
+    readonly inUse: Prop<boolean>;
+    /**
+     * The input's description as LUNA saves it with a track (`io_desc`): `name`, `stem_format`,
+     * `device_channels`, `IOType`, `ChannelIndex`, `Name`, `DeviceHwID`, `hardware_index`.
+     * Read-only here.
+     */
+    readonly ioDesc: Prop<Record<string, unknown>>;
+    /** `signal_level_analysis_enabled`. Turn it on with {@link watchAnalysis}. */
+    readonly signalLevelAnalysisEnabled: Prop<boolean>;
+    /** `tempo_analysis_enabled`. */
+    readonly tempoAnalysisEnabled: Prop<boolean>;
+    /** `instrument_analysis_enabled`. */
+    readonly instrumentAnalysisEnabled: Prop<boolean>;
+    /** `stereo_detect_analysis_enabled`. */
+    readonly stereoDetectAnalysisEnabled: Prop<boolean>;
+    /**
+     * The input's peak since the last result, as a linear gain (0..1, 1 = full scale), while
+     * signal-level analysis is on. `-144` (LUNA's dB floor) means no result: the analysis is off,
+     * or the input is below its silence threshold (fact 187).
+     */
+    readonly signalLevelPeak: Prop<number>;
+    /** Detected tempo in BPM while tempo analysis is on; `0` means none detected (fact 187). */
+    readonly tempo: Prop<number>;
+    /** Detected instrument name while instrument analysis is on; `null` means none (fact 187). */
+    readonly instrument: Prop<string | null>;
+    /** True when stereo-detect analysis hears a stereo source; false also means no result (fact 187). */
+    readonly stereoDetect: Prop<boolean>;
+    /**
+     * Turn an input analysis on for as long as you hold it, and watch this input so its result
+     * prop follows the engine. `release()` turns it back off.
+     *
+     * The `<kind>_analysis_enabled` switch is shared engine state: LUNA's own GUI, Auto Gain and
+     * other clients use the same one (fact 186). So the SDK reference-counts holds per connection
+     * and input, reads the switch before the first hold, and turns it on only if it was off; when
+     * the last hold is released it turns it off again only if it was the one that turned it on.
+     * A switch someone else had on is left on. Another client, or Auto Gain finishing, can still
+     * turn it off while you hold it (fact 188); watch `signalLevelAnalysisEnabled` (and friends)
+     * if that matters.
+     *
+     * `ready` rejects if the write is refused; release the hold anyway.
+     *
+     * @example
+     * const hold = input.watchAnalysis('signal_level');
+     * await hold.ready;
+     * const off = input.signalLevelPeak.onChange(() => meter.value = Math.max(0, input.signalLevelPeak.value ?? 0));
+     * // later
+     * off();
+     * hold.release();
+     */
+    watchAnalysis(kind: InputAnalysisKind): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
+    /**
+     * The input as the plain record {@link Client.audioInputs} returns, from the current props.
+     *
+     * @example
+     * const rows = device.inputs.items.map((i) => i.snapshot());
+     */
+    snapshot(): AudioInput;
 }
 /**
- * What {@link PresetSelection} and {@link TrackPresetSelection} share: search text and tags
- * in, a list of presets out. Requests are debounced, and a reply that a newer request
- * overtook is dropped.
+ * `/devices/<device>/inputs`: a device's inputs. `watch()` here is recursive by default, so a
+ * watched collection follows inputs being added and removed (hotplug) and every input's
+ * properties: `in_use`, and analysis results while an analysis is on (fact 185).
+ *
+ * @example
+ * const w = device.inputs.watch();
+ * await w.ready;
+ * device.inputs.onChange(() => render(device.inputs.items));
+ * // later
+ * w.release();
  */
-declare abstract class PresetSelectionBase {
-    protected readonly client: Client;
-    private readonly base;
-    /** Search text. Filters `presets` by name; for a plugin's presets, it is also what recommendations are asked for. */
-    readonly search: WritableProp<string>;
-    /** Selected tags. */
-    readonly tags: WritableProp<readonly string[]>;
-    /** The tag groups, once {@link ready}. */
-    readonly groups: Prop<readonly PresetTagGroup[]>;
-    /** Presets matching the search text and tags, with their tags. */
-    readonly presets: List<PresetRow>;
-    /** True while a request is in flight or waiting. */
-    readonly loading: Prop<boolean>;
-    /** The last list query's failure, or `null`. */
-    readonly error: Prop<UAError | null>;
-    protected readonly searchCell: Cell<string>;
-    protected readonly tagsCell: Cell<readonly string[]>;
-    private readonly groupsCell;
-    private readonly presetsCell;
-    private readonly loadingCell;
-    private readonly errorCell;
-    protected readonly presetsApi: Presets;
-    protected readonly releases: Unsubscribe[];
-    private readonly timers;
-    private readonly gens;
-    private inFlight;
-    private waiters;
-    private readyPromise;
-    private isDisposed;
-    protected constructor(client: Client, base: {
-        limit?: number;
-        queryDelayMs?: number;
-    });
-    /** The tag groups to offer. */
-    protected abstract loadGroups(): Promise<PresetTagGroup[]>;
-    /** The list query for the current inputs, without `limit`. */
-    protected abstract listQuery(): PresetQueryOptions;
-    /** A writable input over `cell`: setting a new value queries again. */
-    protected input<T>(cell: Cell<T>): WritableProp<T>;
+declare class DeviceInputs extends Collection<DeviceInput> {
     /**
-     * Read the tag groups and the first list (and, for a plugin's presets, start following UA
-     * Assistant's connection). Idempotent.
+     * Subscribe to the inputs and load them. Recursive unless `{ recursive: false }`, which
+     * follows only inputs coming and going. Call `release` when done.
      *
      * @example
-     * await sel.ready();
+     * const w = device.inputs.watch();
+     * await w.ready;
      */
-    ready(): Promise<void>;
-    protected start(): Promise<void>;
+    watch(options?: {
+        recursive?: boolean;
+    }): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
+}
+/**
+ * `/devices/<device>/outputs/<uid>`: one output of an audio device (fact 189). Read-only.
+ *
+ * @example
+ * await device.outputs.load();
+ * const monitor = device.outputs.items.find((o) => o.ioType.value?.[0] === 'CtrlRoom');
+ */
+declare class DeviceOutput extends Node {
+    readonly uid: Prop<string>;
+    readonly name: Prop<string>;
+    /** The engine's object type, `output`. */
+    readonly type: Prop<string>;
+    /** `mono` or `stereo`. */
+    readonly stemFormat: Prop<StemFormat>;
     /**
-     * Add `tag` to the selection, or remove it if selected.
+     * The hardware's I/O types (`IOType`), for example `["CtrlRoom"]` for an Apollo's monitor
+     * output; empty for a plain driver (fact 189).
+     */
+    readonly ioType: Prop<string[]>;
+    readonly deviceId: Prop<string>;
+    readonly deviceName: Prop<string>;
+    readonly deviceChannels: Prop<number[]>;
+    readonly channelIndex: Prop<number[]>;
+    readonly inUse: Prop<boolean>;
+}
+/**
+ * `/devices/<device>/outputs`: a device's outputs. `watch()` is recursive by default, like
+ * {@link DeviceInputs}.
+ *
+ * @example
+ * const w = device.outputs.watch();
+ * await w.ready;
+ * device.outputs.items.map((o) => o.name.value);
+ */
+declare class DeviceOutputs extends Collection<DeviceOutput> {
+    /**
+     * Subscribe to the outputs and load them; recursive unless `{ recursive: false }`.
      *
      * @example
-     * await sel.toggleTag('Clean');
+     * const w = device.outputs.watch();
+     * await w.ready;
      */
-    toggleTag(tag: string): Promise<void>;
-    /** Clear the search text and the selected tags. */
-    clear(): Promise<void>;
-    /** Query again with the current inputs, for example after presets were saved or deleted. */
-    refresh(): void;
+    watch(options?: {
+        recursive?: boolean;
+    }): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
+}
+/** The value of the root's `active_audio_engine` property (fact 190). */
+interface ActiveAudioEngineInfo {
+    /** False while LUNA runs with no audio driver. */
+    enabled: boolean;
+    /** `apollo`, `volt`, `system`, `other`, or `''` when undefined. */
+    audio_engine_type: string;
+    /** The drivers in use, in the shape `luna.drivers.connected` lists them. */
+    devices: AudioDeviceInfo[];
+    /** Per-driver output settings; LUNA's own. */
+    outputs?: unknown[];
+}
+/**
+ * The audio engine LUNA is running (the root's read-only `active_audio_engine`, fact 190):
+ * whether audio is on, which kind of engine, and which drivers it uses. Lets an Add On tell
+ * when audio is down.
+ *
+ * @example
+ * const w = luna.activeAudioEngine.watch();
+ * await w.ready;
+ * luna.activeAudioEngine.enabled.onChange(() => banner.hidden = luna.activeAudioEngine.enabled.value !== false);
+ */
+declare class ActiveAudioEngine {
+    private readonly client;
+    /** The whole value, as LUNA sends it. */
+    readonly info: Prop<ActiveAudioEngineInfo>;
+    /** `info.enabled`. */
+    readonly enabled: Prop<boolean>;
+    /** `info.audio_engine_type`. */
+    readonly engineType: Prop<string>;
+    /** `info.devices`. */
+    readonly devices: Prop<AudioDeviceInfo[]>;
+    private loading;
     /**
-     * Resolves once nothing is waiting or in flight and the lists match the inputs.
+     * Read the value once. Later calls return the same promise.
      *
      * @example
-     * await sel.search.set('lion');
-     * await sel.settled();
+     * await luna.activeAudioEngine.load();
+     * luna.activeAudioEngine.engineType.value; // 'apollo'
      */
-    settled(): Promise<void>;
-    /** Stop following and drop pending requests. */
-    dispose(): void;
-    get disposed(): boolean;
-    protected get started(): boolean;
-    private get idle();
-    /** An input moved: query again after the quiet time. */
-    protected changed(): void;
+    load(): Promise<void>;
     /**
-     * Run `job` after `delayMs`, replacing a pending job under the same `key`. `current()` turns
-     * false once a newer job for the key is scheduled, so a stale reply can be dropped.
+     * Subscribe to the property and read it, so the props follow LUNA. Refcounted through the
+     * Store; call `release` when done.
+     *
+     * @example
+     * const w = luna.activeAudioEngine.watch();
+     * await w.ready;
      */
-    protected schedule(key: string, delayMs: number, job: (current: () => boolean) => Promise<void>): void;
-    private runQuery;
-    /** Count `work` as in flight until it settles. */
-    protected track<T>(work: Promise<T>): Promise<T>;
-    private wake;
-}
-/** Created by {@link Presets.selection}. */
-declare class PresetSelection extends PresetSelectionBase {
-    readonly pluginId: string;
-    private readonly options;
-    /** Match presets carrying any selected tag rather than all of them. Default false. */
-    readonly matchAnyTag: WritableProp<boolean>;
-    /** UA Assistant's picks for the search text, among presets carrying the tags. Best first. */
-    readonly recommendations: List<PresetRecommendation>;
-    /** True while UA Assistant is connected, so recommendations can come. */
-    readonly recommendationsAvailable: Prop<boolean>;
-    /** The last recommendation request's failure, or `null`. */
-    readonly recommendationError: Prop<UAError | null>;
-    private readonly anyCell;
-    private readonly recsCell;
-    private readonly recErrorCell;
-    /** Uids carrying the selected tags, by tag selection, for filtering recommendations. */
-    private taggedUids;
-    /** Query again with the current inputs, for example after presets were saved or deleted. */
-    refresh(): void;
-    protected start(): Promise<void>;
-    protected loadGroups(): Promise<PresetTagGroup[]>;
-    protected listQuery(): PresetQueryOptions;
-    protected changed(): void;
-    private get wantsRecommendations();
-    private scheduleRecommendations;
-    private runRecommendations;
-    /** Every preset uid carrying `tags`, ignoring the search text. Cached per tag selection. */
-    private tagged;
-}
-/** Created by {@link Presets.trackSelection}. */
-declare class TrackPresetSelection extends PresetSelectionBase {
+    watch(): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
     /**
-     * The category, one of {@link TRACK_PRESET_CATEGORIES}, or `null` for all of them. With
-     * `null` or `Instrument`, instrument plugins' presets are listed too (fact 132).
+     * True when the engine is running and uses `driver`: an id from `luna.drivers.connected`
+     * (`AudioDeviceInfo.id`) or the entry itself. Not a `/devices/<uid>` uid: those name device
+     * databases, not drivers (fact 190). False before the value is loaded.
+     *
+     * @example
+     * await luna.drivers.load();
+     * await luna.activeAudioEngine.load();
+     * const live = (luna.drivers.connected.value ?? []).filter((d) => luna.activeAudioEngine.isDeviceActive(d));
      */
-    readonly category: WritableProp<TrackPresetCategory | null>;
-    private readonly categoryCell;
-    /** Query again with the current inputs, and read the installed instruments again. */
-    refresh(): void;
-    /** True when the current category lists instrument plugins' presets as well. */
-    get includesInstrumentPresets(): boolean;
-    protected loadGroups(): Promise<PresetTagGroup[]>;
-    protected listQuery(): PresetQueryOptions;
+    isDeviceActive(driver: string | Pick<AudioDeviceInfo, 'id'>): boolean;
 }
+
+/**
+ * Engine-wide nodes outside any session: audio drivers, hardware devices, preferences,
+ * renders and jobs. Thin typed views; use `property()` for anything not named here.
+ */
 
 interface AudioDeviceInfo {
     id: string;
@@ -4449,6 +6504,25 @@ declare class Device extends Node {
     readonly online: Prop<boolean>;
     readonly sampleRate: Prop<number>;
     readonly clockSource: Prop<string>;
+    /**
+     * The device's audio inputs, live (fact 185). `inputs.watch()` follows hotplug, `in_use` and
+     * analysis results.
+     *
+     * @example
+     * const w = device.inputs.watch();
+     * await w.ready;
+     * device.inputs.items.map((i) => i.name.value);
+     */
+    readonly inputs: DeviceInputs;
+    /**
+     * The device's audio outputs (fact 189).
+     *
+     * @example
+     * await device.outputs.load();
+     * device.outputs.items.map((o) => [o.name.value, o.stemFormat.value]);
+     */
+    readonly outputs: DeviceOutputs;
+    protected release(): void;
 }
 declare class Devices extends Collection<Device> {
 }
@@ -4540,6 +6614,17 @@ declare class Preferences extends Node {
     readonly recordMute: Prop<boolean>;
     readonly metronomeSound: Prop<string>;
     readonly metronomeSounds: Prop<string[]>;
+    /**
+     * The preferences under context `name`: JSON values kept on this computer across sessions
+     * and launches (fact 232). Contexts are shared and unprotected: any Add On, and LUNA itself,
+     * can read and write any of them, so pick a name nobody else will (such as your Add On's
+     * id) and keep secrets in `luna.secrets` instead.
+     *
+     * @example
+     * const prefs = luna.preferences.context('com.example.my-add-on');
+     * await prefs.set('lastTemplate', template.uid);
+     */
+    context(name: string): PreferenceContext;
 }
 /**
  * `/renders/<uid>`: a bounce or an export. `state` runs `created` -> `running` ->
@@ -4581,8 +6666,15 @@ declare class Renders extends Collection<Render> {
 }
 /**
  * `/jobs/<uid>`: long-running engine jobs (lyric transcription, chord extraction, ...).
- * `percentComplete` is 0..100. Terminal jobs are published and then removed, so latch the last
- * snapshot if you need it. Only `cancel()` exists; there is no delete.
+ * `percentComplete` is 0..100. LUNA publishes the terminal status and removes the node in the
+ * same turn (fact 200); {@link done} latches the ending for you. Only `cancel()` exists; there
+ * is no delete. A job you launch yourself is easier to follow through the `Luna.JobRun` its
+ * command returns (`session.musical.chords.detect()`, `session.lyrics.transcribe()`).
+ *
+ * @example
+ * await luna.jobs.load();
+ * const job = luna.jobs.items.find((j) => j.jobType.value === 'lyric_transcription');
+ * if (job) console.log((await job.done()).status);
  */
 declare class Job extends Node {
     readonly uid: Prop<string>;
@@ -4599,12 +6691,101 @@ declare class Job extends Node {
     readonly cancellable: Prop<boolean>;
     readonly percentComplete: Prop<number>;
     get isTerminal(): boolean;
+    /**
+     * Resolve with the job's last snapshot when it completes (`empty: true` when LUNA found
+     * nothing, `job.no_result`); reject with a `UAError` whose code is the job's error, or
+     * `canceled`, `removed` (dropped without an ending) or `timeout`, as every SDK wait that runs
+     * out of time rejects (`Luna.RequestTimeout` carries the same code). The ending is
+     * latched as it arrives, so this answers even after LUNA removed the node, provided the
+     * SDK was watching `/jobs` when the job ended (fact 200).
+     *
+     * @example
+     * const result = await job.done();
+     * if (result.empty) console.log('nothing found');
+     */
+    done(timeoutMs?: number): Promise<JobResult>;
     cancel(): Promise<unknown>;
 }
 declare class Jobs extends Collection<Job> {
 }
 
+/** One assignment's destination. `uid` is a track's, a bus's or an effect's; `name` a MIDI device's. */
+type MidiOutputDestination = {
+    kind: 'track';
+    uid: string;
+} | {
+    kind: 'bus';
+    uid: string;
+} | {
+    kind: 'effect';
+    uid: string;
+} | {
+    kind: 'device';
+    name: string;
+};
+/**
+ * One route for {@link MidiOutputs.set}: to a track or a bus (by object or uid), or to a MIDI
+ * device by its name (`luna.midiDevices` lists them). `channel` is stored as given: LUNA's own
+ * menu writes 0 for all channels and 1-16 for one channel (fact 220).
+ */
+type MidiRoute = {
+    track: {
+        readonly id: string;
+    } | string;
+    channel: number;
+} | {
+    device: {
+        readonly name: Prop<string>;
+    } | string;
+    channel: number;
+};
+/**
+ * One assignment row.
+ *
+ * @example
+ * const a = track.midiOutputs.items[0];
+ * a.destination.value; // { kind: 'track', uid: '...' }
+ * a.channel.value;     // 0 (all channels)
+ */
+declare class MidiOutputAssignment extends Node {
+    readonly destinationTrackUid: Prop<string | null>;
+    readonly destinationBusUid: Prop<string | null>;
+    readonly effectUid: Prop<string | null>;
+    /** The MIDI device's name. */
+    readonly midiDevice: Prop<string | null>;
+    /** The channel as LUNA stores it: 0 for all channels, 1-16 for one (fact 220). */
+    readonly channel: Prop<number>;
+    /** Whichever of the four destination properties is set. `undefined` until loaded. */
+    readonly destination: Prop<MidiOutputDestination>;
+}
+/**
+ * A track's MIDI output assignments. Under a session that called `ready()` they follow LUNA;
+ * call {@link load} once to read them.
+ *
+ * @example
+ * await track.midiOutputs.load();
+ * track.midiOutputs.onChange(() => render(track.midiOutputs.items));
+ */
+declare class MidiOutputs extends Collection<MidiOutputAssignment> {
+    private readonly sessionUid;
+    private readonly trackUid;
+    /**
+     * Replace every assignment of this track with `routes`, in one undo step, through the edit
+     * context's `set_midi_output_assignments` as LUNA's channel strip does (fact 219), and
+     * resolve once {@link items} shows them. A route to a bus uid becomes a bus assignment.
+     * Routes to an effect slot cannot be written this way.
+     *
+     * @example
+     * await track.midiOutputs.set([{ track: synthTrack, channel: 0 }]);
+     * await track.midiOutputs.set([{ device: 'IAC Driver Bus 1', channel: 10 }]);
+     */
+    set(routes: readonly MidiRoute[]): Promise<void>;
+}
+
 type TrackType = 'audio' | 'instrument' | 'midi_matrix' | 'bus' | 'click' | 'count_in' | 'multi_output' | 'video';
+/** The commands LUNA can run on a take once it is recorded (fact 233). */
+declare const POST_RECORD_COMMANDS: readonly ["extract_lyrics", "extract_chords"];
+type PostRecordCommand = (typeof POST_RECORD_COMMANDS)[number];
 declare class Track extends Channel {
     readonly trackType: Prop<TrackType>;
     readonly ioType: Prop<string>;
@@ -4643,16 +6824,66 @@ declare class Track extends Channel {
     readonly presetUid: Prop<string | null>;
     /** That preset's name, or null. */
     readonly presetName: Prop<string | null>;
+    /**
+     * Whether Auto Gain can run on this track's input (`supports_auto_gain`, read-only): true for
+     * an input on hardware whose preamp LUNA can set. LUNA works it out after the input changes,
+     * so it can arrive a moment later (fact 194).
+     *
+     * @example
+     * button.disabled = track.supportsAutoGain.value !== true;
+     */
+    readonly supportsAutoGain: Prop<boolean>;
+    /**
+     * Where this track sends its MIDI (facts 219-220). `await track.midiOutputs.load()` once.
+     *
+     * @example
+     * await track.midiOutputs.set([{ track: synth, channel: 0 }]);
+     */
+    readonly midiOutputs: MidiOutputs;
+    /**
+     * What LUNA runs on each audio take this track records, once the take lands (fact 233):
+     * `extract_lyrics` transcribes it into `session.lyrics`, `extract_chords` detects its chords.
+     * LUNA keeps the list while the session is open, not in the session file: set it again after
+     * reopening. `[]` runs nothing.
+     *
+     * @example
+     * await track.postRecordCommands.set(['extract_lyrics']);
+     */
+    readonly postRecordCommands: WritableProp<PostRecordCommand[]>;
+    /**
+     * The instrument LUNA detected on this track (`instrument_determined`), e.g. `"Electric
+     * Guitar"`, or `null` (fact 233). Read-only here: it is LUNA's analysis result.
+     *
+     * @example
+     * label.textContent = track.instrumentDetermined.value ?? '';
+     */
+    readonly instrumentDetermined: Prop<string | null>;
+    /**
+     * True once the name was set as the user's own (LUNA's rename, or {@link rename}): a track
+     * or instrument preset loaded later keeps it (fact 165). `name.set` leaves it as it is.
+     */
+    readonly nameModified: Prop<boolean>;
+    protected release(): void;
     /** Track solo (a track-level control, unlike mute which is on the main output). */
     get solo(): Control;
-    /** Set the automation mode (`off | read | write | touch | latch`). */
-    setAutomationMode(mode: AutomationModeName): Promise<unknown>;
+    /**
+     * Rename the track as LUNA's own rename does: the write carries request parameter
+     * `name_modified=true`, so LUNA marks the name as the user's and a track or instrument preset
+     * loaded later keeps it (fact 165). `name.set` renames without that mark, and the next
+     * {@link loadPreset} replaces the name. Optimistic like `name.set`; {@link nameModified}
+     * follows on LUNA's push.
+     *
+     * @example
+     * await track.rename('Lead Vocal');
+     * await track.loadPreset(preset); // still 'Lead Vocal'
+     */
+    rename(name: string): Promise<void>;
     /**
      * Apply a preset to this track in one undo step, as LUNA's track header PRESETS > Assign
      * does (fact 132). A track preset replaces the track's plugins, sends and mixer settings; an
      * instrument plugin's preset replaces the instrument only, and needs an instrument track. The
      * track takes the preset's name unless it was renamed in LUNA; a name set with `name.set`
-     * does not count, and is replaced. `presetUid` follows.
+     * does not count, and is replaced; use {@link rename} for a name that stays. `presetUid` follows.
      *
      * @example
      * await track.loadPreset(sel.presets.items[0]);
@@ -4661,10 +6892,23 @@ declare class Track extends Channel {
     loadPreset(preset: string | Pick<PresetRow, 'uid'>): Promise<void>;
     /** Delete this track. */
     delete(): Promise<void>;
-    /** Duplicate this track. Resolves to the reply, which names the new channel. */
+    /**
+     * Duplicate this track in one undo step and resolve to the new {@link Track} once
+     * `session.tracks` lists it with its properties loaded. LUNA copies clips and automation
+     * unless `includeContent` is false (then routing, plugins and I/O only). The copy goes
+     * right after the track or bus `after` names, else right after this track. (LUNA's field is
+     * `before_uid`, but it places the copy after that channel: fact 166.) The SDK names the new
+     * uid up front (`destination_track_uid`), so nothing is found by name.
+     *
+     * @example
+     * const copy = await track.duplicate({ includeContent: false, after: otherTrack });
+     * copy.name.value; // LUNA's name for the copy
+     */
     duplicate(options?: {
         includeContent?: boolean;
-    }): Promise<unknown>;
+        after?: Channel | string;
+        timeoutMs?: number;
+    }): Promise<Track>;
 }
 
 interface TransportLocation extends Location {
@@ -4737,11 +6981,46 @@ declare class Transport extends Node {
     readonly countingIn: Prop<boolean>;
     readonly punchedIn: Prop<boolean>;
     readonly maxTick: Prop<number>;
-    readonly tempoPercent: Prop<number>;
+    /**
+     * Playback speed as a percentage of the tempo map (100 is as written), applied only while
+     * {@link enableTempoPercent} is on. Not undoable. LUNA publishes both only when its
+     * tempo-percent feature is enabled; elsewhere they stay `undefined` (fact 155).
+     *
+     * @example
+     * await t.tempoPercent.set(80);
+     * await t.enableTempoPercent.set(true);   // practice at 80%
+     */
+    readonly tempoPercent: WritableProp<number>;
+    /** Whether {@link tempoPercent} applies (fact 155). @example await t.enableTempoPercent.set(false); */
+    readonly enableTempoPercent: WritableProp<boolean>;
     readonly recPlayMode: Prop<RecPlayMode>;
     readonly countInEnabled: WritableProp<boolean>;
     readonly preRollEnabled: WritableProp<boolean>;
     readonly postRollEnabled: WritableProp<boolean>;
+    /**
+     * How long the pre-roll is, as LUNA stores it: a `"bars,beats,ticks"` duration string
+     * (`"1,0,0"` is one bar, `"0,2,0"` two beats; ticks are engine ticks). Read and write it with
+     * `Luna.parseRollDuration` and `Luna.formatRollDuration`. Used while
+     * {@link preRollEnabled} is on (fact 156).
+     *
+     * @example await t.preRoll.set(Luna.formatRollDuration({ bars: 2 }));
+     */
+    readonly preRoll: WritableProp<string>;
+    /** How long the post-roll is, in the same form as {@link preRoll} (fact 156). @example await t.postRoll.set('1,0,0'); */
+    readonly postRoll: WritableProp<string>;
+    /** Whether the click sounds during playback (fact 155). @example await t.clickDuringPlay.set(false); */
+    readonly clickDuringPlay: WritableProp<boolean>;
+    /** Whether the click sounds while recording (fact 155). @example await t.clickDuringRecord.set(true); */
+    readonly clickDuringRecord: WritableProp<boolean>;
+    /** Whether the click sounds during the count-in (fact 155). @example await t.clickDuringCountIn.set(true); */
+    readonly clickDuringCountIn: WritableProp<boolean>;
+    /**
+     * Whether MIDI recorded over an existing MIDI clip merges into it (on) or makes a new take
+     * (off) (fact 155).
+     *
+     * @example await t.mergeMidi.set(true);
+     */
+    readonly mergeMidi: WritableProp<boolean>;
     /** Current playhead in ticks: the live location while playing, else the play start. */
     get tick(): number;
     /**
@@ -4812,7 +7091,11 @@ declare class Transport extends Node {
     sync(at?: 'now' | 'next_bar' | 'loop_end'): Promise<void>;
 }
 
-type SoloMode = string;
+/**
+ * How soloing a track treats the others (fact 157): `'latching'` adds it to what is soloed,
+ * `'exclusive'` unsolos the rest (LUNA does that only inside a touch, fact 78).
+ */
+type SoloMode = 'latching' | 'exclusive';
 /**
  * How far past the punch point {@link Session.record} widens `loop_stop` when it has to.
  * One bar of 4/4 at any tempo is plenty: the gate is on the punch point, not the take's end.
@@ -4849,6 +7132,24 @@ interface ImportPathOptions {
     name?: string;
     /** How long to wait for the workspace to list the new source. Default 30 000 ms. */
     timeoutMs?: number;
+    /**
+     * What the file is. Default `'audio'`, which resolves to an {@link AudioSource}; `'midi'`
+     * and `'video'` resolve to an {@link ImportedFile} (fact 163). LUNA checks the content is
+     * what the type says and refuses it with `uasrv.invalid_value` otherwise.
+     */
+    type?: 'audio' | 'midi' | 'video';
+}
+/**
+ * A MIDI or video file copied into a session's package by {@link Session.importPath}. Only the
+ * file is added: no track or clip is made (fact 163). A MIDI file is filed in the package's
+ * `midi` folder, a video file, with its extension, in `video`.
+ */
+interface ImportedFile {
+    /** The file's uid in the package. */
+    uid: string;
+    type: 'midi' | 'video';
+    /** The name it was stored under. */
+    name: string;
 }
 interface BounceOptions {
     /** Channels to bounce, by uid. Tracks and buses both work. */
@@ -4882,7 +7183,7 @@ interface NewTrackOptions {
     /** Default `'audio'`. */
     trackType?: Extract<TrackType, 'audio' | 'instrument' | 'midi_matrix' | 'video'>;
     /** Default `'mono'`. */
-    stemFormat?: 'mono' | 'stereo' | string;
+    stemFormat?: 'mono' | 'stereo' | (string & {});
     /** How many tracks to make. Default 1. */
     count?: number;
     /** Number the name when a track or bus already has it. */
@@ -4939,13 +7240,13 @@ interface NewTrackFromPresetOptions {
     /** Place the new tracks in this folder track. */
     folderUid?: string;
     /** The stem format of the audio track an effect plugin's preset makes. Default mono. */
-    stemFormat?: 'mono' | 'stereo' | string;
+    stemFormat?: 'mono' | 'stereo' | (string & {});
 }
 interface NewBusOptions {
     /** Default `'Bus'`. */
     name?: string;
     /** Default `'stereo'`. */
-    stemFormat?: 'mono' | 'stereo' | string;
+    stemFormat?: 'mono' | 'stereo' | (string & {});
 }
 interface NewFolderOptions {
     /** Default `'Folder'`. */
@@ -4956,7 +7257,7 @@ interface NewFolderOptions {
      */
     mode?: Exclude<FolderMode, 'none'>;
     /** Default `'stereo'`. */
-    stemFormat?: 'mono' | 'stereo' | string;
+    stemFormat?: 'mono' | 'stereo' | (string & {});
     /** Place the new folder inside this folder. Default: the session root. */
     folderUid?: string;
 }
@@ -5000,7 +7301,13 @@ declare class Session extends Node {
     readonly canUndo: Prop<boolean>;
     readonly canRedo: Prop<boolean>;
     readonly changeCount: Prop<number>;
-    readonly soloMode: Prop<SoloMode>;
+    /**
+     * The session's solo mode, writable (fact 157). LUNA refuses any value but the two
+     * {@link SoloMode}s. Not undoable.
+     *
+     * @example await session.soloMode.set('exclusive');
+     */
+    readonly soloMode: WritableProp<SoloMode>;
     readonly tempoEstablished: Prop<boolean>;
     readonly commandStatus: Prop<string | null>;
     readonly commandPercentComplete: Prop<number>;
@@ -5012,6 +7319,10 @@ declare class Session extends Node {
     /** Tempo map, time and key signatures, and tick/bar/seconds conversion. */
     readonly musical: Musical;
     readonly markers: Markers;
+    /** The session's lyrics, ruler and transcribed (fact 152). */
+    readonly lyrics: Lyrics;
+    /** Mix, edit, plugin and send groups (facts 215-218). Not loaded by `ready()`: `await session.groups.load()`. */
+    readonly groups: Groups;
     /** Data Add Ons keep with this session, by reverse-DNS context (fact 129). */
     readonly storage: SessionStorage;
     /** Edit contexts (`main`, `editor`, `alt_<n>`). */
@@ -5052,6 +7363,48 @@ declare class Session extends Node {
      * `undefined` until the session's package uid is known (after `ready()`).
      */
     get sources(): Collection<AudioSource> | undefined;
+    /**
+     * The session's source files, loaded and ready: waits for `ready()` (which brings the
+     * package uid), loads the folder and every member's properties, and keeps following it.
+     *
+     * @example
+     * const sources = await session.loadSources();
+     * sources.items.map((s) => s.displayName.value);
+     * sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+     */
+    loadSources(): Promise<Collection<AudioSource>>;
+    /**
+     * A source file's absolute path on disk, from the session's package path (fact 239):
+     * `<package>/audio/<uid>.wav`, or `<package>/renders/clips/<uid>.wav` for a rendering.
+     * Synchronous, so a `dragstart` handler can use it. `undefined` before `ready()`.
+     *
+     * @example
+     * const path = session.sourcePath(source);
+     * if (path) await luna.gui.revealPath(path);
+     */
+    sourcePath(source: AudioSource | string): string | undefined;
+    /**
+     * The session's own package in the workspace (name, folder, favourite, comments), loaded,
+     * without loading every package (`workspace.packages`).
+     *
+     * @example
+     * const pkg = await session.package();
+     * pkg.name; pkg.directoryPath.value; await pkg.favorite.set(true);
+     */
+    package(): Promise<SessionPackage>;
+    private packageNode;
+    /**
+     * Which tracks and clips use each source file, live: it follows clips being added, deleted,
+     * rendered or pointed at another file, and tracks switching playlists. Loads every
+     * playlist's clips first. Call `dispose()` on it when done.
+     *
+     * @example
+     * const usage = await session.sourceUsage();
+     * usage.byId(source.id)?.trackUids.map((t) => session.tracks.byId(t)?.name.value);
+     * usage.isUsed(source.id);
+     * usage.onChange(() => render());
+     */
+    sourceUsage(): Promise<SourceUsage>;
     /** The active playlist of a track, once playlists are loaded. */
     playlistFor(track: Track): Playlist | undefined;
     /**
@@ -5303,6 +7656,19 @@ declare class Session extends Node {
     /**
      * Move or copy the clips in a tick range (or the context selection when omitted) so they
      * start at `toTick`.
+     *
+     * `playlists` moves them to other tracks: each entry takes the clips of `from` (a playlist
+     * or its uid) to `to`. It replaces `trackUids`, which LUNA then ignores (fact 174).
+     * `moveAutomation` carries the tracks' automation in the range along; left out, LUNA follows
+     * the context's own "automation follows edit" setting.
+     *
+     * @example
+     * // Move bar 1 of the vocal to the double track, at the same time.
+     * await session.moveClips(0, {
+     *   startTick: 0,
+     *   stopTick: Luna.WHOLE_NOTE,
+     *   playlists: [{ from: session.playlistFor(vocal)!, to: session.playlistFor(double)! }],
+     * });
      */
     moveClips(toTick: number, options?: {
         startTick?: number;
@@ -5310,7 +7676,56 @@ declare class Session extends Node {
         trackUids?: string[];
         copy?: boolean;
         contextType?: string;
+        playlists?: ReadonlyArray<{
+            from: Playlist | string;
+            to: Playlist | string;
+        }>;
+        moveAutomation?: boolean;
     }): Promise<unknown>;
+    /**
+     * Delete playlist versions in one undo step (`delete_playlists`), and resolve once they
+     * have left {@link playlists} (fact 170). A version a track is using can be deleted when
+     * the track has another: the track switches to the version before it (after it, for the
+     * first). LUNA also applies it to the tracks edit-grouped with them. Deleting nothing
+     * deletable (a track's only version) rejects with `uasrv.invalid_value`.
+     *
+     * @example
+     * const old = session.playlists.items.filter((p) => p.trackUid.value === track.id && p.id !== track.playlistUid.value);
+     * await session.deletePlaylists(old);
+     */
+    deletePlaylists(playlists: ReadonlyArray<Playlist | string>): Promise<void>;
+    /**
+     * Delete every playlist version the given tracks are not using, keeping the one each plays
+     * (`delete_playlists` with `delete_unused`, which lists the versions to keep, fact 170).
+     * Resolves once they have left {@link playlists}.
+     *
+     * @example
+     * await session.deleteUnusedPlaylists([vocal, double]);
+     */
+    deleteUnusedPlaylists(tracks: ReadonlyArray<Track | string>): Promise<void>;
+    private settlePlaylistsGone;
+    /**
+     * Make one audio track per device input, each recording from its input, in one undo step,
+     * as LUNA's "create tracks from inputs" does (`new_tracks_from_inputs`, fact 172), and
+     * resolve to the new tracks once listed and loaded. Each is named after its input (made
+     * unique) and takes the input's stem format unless `stemFormat` says otherwise.
+     * `recordEnable` arms them; `autoGain` starts Auto Gain on those that support it.
+     *
+     * Inputs LUNA does not make tracks for (talkback, monitor, loopback) are skipped. Because
+     * LUNA never answers a request with an unknown input or with none left, the SDK refuses
+     * those first: `unknown_input` for an input not in `luna.audioInputs()`, `no_inputs` when
+     * nothing is left.
+     *
+     * @example
+     * const inputs = await luna.audioInputs();
+     * const tracks = await session.newTracksFromInputs({ inputUids: inputs.slice(0, 2).map((i) => i.uid), recordEnable: true });
+     */
+    newTracksFromInputs(options: {
+        inputUids: readonly string[];
+        recordEnable?: boolean;
+        autoGain?: boolean;
+        stemFormat?: 'mono' | 'stereo';
+    }): Promise<Track[]>;
     /**
      * Set the shape and/or curvature of fades, given as `seg.fadeIn.value` / `seg.fadeOut.value`
      * from {@link Playlist.compiledClips} (pass both halves of a crossfade). LUNA's
@@ -5381,14 +7796,25 @@ declare class Session extends Node {
      * engine on the same machine. A path the engine cannot open rejects
      * with LUNA's `device.database_error`. For a browser `File`, use {@link uploadFile}.
      *
+     * With `type: 'midi'` or `'video'` the file is copied into the package's `midi` or
+     * `video` folder instead, and the call resolves to an {@link ImportedFile} as soon as LUNA
+     * answers (fact 163). Nothing plays it yet: LUNA's own import (`importFile`) also makes the
+     * track and clip.
+     *
      * @example
      * const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
      * if (path) {
      *   const source = await session.importPath(path);
      *   await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
      * }
+     * const midi = await session.importPath('/Users/me/groove.mid', { type: 'midi' });   // { uid, type: 'midi', name }
      */
-    importPath(path: string, options?: ImportPathOptions): Promise<AudioSource>;
+    importPath(path: string, options?: ImportPathOptions & {
+        type?: 'audio';
+    }): Promise<AudioSource>;
+    importPath(path: string, options: ImportPathOptions & {
+        type: 'midi' | 'video';
+    }): Promise<ImportedFile>;
     /**
      * LUNA's own import: the File > Import action. Imports an audio, MIDI or video file at
      * the selection start, onto `trackUid` or a new track, making a clip as LUNA does.
@@ -5465,13 +7891,48 @@ declare class Session extends Node {
     protected release(): void;
 }
 
+/**
+ * The kind of session package `new_session` makes. LUNA's own list; `'default'` is an
+ * ordinary session, `'standalone'` one kept in a standalone sessions subfolder named by
+ * {@link CreateSessionOptions.standaloneId}.
+ */
+type NewSessionType = 'default' | 'multi' | 'history' | 'template' | 'track_preset' | 'device_mixer' | 'volt' | 'standalone';
 interface CreateSessionOptions {
+    name: string;
+    /** Folder to create the session package in; the engine default when omitted. */
+    directoryPath?: string;
+    /**
+     * The new package's uid, a UUID (dashes are ignored); LUNA makes one when omitted. Give a
+     * fixed one so an Add On can find its own session again in `workspace.query()` (the row whose
+     * `uid` it is) and reopen it with `sessions.open()` (fact 237).
+     */
+    sessionPackageUid?: string;
+    /** The kind of package; `'default'` when omitted. An unknown value is treated as `'default'` by LUNA. */
+    sessionType?: NewSessionType;
+    /**
+     * With `sessionType: 'standalone'`: the standalone sessions subfolder to create the package
+     * in, in place of `directoryPath`.
+     */
+    standaloneId?: string;
+    /** How long to wait for `loaded`. Default 15 000 ms. */
+    timeoutMs?: number;
+}
+interface CreateFromTemplateOptions {
+    /** The template's package uid, from `workspace.templates()`. Dashes are ignored. */
+    templatePackageUid: string;
+    /** The new session's name. */
     name: string;
     /** Folder to create the session package in; the engine default when omitted. */
     directoryPath?: string;
     /** How long to wait for `loaded`. Default 15 000 ms. */
     timeoutMs?: number;
 }
+/**
+ * A package uid in the form LUNA keeps it: dashes stripped (as `open_session` does), lower case.
+ *
+ * @example Luna.normalizePackageUid('7D3C0F9E-2B8A-…') // '7d3c0f9e2b8a…'
+ */
+declare function normalizePackageUid(uid: string | undefined | null): string;
 declare class Sessions extends Node {
     /** Open sessions. */
     readonly items: Collection<Session>;
@@ -5480,78 +7941,104 @@ declare class Sessions extends Node {
     /** The focused Session object, when it is among the open ones. */
     readonly focused: Prop<Session | undefined>;
     private readyPromise;
-    /** Subscribe to `/sessions` and load the list. Idempotent. */
+    /**
+     * Subscribe to `/sessions` and load the list, with each open session's own properties
+     * (name, `sessionPackageUid`, `loaded`) but not its contents. Idempotent. A session opened
+     * later has its properties read as it appears (`await luna.settled()` waits for that).
+     */
     ready(): Promise<void>;
+    private readonly headers;
+    /** Read a session's own properties once, so `sessionPackageUid` is known without `ready()`. */
+    private readHeader;
+    /**
+     * The open session whose package is `packageUid`, or `undefined`. Dashes and case are
+     * ignored, so a uid from `workspace.recent()` or `query()` matches however it was written.
+     * Call after `ready()`.
+     *
+     * @example
+     * await luna.sessions.ready();
+     * const open = luna.sessions.byPackageUid(row.uid);
+     * if (open) await luna.sessions.focusedUid.set(open.uid);
+     * else await luna.sessions.open(row.uid);
+     */
+    byPackageUid(packageUid: string): Session | undefined;
+    /**
+     * Switch to the session of a package if it is open, else open it: the "open this" of a
+     * recent-sessions list.
+     *
+     * @example
+     * row.onclick = () => void luna.sessions.openOrFocus(entry.uid);
+     */
+    openOrFocus(packageUid: string, timeoutMs?: number): Promise<Session>;
     /** The focused session or, failing that, the first open one. Not yet `ready()`. */
     current(): Session | undefined;
-    /** Create a new session, load it and wait until the engine reports it loaded. */
+    /**
+     * Create a new session, load it and wait until the engine reports it loaded.
+     *
+     * @example
+     * const s = await luna.sessions.create({ name: 'Demo' });
+     *
+     * // An Add On's own session, found again by a fixed package uid (fact 237):
+     * const sessionPackageUid = '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7';
+     * const row = (await luna.workspace.query()).find((r) => r.uid === sessionPackageUid);
+     * const own = row?.online
+     *   ? await luna.sessions.open(sessionPackageUid)
+     *   : await luna.sessions.create({ name: 'My Add On', sessionPackageUid });
+     */
     create(options: CreateSessionOptions): Promise<Session>;
     /** Open an existing session package by its uid (see `/workspace/sessions`). */
     open(sessionPackageUid: string, timeoutMs?: number): Promise<Session>;
+    /**
+     * Create a session copied from a session template (see `workspace.templates()`), load it
+     * and wait until the engine reports it loaded. The new session is its own package; the
+     * template is never changed.
+     *
+     * @example
+     * const [template] = await luna.workspace.templates();
+     * const session = await luna.sessions.createFromTemplate({ templatePackageUid: template.uid, name: 'My Song' });
+     * session.sessionPackageUid.value;   // the copy's own package, to reopen later with sessions.open()
+     */
+    createFromTemplate(options: CreateFromTemplateOptions): Promise<Session>;
     /** Close a session by uid. */
     close(uid: string): Promise<unknown>;
     /** `load_session` then wait for `/sessions/<uid>/loaded` to become true (fact 15). */
     loadSession(uid: string, timeoutMs?: number): Promise<Session>;
 }
 
-interface SessionPackageRow {
-    uid: string;
-    name: string;
-    path: string;
-    online: boolean;
-    sessionType: number | string;
-    factory: boolean;
-    favorite: boolean;
-    /** Milliseconds since the epoch. */
-    created: number;
-    /** Seconds since the epoch, as the engine reports it. */
-    modified: number;
-    /** Milliseconds since the epoch. */
-    lastOpened: number;
-    tags: string[];
+/** How long a suppression lasts at most unless {@link SuppressProgressOptions.maxMs} says otherwise. */
+declare const PROGRESS_SUPPRESSION_MAX_MS = 120000;
+interface SuppressProgressOptions {
+    /**
+     * Release on its own after this many milliseconds, whatever the page does. Default
+     * {@link PROGRESS_SUPPRESSION_MAX_MS}. LUNA keeps an Add On's suppression until it is
+     * released (fact 224), so keep this near the longest operation it covers.
+     */
+    maxMs?: number;
 }
-interface QueryOptions {
-    table?: 'sessions' | 'versions' | 'tutorials';
-    sessionPackageUid?: string;
-    factory?: boolean;
-    favorite?: boolean;
-    tags?: string[];
-    /** Match any tag rather than all. */
-    anyTag?: boolean;
-    search?: string;
-    orderBy?: 'created' | 'last_opened' | 'modified' | 'name' | string;
-    orderAs?: 'asc' | 'desc';
-    lastOpenedMin?: number;
-    limit?: number;
-}
-/** One session package as a live node. */
-declare class SessionPackage extends Node {
-    readonly uid: Prop<string>;
-    readonly fileName: Prop<string>;
-    readonly directoryPath: Prop<string>;
-    readonly sessionType: Prop<string>;
-    readonly factory: Prop<boolean>;
-    readonly favorite: WritableProp<boolean>;
-    readonly comments: WritableProp<string>;
-    readonly created: Prop<number>;
-    readonly modified: Prop<number>;
-    readonly lastOpened: Prop<number>;
-    /** Display name without the `.luna` extension. */
-    get name(): string;
-}
-declare class Workspace extends Node {
-    /** All packages. Large; prefer {@link query} or {@link recent} unless you need live updates. */
-    readonly packages: Collection<SessionPackage>;
-    /** Query the workspace database. Columnar on the wire; rows here. */
-    query(options?: QueryOptions): Promise<SessionPackageRow[]>;
-    /** Most recently opened packages, newest first. */
-    recent(limit?: number): Promise<SessionPackageRow[]>;
-    /** Full-text search over session metadata. */
-    search(text: string): Promise<unknown>;
-    protected release(): void;
+/**
+ * One held suppression. {@link release} is idempotent and never rejects for a handle LUNA
+ * already dropped.
+ *
+ * @example
+ * const hold = await luna.gui.suppressProgress({ maxMs: 30_000 });
+ * hold.released;          // false
+ * await hold.release();
+ */
+interface ProgressSuppression {
+    /** The handle sent to LUNA (`suppression_uid`). */
+    readonly uid: string;
+    /** True once released, by {@link release}, the watchdog or the page going away. */
+    readonly released: boolean;
+    release(): Promise<void>;
 }
 
-type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | string;
+/**
+ * A page a LUNA window shows. `lunaplay` is reported while LUNA Play shows but cannot be set:
+ * {@link Gui.setPage} takes a {@link SettablePage} (fact 236).
+ */
+type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | (string & {});
+/** The pages {@link Gui.setPage} can switch a window to (fact 236). */
+type SettablePage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard';
 type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
 /** Where an installed Add On lives: see {@link AddOn.installedFrom}. */
 type AddOnInstalledFrom = 'folder' | 'link' | 'built_in';
@@ -5758,6 +8245,15 @@ declare class Gui extends Node {
     readonly armMode: WritableProp<boolean>;
     readonly priorLaunchCount: Prop<number>;
     /**
+     * The folder LUNA creates new sessions in, as set in its Settings (fact 160). Read-only;
+     * it follows the setting once `/gui` is watched. `undefined` on an engine without `/gui`.
+     *
+     * @example
+     * await luna.gui.watch().ready;
+     * luna.gui.sessionStoragePath.value;   // e.g. "/Users/me/Music/LUNA"
+     */
+    readonly sessionStoragePath: Prop<string>;
+    /**
      * The plugin editor windows open in LUNA, opened from the page or by the user (fact 126).
      * `undefined` until known, and on a LUNA that does not publish them. Follows LUNA once
      * {@link watchPluginWindows} has run, which `session.ready()` does. Read one slot's state
@@ -5818,8 +8314,16 @@ declare class Gui extends Node {
     protected post<R = unknown>(command: string, payload?: unknown): Promise<R>;
     /** The main window. */
     get main(): GuiWindow;
-    /** Switch the main window (or another context's window) to a page. */
-    setPage(page: GuiPage, contextType?: string): Promise<unknown>;
+    /**
+     * Switch the main window (or another context's window) to a page, and resolve once the
+     * window's `page` shows it (fact 236). LUNA refuses a page it cannot switch to, `lunaplay`
+     * among them, with `uasrv.invalid_value`.
+     *
+     * @example
+     * await luna.gui.setPage('mixer');
+     * luna.gui.main.page.value; // 'mixer'
+     */
+    setPage(page: SettablePage, contextType?: string): Promise<void>;
     openUrl(url: string): Promise<unknown>;
     /** Reveal a file or folder in Finder / Explorer. */
     revealPath(path: string): Promise<unknown>;
@@ -5900,24 +8404,37 @@ declare class Gui extends Node {
      * Open the editor window of the plugin in `slot` on a track or bus, as clicking it in
      * LUNA's mixer does (or bring it to the front). LUNA answers before the window opens, and
      * an empty slot opens nothing: `effect.openEditor()` waits for the window and says so.
-     * `sessionUid` defaults to the session in LUNA's window. A LUNA without the command
-     * rejects with `Luna.Unsupported`.
+     * `sessionUid` defaults to the session in LUNA's window. `contextType` names the LUNA window
+     * to open it from (`main` by default; an Add On in an alternate window passes its own, such
+     * as `alt_1`); a window that is not open rejects with `uasrv.invalid_object`, and a name LUNA
+     * does not know means `main` (fact 178). A LUNA without the command rejects with
+     * `Luna.Unsupported`.
      *
      * @example
      * await luna.gui.showPlugin(track.id, 'effect_0');
+     * await luna.gui.showPlugin(track.id, 'effect_0', { contextType: 'alt_1' });
      */
     showPlugin(channelUid: string, slot: string, options?: {
         sessionUid?: string;
+        contextType?: string;
     }): Promise<unknown>;
     /**
      * Close the editor window of the plugin in `slot`, if it is open. See {@link showPlugin}.
      *
      * @example
      * await luna.gui.hidePlugin(track.id, 'effect_0');
+     * await luna.gui.hidePlugin(track.id, 'effect_0', { contextType: 'alt_1' });
      */
     hidePlugin(channelUid: string, slot: string, options?: {
         sessionUid?: string;
+        contextType?: string;
     }): Promise<unknown>;
+    /**
+     * Post show_plugin / hide_plugin. LUNA answers `uasrv.invalid_object` both when it has no
+     * such command and when the named window is not open (fact 178): tell them apart by
+     * whether `/gui/windows` lists the window.
+     */
+    private pluginWindow;
     /** Run a LUNA rack command by id with extra fields as its data. Escape hatch. */
     execute(command: string, data?: Record<string, unknown>): Promise<unknown>;
     /**
@@ -6098,7 +8615,179 @@ declare class Gui extends Node {
     startTask(title: string, options?: {
         nativeProgressBar?: boolean;
     }): Promise<ProgressTask>;
+    /**
+     * Hold back LUNA's modal progress dialog while this page shows its own progress UI, and
+     * close one already open (fact 223). The hold is app-wide: it withholds the dialog of every
+     * task but one started with `nativeProgressBar`. Release it from a `finally`; a watchdog
+     * releases it after `maxMs` (default two minutes), and so does the page going away when it
+     * still can. LUNA does not drop an Add On's hold when the Add On closes (fact 224).
+     *
+     * @example
+     * const hold = await luna.gui.suppressProgress();
+     * try {
+     *   await work();
+     * } finally {
+     *   await hold.release();
+     * }
+     */
+    suppressProgress(options?: SuppressProgressOptions): Promise<ProgressSuppression>;
     private dialog;
+}
+
+/**
+ * `/auto_gain`'s `status` (fact 191). `done_listening`, `overload_error` and `low_signal_error`
+ * end a pass; `stopped` is the idle state.
+ */
+type AutoGainStatus = 'unknown' | 'stopped' | 'waiting_for_signal' | 'listening' | 'overload' | 'adjusting_gain' | 'done_listening' | 'overload_error' | 'low_signal_error';
+/** A track (or any channel with an input) Auto Gain can run on: its session and its uid. */
+type AutoGainTarget = {
+    readonly sessionUid: string;
+    readonly id: string;
+} | {
+    sessionUid: string;
+    channelUid: string;
+};
+/** Options for {@link AutoGain.start}. */
+interface AutoGainStartOptions {
+    /**
+     * Start listening at once (`auto_start`), on every channel added so far. Default `true`, as
+     * LUNA's own setup does; with `false` the channel is added and waits.
+     */
+    autoStart?: boolean;
+    /**
+     * How long to listen, in whole seconds (`duration`). Omitted or 0 uses LUNA's default. It is
+     * a service-wide setting: it applies to the whole pass, not only this channel (fact 192).
+     */
+    duration?: number;
+}
+/**
+ * `/auto_gain/channels/<name>`: a channel Auto Gain is listening to. The node name is LUNA's
+ * own key; identify a channel by `sessionUid` and `channelUid` (fact 191).
+ *
+ * @example
+ * const ch = luna.autoGain.channelFor(track);
+ * ch?.signalLevelPeak.onChange(() => draw(ch.signalLevelPeak.value ?? 0));
+ */
+declare class AutoGainChannel extends Node {
+    readonly sessionUid: Prop<string>;
+    /** The track (channel) uid. */
+    readonly channelUid: Prop<string>;
+    /** The input's peak as a linear gain, mirrored from the input's `signal_level_peak` (fact 187). */
+    readonly signalLevelPeak: Prop<number>;
+    /** Detected instrument, when LUNA's instrument analysis is on for recording; else absent. */
+    readonly instrument: Prop<string>;
+    /** Detected tempo in BPM, when LUNA's tempo analysis is on for recording; else absent. */
+    readonly tempo: Prop<number>;
+}
+/**
+ * `/auto_gain`: the Auto Gain service. All of its properties are read-only. The service only
+ * exists when LUNA's Auto Gain feature is on; check {@link available} first (fact 191).
+ *
+ * @example
+ * const w = luna.autoGain.watch();
+ * await w.ready;
+ * await luna.autoGain.start(track);
+ * luna.autoGain.status.onChange(() => {
+ *   if (luna.autoGain.status.value === 'done_listening') console.log('gain set');
+ * });
+ */
+declare class AutoGain extends Node {
+    /** The service's state. */
+    readonly status: Prop<AutoGainStatus>;
+    /** A human-readable status line, as LUNA shows it. */
+    readonly statusStr: Prop<string>;
+    /** Extra information for the current status. */
+    readonly info: Prop<string>;
+    /** Seconds of listening left in the current pass. */
+    readonly countDown: Prop<number>;
+    /** The channels Auto Gain is listening to, with their live peaks. */
+    readonly channels: Collection<AutoGainChannel>;
+    private presence;
+    /**
+     * Whether this LUNA has the Auto Gain service: true when `/` lists `auto_gain` (fact 191).
+     * Cached once answered.
+     *
+     * @example
+     * if (!(await luna.autoGain.available())) button.hidden = true;
+     */
+    available(): Promise<boolean>;
+    /**
+     * Subscribe to the service recursively and load it, so the status and the channels with
+     * their peaks follow LUNA. Call `release` when done.
+     *
+     * @example
+     * const w = luna.autoGain.watch();
+     * await w.ready;
+     */
+    watch(options?: {
+        recursive?: boolean;
+    }): {
+        ready: Promise<void>;
+        release: Unsubscribe;
+    };
+    /**
+     * The channel Auto Gain is listening to for `target`, if any.
+     *
+     * @example
+     * const listening = luna.autoGain.channelFor(track) !== undefined;
+     */
+    channelFor(target: AutoGainTarget): AutoGainChannel | undefined;
+    /**
+     * Start Auto Gain on a track: `post /auto_gain/start_auto_gain {session_uid, channel_uid,
+     * auto_start, duration}` (fact 192). LUNA adds a channel under `channels`, turns on the input's
+     * signal-level analysis for it, and (with `autoStart`) starts listening. Starting a channel
+     * that is already listening changes nothing. LUNA answers before it acts and does not refuse
+     * a track whose input cannot take part: check `track.supportsAutoGain` first.
+     *
+     * @example
+     * await luna.autoGain.start(track, { duration: 8 });
+     */
+    start(target: AutoGainTarget, options?: AutoGainStartOptions): Promise<void>;
+    /**
+     * Stop Auto Gain on a track: `post /auto_gain/stop_auto_gain {session_uid, channel_uid}`
+     * (fact 193). Its channel goes, and the input's signal-level analysis is turned off.
+     *
+     * @example
+     * await luna.autoGain.stop(track);
+     */
+    stop(target: AutoGainTarget): Promise<void>;
+    /**
+     * Stop Auto Gain on every channel, whoever started it: `stop_auto_gain {all: true}` (fact 193).
+     *
+     * @example
+     * await luna.autoGain.stopAll();
+     */
+    stopAll(): Promise<void>;
+}
+
+/** How serious a notice is. */
+type ErrorNoticeLevel = 'error' | 'warning' | 'info';
+declare class ErrorNotice extends Node {
+    readonly uid: Prop<string>;
+    /** When LUNA raised it, in seconds since the epoch; a repeat of the same notice advances it. */
+    readonly timestamp: Prop<number>;
+    readonly level: Prop<ErrorNoticeLevel | (string & {})>;
+    /** The error code, e.g. `uasrv.launch_failed`. */
+    readonly code: Prop<string>;
+    /** The title LUNA shows, e.g. "OPEN IN LUNA". */
+    readonly title: Prop<string>;
+    /** The detail: text, or a JSON object as text (an assert's is `{error, function, file, line}`). */
+    readonly payload: Prop<string>;
+    /** The label of the notice's button, when it has one. */
+    readonly buttonTitle: Prop<string>;
+    /** The notice this one belongs to, when it is part of another. */
+    readonly parentUid: Prop<string | null>;
+    /** The groups it belongs to, parsed from LUNA's JSON text. */
+    readonly groups: Prop<string[]>;
+}
+declare class ErrorNotices extends Collection<ErrorNotice> {
+    /**
+     * The notices, newest first.
+     *
+     * @example
+     * const latest = luna.errors.sorted[0];
+     */
+    get sorted(): ErrorNotice[];
 }
 
 /** Where {@link Secrets} keeps values: the OS credential store, or page memory. */
@@ -6184,6 +8873,18 @@ declare class Client {
     readonly devices: Devices;
     /** The MIDI devices LUNA sees (`/devices/<LUNA>/midi`), `All` and `None` included. */
     readonly midiDevices: MidiDevices;
+    /** The audio engine LUNA is running: on or off, its kind, the drivers it uses (fact 190). */
+    readonly activeAudioEngine: ActiveAudioEngine;
+    /** LUNA's Auto Gain service (`/auto_gain`, fact 191). Check `available()` first. */
+    readonly autoGain: AutoGain;
+    /**
+     * LUNA's error notices (fact 235), read-only. Follows LUNA once watched.
+     *
+     * @example
+     * await luna.errors.watch().ready;
+     * luna.errors.sorted.map((e) => `${e.level.value}: ${e.title.value}`);
+     */
+    readonly errors: ErrorNotices;
     readonly preferences: Preferences;
     readonly renders: Renders;
     readonly jobs: Jobs;
@@ -6196,17 +8897,29 @@ declare class Client {
     /**
      * The focused session (or the first open one), subscribed and loaded.
      *
+     * With no session open it rejects at once with {@link NoSessionOpen}, unless `wait` is set:
+     * then it waits for the user to open or create one. Loading is bounded by `timeoutMs`
+     * (default 15 000 ms; with `wait`, no limit unless given), after which it rejects with
+     * `RequestTimeout` rather than hanging.
+     *
      * @example
      * const session = await luna.session();
      * console.log(session.name.value, session.tracks.items.length);
+     *
+     * // A page that opens before any session does:
+     * const s = await luna.session({ wait: true });
      */
-    session(): Promise<Session>;
+    session(options?: {
+        wait?: boolean;
+        timeoutMs?: number;
+    }): Promise<Session>;
     /**
      * The device inputs a track can record from (`/devices/<device>/inputs`, fact 76). Assign
      * one with `track.inputNodeUid.set(input.uid)`, or pass it to `session.record()`.
      *
      * Read on each call and not cached: devices come and go, and `inUse` changes as tracks are
-     * armed.
+     * armed. To follow those changes, watch `device.inputs` on each of `luna.devices` instead
+     * (fact 185); `input.snapshot()` gives the same record.
      *
      * @example
      * const inputs = await luna.audioInputs();
@@ -6285,6 +8998,20 @@ declare abstract class Node {
         ready: Promise<void>;
         release: Unsubscribe;
     };
+    /**
+     * Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+     * LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+     * Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+     * for a command that publishes no enabled state (most are always enabled).
+     *
+     * @example
+     * const canPaste = session.context.commandEnabled('paste');
+     * canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+     */
+    commandEnabled(command: string): Prop<boolean>;
+    private readonly commandWatches;
+    /** Where `command`'s node is: under this node. */
+    protected commandPath(command: string): string;
     /** Read-only property view. `value` is `undefined` until loaded or pushed. */
     protected prop<T>(name: string): Prop<T>;
     /**
@@ -6790,6 +9517,36 @@ declare function bindShortcuts(client: Client, options?: ShortcutsOptions & {
 }): ShortcutsBinding;
 
 /**
+ * Clip gain as LUNA evaluates it (fact 228). A clip's gain automation lives on its `gain`
+ * control (`<clip>/controls/gain`, {@link Clip.gainControl}); its breakpoints are in dB and
+ * their ticks are relative to the clip's start. These helpers are pure: they read breakpoints
+ * you pass in and talk to nothing.
+ *
+ * @example
+ * const lane = clip.gainControl.automation;
+ * await clip.gainControl.load();
+ * await lane.load();
+ * const db = Luna.clipGainAt(lane.breakpoints, Luna.QUARTER_NOTE) ?? clip.gain.value ?? 0;
+ * const amplitude = Luna.dbToGain(db);
+ */
+
+/**
+ * The gain in dB at `tick` (clip-relative ticks) from a clip gain lane, the way LUNA's clip
+ * compiler evaluates it (fact 228): linear in dB between breakpoints, so 0 dB and -6 dB read
+ * -3 dB half way; the first and last values hold outside the end points, with no slope carried
+ * past them; two breakpoints at one tick are a step, the later one winning from that tick on.
+ * `undefined` for an empty lane: LUNA then plays the clip's static `gain`.
+ *
+ * Breakpoints are sorted by tick here, so `automation.breakpoints` or any order will do.
+ *
+ * @example
+ * Luna.clipGainAt([{ tick: 0, value: 0 }, { tick: 960, value: -6 }], 480); // -3
+ * Luna.clipGainAt([{ tick: 0, value: 0 }, { tick: 960, value: -6 }], 5000); // -6, held
+ * Luna.clipGainAt([], 0);                                                    // undefined
+ */
+declare function clipGainAt(breakpoints: readonly Breakpoint[], tick: number): number | undefined;
+
+/**
  * The categories an Add On's manifest `categories` names (HBH-36068): one or more of these, by
  * `name`. LUNA reports them as {@link AddOn.categories}; `ua-builder` checks each against this
  * list and suggests some with {@link suggestAddOnCategories} when a manifest has none.
@@ -7251,6 +10008,436 @@ declare function requireTick(value: unknown, what: string): number;
 declare function midiByte(value: unknown, what: string, min?: number): number;
 
 /**
+ * Linear gain and decibels: the amplitude ratio a signal is multiplied by, and the same ratio
+ * in dB (`20 * log10(gain)`). Use them for meter levels, a plug-in parameter that takes a
+ * linear gain, or arithmetic on dB values (adding two gains, for example).
+ *
+ * They are **not** fader positions. A fader's 0..1 position maps to dB through LUNA's taper
+ * tables, which are not logarithmic; that is {@link Taper} (`taper.toDb(normalized)`,
+ * `taper.toNormalized(db)`), or simply a gain control's `real` view.
+ */
+/**
+ * A linear gain as decibels: `20 * log10(gain)`. Silence (0, or anything not above it) is
+ * `-Infinity`.
+ *
+ * @example
+ * Luna.gainToDb(1);     // 0
+ * Luna.gainToDb(0.5);   // -6.02
+ * Luna.gainToDb(0);     // -Infinity
+ * // not a fader position: for that use the control's taper
+ * track.gain.taper.value?.toDb(track.gain.normalized.value ?? 0);
+ */
+declare function gainToDb(gain: number): number;
+/** LUNA's "-infinity" gain in dB: at or below it, {@link dbToGain} answers exactly 0 (fact 228). */
+declare const NEG_INFINITY_DB = -144;
+/**
+ * Decibels as a linear gain: `10 ** (db / 20)`, with LUNA's hard zero at or below
+ * {@link NEG_INFINITY_DB} (fact 228). `-Infinity` is 0.
+ *
+ * @example
+ * Luna.dbToGain(0);           // 1
+ * Luna.dbToGain(-6);          // 0.501
+ * Luna.dbToGain(-144);        // 0
+ */
+declare function dbToGain(db: number): number;
+
+/**
+ * Runtime value lists and parsers for the string properties LUNA publishes: track, bus,
+ * folder-mode, stem-format, session and control types (fact 181). Each list mirrors LUNA's own enum and
+ * must track it. A parser returns the value when LUNA would publish it and `undefined` for
+ * anything else (an unknown string, `null`, a number), so a page can validate what it reads,
+ * fill a menu, or check user input before sending it.
+ */
+
+/**
+ * Every {@link TrackType} LUNA defines. `click` and `count_in` are LUNA's system tracks, and
+ * `bus` a track that stands for a bus; `audio`, `instrument`, `midi_matrix` and `video` are what
+ * `session.newTrack()` makes.
+ *
+ * @example
+ * const menu = Luna.TRACK_TYPES.filter((t) => t !== 'click' && t !== 'count_in');
+ */
+declare const TRACK_TYPES: readonly TrackType[];
+/**
+ * A `track_type` value as a {@link TrackType}, or `undefined` when LUNA would not publish it.
+ *
+ * @example
+ * Luna.parseTrackType('instrument');   // 'instrument'
+ * Luna.parseTrackType('Audio');        // undefined
+ */
+declare function parseTrackType(value: unknown): TrackType | undefined;
+/** LUNA's cue buses: `cue_0` .. `cue_63`. */
+declare const MAX_CUE_BUSES = 64;
+/**
+ * The named {@link BusType}s LUNA defines. Cue buses are not in it: LUNA numbers them
+ * `cue_0` .. `cue_63` ({@link MAX_CUE_BUSES}), which {@link parseBusType} accepts. `headphone`
+ * is a device bus (Volt), not one a session holds.
+ *
+ * @example
+ * Luna.BUS_TYPES.includes('aux');   // true
+ */
+declare const BUS_TYPES: readonly BusType[];
+/**
+ * A `bus_type` value as a {@link BusType}: one of {@link BUS_TYPES}, or a cue bus `cue_N` with
+ * N below {@link MAX_CUE_BUSES}. Anything else is `undefined`.
+ *
+ * @example
+ * Luna.parseBusType('cue_2');    // 'cue_2'
+ * Luna.parseBusType('cue_64');   // undefined
+ */
+declare function parseBusType(value: unknown): BusType | undefined;
+/**
+ * Every {@link FolderMode} (fact 136): `none` is an ordinary bus, `summing` and `container`
+ * are folders.
+ *
+ * @example
+ * for (const mode of Luna.FOLDER_MODES) select.add(new Option(mode));
+ */
+declare const FOLDER_MODES: readonly FolderMode[];
+/**
+ * A `folder_mode` value as a {@link FolderMode}, or `undefined`. A mode that has not arrived
+ * yet is `undefined` too, which is not a folder: test for one with `Bus.isFolder`, not with
+ * `mode !== 'none'`.
+ *
+ * @example
+ * Luna.parseFolderMode('summing');   // 'summing'
+ * Luna.parseFolderMode(2);           // undefined
+ */
+declare function parseFolderMode(value: unknown): FolderMode | undefined;
+/**
+ * The stem formats LUNA's enum publishes, in its spelling. A channel in a LUNA session is
+ * `mono` or `stereo`; the rest are its multichannel formats (`2_1`, `lcr`, ..., `9_1_6`).
+ *
+ * @example
+ * Luna.STEM_FORMATS.slice(0, 2);   // ['mono', 'stereo']
+ */
+declare const STEM_FORMATS: readonly ["mono", "stereo", "2_1", "lcr", "lcrs", "quad", "5_1", "6_1", "7_1", "5_1_4", "7_1_4", "9_1_6"];
+/** One of {@link STEM_FORMATS}. */
+type KnownStemFormat = (typeof STEM_FORMATS)[number];
+/**
+ * A `stem_format` value as one of {@link STEM_FORMATS}, or `undefined`.
+ *
+ * @example
+ * Luna.parseStemFormat('stereo');      // 'stereo'
+ * Luna.parseStemFormat('mid-side');    // undefined
+ */
+declare function parseStemFormat(value: unknown): KnownStemFormat | undefined;
+/**
+ * Session package types, in LUNA's order: a package's `session_type` is this index in a
+ * `/workspace/query` row (a template is 3, fact 151) and this string on a session or package
+ * node. `multi` is no longer made, `history` and `track_preset` are LUNA's own packages (see
+ * {@link HIDDEN_SESSION_TYPES}).
+ *
+ * @example
+ * Luna.SESSION_TYPES[3];   // 'template'
+ */
+declare const SESSION_TYPES: readonly ["default", "multi", "history", "template", "track_preset", "device_mixer", "volt", "standalone"];
+/** One of {@link SESSION_TYPES}. */
+type SessionType = (typeof SESSION_TYPES)[number];
+/**
+ * A `session_type` value as a {@link SessionType}: the string, or its index in
+ * {@link SESSION_TYPES} as a workspace query row carries it. Anything else is `undefined`.
+ *
+ * @example
+ * Luna.parseSessionType(3);              // 'template'
+ * Luna.parseSessionType('track_preset'); // 'track_preset'
+ * Luna.parseSessionType(8);              // undefined
+ */
+declare function parseSessionType(value: unknown): SessionType | undefined;
+/**
+ * The session types an Add On listing the user's sessions should leave out: LUNA's undo
+ * history packages and the packages that hold track presets, which the user never opens as
+ * sessions.
+ *
+ * @example
+ * const shown = rows.filter((row) => !Luna.isHiddenSessionType(row.sessionType));
+ */
+declare const HIDDEN_SESSION_TYPES: readonly SessionType[];
+/**
+ * Whether a `session_type` (string or index) is one of {@link HIDDEN_SESSION_TYPES}.
+ *
+ * @example
+ * Luna.isHiddenSessionType(2);           // true, 'history'
+ * Luna.isHiddenSessionType('default');   // false
+ */
+declare function isHiddenSessionType(value: unknown): boolean;
+/**
+ * A `control_type` value as one of {@link CONTROL_TYPES}, or `undefined`.
+ *
+ * @example
+ * Luna.parseControlType('preamp_gain');   // 'preamp_gain'
+ * Luna.parseControlType('volume');        // undefined
+ */
+declare function parseControlType(value: unknown): KnownControlType | undefined;
+
+/**
+ * Codes a `Luna.Error` can carry, to compare `error.code` against instead of
+ * a string literal. The `uasrv.*`, `device.*` and `mixer.*` ones are LUNA's own error strings,
+ * passed through unchanged; the rest are the SDK's fixed codes. The engine list is the subset
+ * the SDK documents (docs/EVIDENCE.md); LUNA defines more, and an unlisted code still arrives
+ * unchanged in `error.code`.
+ *
+ * @example
+ * try {
+ *   await session.moveToFolder([track], someBus);
+ * } catch (e) {
+ *   if (e instanceof Luna.Error && e.code === Luna.ErrorCodes.INVALID_VALUE) showHint('Not a folder');
+ *   else throw e;
+ * }
+ */
+declare const ErrorCodes: {
+    /** A property name the node does not have. */
+    readonly INVALID_PROPERTY: "uasrv.invalid_property";
+    /** A value the command or property refuses (an unknown uid, a range, a bad mode). */
+    readonly INVALID_VALUE: "uasrv.invalid_value";
+    /** No node or command at the path: often an older LUNA without the feature. */
+    readonly INVALID_OBJECT: "uasrv.invalid_object";
+    /** A value of the wrong type. */
+    readonly INVALID_TYPE: "uasrv.invalid_type";
+    /** A write to a read-only property. */
+    readonly READ_ONLY: "uasrv.read_only";
+    /** A command missing a required field. */
+    readonly MISSING_FIELD: "uasrv.missing_field";
+    /** A file or folder could not be read or written. */
+    readonly FILESYSTEM_ERROR: "uasrv.filesystem_error";
+    /** LUNA is busy with the same kind of request; try again later. */
+    readonly TOO_MANY_REQUESTS: "uasrv.too_many_requests";
+    /** LUNA is busy with another step; try again. */
+    readonly SOFTWARE_BUSY: "uasrv.software_busy";
+    /** What the request names is not installed (an Add On, an app, LUNA itself for an "open in LUNA"). */
+    readonly NOT_INSTALLED: "uasrv.not_installed";
+    /** The user has not allowed it (for example a folder `list_files` was not granted). */
+    readonly NOT_PERMITTED: "uasrv.not_permitted";
+    /** The command exists but is not implemented on this engine. */
+    readonly NOT_IMPLEMENTED: "uasrv.not_implemented";
+    /** LUNA's catch-all. */
+    readonly DEFAULT_ERROR: "uasrv.default_error";
+    /** The session database refused the change (for example a `folder_uid` that is not a folder). */
+    readonly DATABASE_ERROR: "device.database_error";
+    /** A file the session needs could not be found or read. */
+    readonly DEVICE_FILESYSTEM_ERROR: "device.filesystem_error";
+    /** An output assignment names a bus that no longer exists. */
+    readonly MISSING_BUS: "device.missing_bus";
+    /** An assignment names an input that does not exist. */
+    readonly MISSING_INPUT: "device.missing_input";
+    /** An assignment names an output that does not exist. */
+    readonly MISSING_OUTPUT: "device.missing_output";
+    /** The session cannot be written (read-only). */
+    readonly SESSION_NOT_WRITABLE: "device.session_not_writable";
+    /** An edit that needs a selection was given none. */
+    readonly NO_SELECTION: "device.no_selection";
+    /** An edit range that is empty or reversed. */
+    readonly INVALID_RANGE: "device.invalid_range";
+    /** A slot's `plugin_error` when its plug-in is not installed (`Luna.PLUGIN_ERROR_MISSING`). */
+    readonly MISSING_PLUGIN: "mixer.missing_plug-in";
+    /** No LUNA answered: `Luna.NotRunning`. */
+    readonly NOT_RUNNING: "not_running";
+    /** A request was not answered in time: `Luna.RequestTimeout`. */
+    readonly TIMEOUT: "timeout";
+    /** The connection dropped: `Luna.ConnectionLost`. */
+    readonly DISCONNECTED: "disconnected";
+    /** The engine lacks the feature: `Luna.Unsupported`. */
+    readonly UNSUPPORTED: "unsupported";
+    /** No session is open: `Luna.NoSessionOpen`. */
+    readonly NO_SESSION: "no_session";
+    /** The object's node was removed: `Luna.Disposed`. */
+    readonly DISPOSED: "disposed";
+    /** An argument the SDK refuses before sending anything. */
+    readonly OUT_OF_RANGE: "out_of_range";
+};
+/** One of the {@link ErrorCodes} values. `UAError.code` stays a `string`, since LUNA defines more. */
+type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
+/**
+ * Folder tracks as a tree (fact 136): the flat `folderUid` links and `order` keys of a
+ * session's tracks and buses turned into rows to draw, with the rules LUNA applies to them.
+ *
+ * Built from a snapshot: call {@link folderTree} again when `folderUid`, `order`,
+ * `folderMode` or the track and bus lists change.
+ *
+ * Malformed links never cost a row. A session can hold them for a moment (a folder demoted
+ * before its children move, an undo landing out of order), so instead of hiding or moving
+ * anything silently the tree reports each in {@link FolderTree.anomalies}: a channel whose
+ * folder is itself, is missing, or is caught in a loop is drawn at the root; a channel whose
+ * folder is a bus that is not (or no longer) a folder stays inside it.
+ */
+
+/**
+ * What a tree is built from: a {@link Track} or {@link Bus}, or anything shaped like one.
+ * Only a channel with a `folderMode` that is `summing` or `container` is a folder.
+ */
+interface FolderChannel {
+    readonly id: string;
+    readonly folderUid: {
+        readonly value: string | null | undefined;
+    };
+    readonly order: {
+        readonly value: number | undefined;
+    };
+    readonly folderMode?: {
+        readonly value: FolderMode | undefined;
+    };
+}
+/** One row of a {@link FolderTree}. */
+interface FolderRow<T extends FolderChannel = Track | Bus> {
+    /** The track or bus. */
+    readonly channel: T;
+    /** `channel.id`. */
+    readonly id: string;
+    /** 0 at the session root, one more per folder level. */
+    readonly depth: number;
+    /** Whether the channel is a folder (`summing` or `container`). */
+    readonly isFolder: boolean;
+    /**
+     * The folder it is drawn in, `null` at the root. For a channel re-rooted as an anomaly this
+     * differs from its `folderUid`, which the anomaly keeps.
+     */
+    readonly parentId: string | null;
+    /** The rows directly inside it, in order; empty for a track or an empty folder. */
+    readonly childIds: readonly string[];
+}
+/** What was wrong with a channel's `folderUid`. */
+type FolderAnomalyKind = 
+/** Its `folderUid` is its own id. Drawn at the root. */
+'self-parent'
+/** Its `folderUid` names no track or bus in the tree. Drawn at the root. */
+ | 'dangling-parent'
+/** Its `folderUid` names a bus that is not a folder, or a track. Kept inside it. */
+ | 'non-folder-parent'
+/** Its folder chain loops back on itself. This one, the loop's first by order, is drawn at the root. */
+ | 'cycle'
+/** A second channel with an id already in the tree. Left out. */
+ | 'duplicate-id';
+/** One anomaly in a {@link FolderTree}. */
+interface FolderAnomaly {
+    readonly kind: FolderAnomalyKind;
+    /** The channel it is about. */
+    readonly id: string;
+    /** The `folderUid` it claimed, for the parent anomalies. */
+    readonly folderUid?: string;
+}
+/** Options for {@link FolderTree.visibleRows}. */
+interface VisibleRowsOptions<T extends FolderChannel = Track | Bus> {
+    /**
+     * Ids of collapsed folders: pass the edit context's `collapsedFolders.value` as it is.
+     * Everything inside a collapsed folder is hidden; ids of anything else are ignored, since
+     * LUNA does not prune that list when a folder is deleted.
+     */
+    collapsed?: Iterable<string> | null;
+    /**
+     * Which rows to draw. It hides only the rows it rejects: a folder left out by it still hides
+     * its contents when collapsed, and its contents are judged on their own.
+     */
+    filter?: (row: FolderRow<T>) => boolean;
+}
+/**
+ * Build the folder tree of a session's tracks and buses, or of a list of channels.
+ *
+ * @example
+ * const tree = Luna.folderTree(session);
+ * const collapsed = session.context.collapsedFolders.value;
+ * for (const row of tree.visibleRows({ collapsed })) {
+ *   draw(row.channel.name.value, { indent: row.depth, folder: row.isFolder });
+ * }
+ */
+declare function folderTree(source: Session): FolderTree<Track | Bus>;
+declare function folderTree<T extends FolderChannel>(source: ReadonlyArray<T>): FolderTree<T>;
+/**
+ * A snapshot of the folder hierarchy: rows in LUNA's order (each folder followed by
+ * everything inside it), the rows to draw under collapsed folders, selection expansion, and
+ * the folder a channel's main output sums into. Make one with {@link folderTree}.
+ *
+ * @example
+ * const tree = Luna.folderTree(session);
+ * tree.rows.map((r) => '  '.repeat(r.depth) + r.channel.name.value).join('\n');
+ */
+declare class FolderTree<T extends FolderChannel = Track | Bus> {
+    /** Every row, depth first: a folder comes right before its contents, siblings by `order`. */
+    readonly rows: readonly FolderRow<T>[];
+    /** The rows at the session root, in order, anomalies drawn there included. */
+    readonly roots: readonly FolderRow<T>[];
+    /** Everything malformed about the links; empty for a well-formed session. */
+    readonly anomalies: readonly FolderAnomaly[];
+    private readonly byId;
+    private readonly channels;
+    /**
+     * The row of a track or bus, by id or object; `undefined` when it is not in the tree.
+     *
+     * @example
+     * tree.row(track)?.depth;   // 1 inside a top-level folder
+     */
+    row(channel: ChannelRef): FolderRow<T> | undefined;
+    /**
+     * The rows to draw: {@link rows} without everything inside a collapsed folder, a collapsed
+     * folder inside another included, and without what `filter` rejects.
+     *
+     * @example
+     * const ctx = session.context;
+     * const rows = tree.visibleRows({
+     *   collapsed: ctx.collapsedFolders.value,
+     *   filter: (r) => !(r.channel instanceof Luna.Track && ['click', 'count_in'].includes(r.channel.trackType.value ?? '')),
+     * });
+     */
+    visibleRows(options?: VisibleRowsOptions<T>): FolderRow<T>[];
+    /**
+     * Everything inside a folder, nested folders' contents included, in order; the folder
+     * itself is left out. Empty for a track, an empty folder or an unknown id.
+     *
+     * @example
+     * const inside = tree.descendants(drums).map((r) => r.channel);
+     */
+    descendants(folder: ChannelRef): FolderRow<T>[];
+    /**
+     * A track selection as LUNA widens it (fact 182): a selected folder brings everything inside it, right
+     * after it. Order is kept, duplicates are dropped (first place wins), and ids not in the
+     * tree are dropped.
+     *
+     * @example
+     * const ctx = session.context;
+     * const ids = tree.expandSelection(ctx.selectionTracks.value ?? []);
+     */
+    expandSelection(ids: ReadonlyArray<ChannelRef>): string[];
+    /**
+     * The summing folder a track or bus's main output goes to, as LUNA routes it (fact 136): the
+     * nearest `summing` folder above it, passing through `container` ones; `null` for the master
+     * (no summing folder above, or a channel not in the tree). A summing folder gives the one
+     * above it, never itself. It follows the channels' own `folderUid` links, as LUNA does, not
+     * the re-rooted rows, and stops at a loop.
+     *
+     * @example
+     * const target = tree.summingFolder(track);
+     * label.textContent = target ? `→ ${target.name.value}` : '→ Master';
+     */
+    summingFolder(channel: ChannelRef): T | null;
+}
+
+/**
+ * A pre- or post-roll length: whole bars, then beats, then engine ticks, counted in the
+ * session's time signatures where the roll falls.
+ */
+interface RollDuration {
+    bars: number;
+    beats: number;
+    /** Engine ticks (`Luna.TICKS_PER_BEAT` to a beat), as LUNA stores them. */
+    ticks: number;
+}
+/**
+ * Read a roll string, `"bars,beats,ticks"`, as LUNA stores `pre_roll` and `post_roll`
+ * (fact 156). `undefined` for anything else, which is what a session that never set its
+ * roll holds; LUNA then uses no roll.
+ *
+ * @example Luna.parseRollDuration('1,2,0');   // { bars: 1, beats: 2, ticks: 0 }
+ */
+declare function parseRollDuration(value: string | null | undefined): RollDuration | undefined;
+/**
+ * Write a roll length in LUNA's form for `transport.preRoll.set()` or `postRoll.set()`.
+ * Omitted parts are 0. Rejects with `out_of_range` for a negative or non-integer part.
+ *
+ * @example await session.transport.postRoll.set(Luna.formatRollDuration({ bars: 1 }));   // "1,0,0"
+ */
+declare function formatRollDuration(duration: Partial<RollDuration>): string;
+
+/**
  * One call to a connected client.
  *
  * Resolution order:
@@ -7381,6 +10568,36 @@ declare function canDropPaths(): boolean;
  */
 declare function onPathDrop(handlers: PathDropHandlers | ((drop: PathDrop) => void)): Unsubscribe;
 
+/** What {@link startSourceDrag} drags: absolute paths, or a session's sources. */
+type SourceDragItems = {
+    path: string | readonly string[];
+} | {
+    session: Session;
+    source: AudioSource | string | ReadonlyArray<AudioSource | string>;
+};
+/** The minimal drag event this needs; a DOM `DragEvent` is one. */
+interface DragStartLike {
+    readonly dataTransfer: {
+        setData(format: string, data: string): void;
+        effectAllowed: string;
+    } | null;
+}
+/**
+ * Fill a `dragstart` event with session files so LUNA's timeline can take the drop (fact 241).
+ * Synchronous, as `dragstart` must be: a source's path comes from the session's package path,
+ * so call `session.ready()` first. Answers the paths dragged.
+ *
+ * A rendering (`source.isRender`) is not one of the session's sources: LUNA would import a
+ * copy. Drag the clip's `sourceUid` instead.
+ *
+ * @example
+ * el.addEventListener('dragstart', (e) => Luna.startSourceDrag(e, { session, source: src }));
+ * el.addEventListener('dragstart', (e) => Luna.startSourceDrag(e, { path: '/Users/me/Loops/beat.wav' }));
+ */
+declare function startSourceDrag(event: DragStartLike, items: SourceDragItems): string[];
+/** `file://` URL of an absolute POSIX or Windows path, percent-encoded per segment. */
+declare function fileUrl(path: string): string;
+
 /**
  * The Luna namespace. Everything public lives here; `import { Luna } from '@uaudio/luna-builder-sdk'`
  * or, from a script tag, `globalThis.Luna`.
@@ -7394,6 +10611,10 @@ declare const VERSION: string;
 
 declare const luna_ADD_ON_CATEGORIES: typeof ADD_ON_CATEGORIES;
 declare const luna_AUTOMATION_MODES: typeof AUTOMATION_MODES;
+type luna_ActiveAudioEngine = ActiveAudioEngine;
+declare const luna_ActiveAudioEngine: typeof ActiveAudioEngine;
+type luna_ActiveAudioEngineInfo = ActiveAudioEngineInfo;
+type luna_AddLyricOptions = AddLyricOptions;
 type luna_AddOn = AddOn;
 declare const luna_AddOn: typeof AddOn;
 type luna_AddOnCategory = AddOnCategory;
@@ -7402,7 +10623,11 @@ type luna_AddOnInstalledFrom = AddOnInstalledFrom;
 type luna_AddOnInstance = AddOnInstance;
 declare const luna_AddOnInstance: typeof AddOnInstance;
 type luna_AddOnTarget = AddOnTarget;
+type luna_AffectedTracksOptions = AffectedTracksOptions;
 type luna_AlgType = AlgType;
+type luna_AnalysisKind = AnalysisKind;
+type luna_AnalysisNode = AnalysisNode;
+declare const luna_AnalysisNode: typeof AnalysisNode;
 type luna_Assistant = Assistant;
 declare const luna_Assistant: typeof Assistant;
 type luna_AudioDeviceInfo = AudioDeviceInfo;
@@ -7410,10 +10635,18 @@ type luna_AudioHealth = AudioHealth;
 type luna_AudioInput = AudioInput;
 type luna_AudioSource = AudioSource;
 declare const luna_AudioSource: typeof AudioSource;
+type luna_AutoGain = AutoGain;
+declare const luna_AutoGain: typeof AutoGain;
+type luna_AutoGainChannel = AutoGainChannel;
+declare const luna_AutoGainChannel: typeof AutoGainChannel;
+type luna_AutoGainStartOptions = AutoGainStartOptions;
+type luna_AutoGainStatus = AutoGainStatus;
+type luna_AutoGainTarget = AutoGainTarget;
 type luna_Automation = Automation;
 declare const luna_Automation: typeof Automation;
 type luna_AutomationMode = AutomationMode;
 type luna_AutomationModeName = AutomationModeName;
+declare const luna_BUS_TYPES: typeof BUS_TYPES;
 type luna_BarBeat = BarBeat;
 type luna_Bindings = Bindings;
 declare const luna_Bindings: typeof Bindings;
@@ -7427,13 +10660,19 @@ declare const luna_Bus: typeof Bus;
 type luna_BusType = BusType;
 declare const luna_COARSE_PAIRS_PER_FINE: typeof COARSE_PAIRS_PER_FINE;
 declare const luna_COARSE_PAIR_NS: typeof COARSE_PAIR_NS;
+declare const luna_CONTROL_TYPES: typeof CONTROL_TYPES;
 declare const luna_CUE_COUNT: typeof CUE_COUNT;
 type luna_Cell<T> = Cell<T>;
 declare const luna_Cell: typeof Cell;
 type luna_Channel = Channel;
 declare const luna_Channel: typeof Channel;
+type luna_ChannelRef = ChannelRef;
 type luna_Chord = Chord;
 declare const luna_Chord: typeof Chord;
+type luna_ChordAnalysis = ChordAnalysis;
+declare const luna_ChordAnalysis: typeof ChordAnalysis;
+type luna_ChordAnalysisResult = ChordAnalysisResult;
+type luna_ChordSegment = ChordSegment;
 type luna_ChordSpec = ChordSpec;
 type luna_Chords = Chords;
 declare const luna_Chords: typeof Chords;
@@ -7467,8 +10706,11 @@ type luna_Control = Control;
 declare const luna_Control: typeof Control;
 type luna_ControlBinding = ControlBinding;
 type luna_ControlType = ControlType;
+type luna_ControlValue = ControlValue;
+type luna_ControlValueRange = ControlValueRange;
 type luna_Controls = Controls;
 declare const luna_Controls: typeof Controls;
+type luna_CreateFromTemplateOptions = CreateFromTemplateOptions;
 type luna_CreateSessionOptions = CreateSessionOptions;
 type luna_CrossfadeAlign = CrossfadeAlign;
 declare const luna_DEFAULT_LUNA_PORT: typeof DEFAULT_LUNA_PORT;
@@ -7477,11 +10719,20 @@ declare const luna_DISPLAY_TICKS_PER_BEAT: typeof DISPLAY_TICKS_PER_BEAT;
 type luna_Destination = Destination;
 type luna_Device = Device;
 declare const luna_Device: typeof Device;
+type luna_DeviceInput = DeviceInput;
+declare const luna_DeviceInput: typeof DeviceInput;
+type luna_DeviceInputs = DeviceInputs;
+declare const luna_DeviceInputs: typeof DeviceInputs;
+type luna_DeviceOutput = DeviceOutput;
+declare const luna_DeviceOutput: typeof DeviceOutput;
+type luna_DeviceOutputs = DeviceOutputs;
+declare const luna_DeviceOutputs: typeof DeviceOutputs;
 type luna_Devices = Devices;
 declare const luna_Devices: typeof Devices;
 type luna_Disposed = Disposed;
 declare const luna_Disposed: typeof Disposed;
 type luna_DragOptions = DragOptions;
+type luna_DragStartLike = DragStartLike;
 type luna_Drivers = Drivers;
 declare const luna_Drivers: typeof Drivers;
 declare const luna_EDIT_SHORTCUTS: typeof EDIT_SHORTCUTS;
@@ -7490,39 +10741,90 @@ declare const luna_EIGHTH_NOTE: typeof EIGHTH_NOTE;
 type luna_Effect = Effect;
 declare const luna_Effect: typeof Effect;
 type luna_Engine = Engine;
+type luna_ErrorCode = ErrorCode;
+declare const luna_ErrorCodes: typeof ErrorCodes;
+type luna_ErrorNotice = ErrorNotice;
+declare const luna_ErrorNotice: typeof ErrorNotice;
+type luna_ErrorNoticeLevel = ErrorNoticeLevel;
+type luna_ErrorNotices = ErrorNotices;
+declare const luna_ErrorNotices: typeof ErrorNotices;
 type luna_EventHandler = EventHandler;
 type luna_ExportOptions = ExportOptions;
+type luna_ExtractionOptions = ExtractionOptions;
+declare const luna_FOLDER_MODES: typeof FOLDER_MODES;
 type luna_FadeShape = FadeShape;
 type luna_FileEntry = FileEntry;
 type luna_FloatLiteral = FloatLiteral;
 declare const luna_FloatLiteral: typeof FloatLiteral;
+type luna_FolderAnomaly = FolderAnomaly;
+type luna_FolderAnomalyKind = FolderAnomalyKind;
+type luna_FolderChannel = FolderChannel;
 type luna_FolderMode = FolderMode;
+type luna_FolderRow<T extends FolderChannel = Track | Bus> = FolderRow<T>;
+type luna_FolderTree<T extends FolderChannel = Track | Bus> = FolderTree<T>;
+declare const luna_FolderTree: typeof FolderTree;
+declare const luna_GROUP_ATTRIBUTES: typeof GROUP_ATTRIBUTES;
 type luna_Gesture = Gesture;
 type luna_GestureOptions = GestureOptions;
 type luna_GetOptions = GetOptions;
+type luna_Group = Group;
+declare const luna_Group: typeof Group;
+type luna_GroupAttribute = GroupAttribute;
+type luna_Groups = Groups;
+declare const luna_Groups: typeof Groups;
 type luna_Gui = Gui;
 declare const luna_Gui: typeof Gui;
 type luna_GuiPage = GuiPage;
 type luna_GuiWindow = GuiWindow;
 declare const luna_GuiWindow: typeof GuiWindow;
 declare const luna_HALF_NOTE: typeof HALF_NOTE;
+declare const luna_HIDDEN_SESSION_TYPES: typeof HIDDEN_SESSION_TYPES;
+declare const luna_INPUT_ANALYSIS_KINDS: typeof INPUT_ANALYSIS_KINDS;
+declare const luna_INSERT_ALIAS_PREFIX: typeof INSERT_ALIAS_PREFIX;
 type luna_ImportPathOptions = ImportPathOptions;
+type luna_ImportedFile = ImportedFile;
+type luna_InputAnalysisKind = InputAnalysisKind;
 type luna_InsertClipOptions = InsertClipOptions;
 type luna_InsertSlot = InsertSlot;
+type luna_InstrumentAnalysis = InstrumentAnalysis;
+declare const luna_InstrumentAnalysis: typeof InstrumentAnalysis;
+type luna_InstrumentAnalysisResult = InstrumentAnalysisResult;
 type luna_Job = Job;
 declare const luna_Job: typeof Job;
+type luna_JobCriteria = JobCriteria;
+type luna_JobResult = JobResult;
+type luna_JobRun = JobRun;
+declare const luna_JobRun: typeof JobRun;
+type luna_JobRunOptions = JobRunOptions;
+type luna_JobSnapshot = JobSnapshot;
 type luna_Jobs = Jobs;
 declare const luna_Jobs: typeof Jobs;
+type luna_KeptReason = KeptReason;
+type luna_KeyAnalysis = KeyAnalysis;
+declare const luna_KeyAnalysis: typeof KeyAnalysis;
+type luna_KeyAnalysisResult = KeyAnalysisResult;
+type luna_KeyCandidate = KeyCandidate;
 type luna_KeyCombo = KeyCombo;
 type luna_KeySignature = KeySignature;
 declare const luna_KeySignature: typeof KeySignature;
+type luna_KnownControlType = KnownControlType;
+type luna_KnownStemFormat = KnownStemFormat;
+declare const luna_LUNA_CHANNEL_PLUGIN_ID: typeof LUNA_CHANNEL_PLUGIN_ID;
 declare const luna_LUNA_DEVICE_UID: typeof LUNA_DEVICE_UID;
+declare const luna_LUNA_EXTENSION_PLUGIN_IDS: typeof LUNA_EXTENSION_PLUGIN_IDS;
 type luna_LengthFollows = LengthFollows;
 type luna_List<T> = List<T>;
 type luna_Location = Location;
 type luna_LocationOptions = LocationOptions;
 type luna_LogFn = LogFn;
 type luna_LogLevel = LogLevel;
+type luna_Lyric = Lyric;
+declare const luna_Lyric: typeof Lyric;
+type luna_LyricProviders = LyricProviders;
+type luna_LyricWord = LyricWord;
+type luna_Lyrics = Lyrics;
+declare const luna_Lyrics: typeof Lyrics;
+declare const luna_MAX_CUE_BUSES: typeof MAX_CUE_BUSES;
 declare const luna_MAX_SECRET_BYTES: typeof MAX_SECRET_BYTES;
 declare const luna_MAX_SECRET_NAME_LENGTH: typeof MAX_SECRET_NAME_LENGTH;
 declare const luna_MAX_SYSEX_BYTES: typeof MAX_SYSEX_BYTES;
@@ -7546,14 +10848,22 @@ type luna_MidiInputListenOptions = MidiInputListenOptions;
 type luna_MidiInputMessage = MidiInputMessage;
 type luna_MidiInputTarget = MidiInputTarget;
 type luna_MidiInputType = MidiInputType;
+type luna_MidiOperation = MidiOperation;
+type luna_MidiOutputAssignment = MidiOutputAssignment;
+declare const luna_MidiOutputAssignment: typeof MidiOutputAssignment;
+type luna_MidiOutputDestination = MidiOutputDestination;
 type luna_MidiOutputTarget = MidiOutputTarget;
+type luna_MidiOutputs = MidiOutputs;
+declare const luna_MidiOutputs: typeof MidiOutputs;
 type luna_MidiPort = MidiPort;
 declare const luna_MidiPort: typeof MidiPort;
+type luna_MidiRoute = MidiRoute;
 type luna_MidiRow = MidiRow;
 type luna_MidiRowData = MidiRowData;
 type luna_MockEngine = MockEngine;
 declare const luna_MockEngine: typeof MockEngine;
 type luna_MockEngineOptions = MockEngineOptions;
+type luna_MockJobPlan = MockJobPlan;
 type luna_MockMidiRow = MockMidiRow;
 type luna_MockMidiSent = MockMidiSent;
 type luna_MockNodeSpec = MockNodeSpec;
@@ -7563,10 +10873,13 @@ type luna_ModuleFactory = ModuleFactory;
 type luna_MoveToFolderOptions = MoveToFolderOptions;
 type luna_Musical = Musical;
 declare const luna_Musical: typeof Musical;
+declare const luna_NEG_INFINITY_DB: typeof NEG_INFINITY_DB;
 type luna_NestedFileEntry = NestedFileEntry;
 type luna_NewBusOptions = NewBusOptions;
 type luna_NewFolderOptions = NewFolderOptions;
+type luna_NewGroupOptions = NewGroupOptions;
 type luna_NewNote = NewNote;
+type luna_NewSessionType = NewSessionType;
 type luna_NewTrackFromPresetOptions = NewTrackFromPresetOptions;
 type luna_NewTrackOptions = NewTrackOptions;
 type luna_NoSessionOpen = NoSessionOpen;
@@ -7576,6 +10889,7 @@ declare const luna_Node: typeof Node;
 type luna_NotRunning = NotRunning;
 declare const luna_NotRunning: typeof NotRunning;
 type luna_Note = Note;
+declare const luna_ONE_TWENTY_EIGHTH_NOTE: typeof ONE_TWENTY_EIGHTH_NOTE;
 declare const luna_OVERVIEW_PAIR_NS: typeof OVERVIEW_PAIR_NS;
 type luna_Operation = Operation;
 type luna_Output = Output;
@@ -7586,6 +10900,8 @@ type luna_OverviewInfo = OverviewInfo;
 type luna_OverviewKind = OverviewKind;
 type luna_OverviewOptions = OverviewOptions;
 declare const luna_PLUGIN_ERROR_MISSING: typeof PLUGIN_ERROR_MISSING;
+declare const luna_POST_RECORD_COMMANDS: typeof POST_RECORD_COMMANDS;
+declare const luna_PROGRESS_SUPPRESSION_MAX_MS: typeof PROGRESS_SUPPRESSION_MAX_MS;
 type luna_PairRange = PairRange;
 type luna_ParsedChord = ParsedChord;
 type luna_PathDrop = PathDrop;
@@ -7594,15 +10910,20 @@ type luna_Playlist = Playlist;
 declare const luna_Playlist: typeof Playlist;
 type luna_Plugin = Plugin;
 declare const luna_Plugin: typeof Plugin;
+type luna_PluginFormat = PluginFormat;
 type luna_PluginManifest = PluginManifest;
 type luna_PluginQueryOptions = PluginQueryOptions;
 type luna_PluginRequirement = PluginRequirement;
 type luna_PluginRow = PluginRow;
+type luna_PluginSdkType = PluginSdkType;
 type luna_PluginWindow = PluginWindow;
 type luna_Plugins = Plugins;
 declare const luna_Plugins: typeof Plugins;
 type luna_Port = Port;
 type luna_PortStatus = PortStatus;
+type luna_PostRecordCommand = PostRecordCommand;
+type luna_PreferenceContext = PreferenceContext;
+declare const luna_PreferenceContext: typeof PreferenceContext;
 type luna_Preferences = Preferences;
 declare const luna_Preferences: typeof Preferences;
 type luna_PresetQueryOptions = PresetQueryOptions;
@@ -7614,8 +10935,10 @@ type luna_PresetSelectionOptions = PresetSelectionOptions;
 type luna_PresetTagGroup = PresetTagGroup;
 type luna_Presets = Presets;
 declare const luna_Presets: typeof Presets;
+type luna_ProgressSuppression = ProgressSuppression;
 type luna_ProgressTask = ProgressTask;
 type luna_Prop<T> = Prop<T>;
+type luna_PropKey<T> = PropKey<T>;
 declare const luna_QUARTER_NOTE: typeof QUARTER_NOTE;
 type luna_QueryOptions = QueryOptions;
 type luna_QwertyKeyEvent = QwertyKeyEvent;
@@ -7624,6 +10947,9 @@ declare const luna_QwertyMidi: typeof QwertyMidi;
 declare const luna_RECORD_LOOP_MARGIN_TICKS: typeof RECORD_LOOP_MARGIN_TICKS;
 type luna_RangeOptions = RangeOptions;
 type luna_RecPlayMode = RecPlayMode;
+type luna_RecentSessionRow = RecentSessionRow;
+type luna_RecentSessions = RecentSessions;
+declare const luna_RecentSessions: typeof RecentSessions;
 type luna_RecordOptions = RecordOptions;
 type luna_RecordTake = RecordTake;
 declare const luna_RecordTake: typeof RecordTake;
@@ -7637,8 +10963,12 @@ declare const luna_Renders: typeof Renders;
 type luna_ReorderOptions = ReorderOptions;
 type luna_RequestTimeout = RequestTimeout;
 declare const luna_RequestTimeout: typeof RequestTimeout;
+type luna_RollDuration = RollDuration;
 declare const luna_SEND_COUNT: typeof SEND_COUNT;
+declare const luna_SESSION_TYPES: typeof SESSION_TYPES;
 declare const luna_SIXTEENTH_NOTE: typeof SIXTEENTH_NOTE;
+declare const luna_SIXTY_FOURTH_NOTE: typeof SIXTY_FOURTH_NOTE;
+declare const luna_STEM_FORMATS: typeof STEM_FORMATS;
 type luna_Scheduler = Scheduler;
 declare const luna_Scheduler: typeof Scheduler;
 type luna_SecretStorage = SecretStorage;
@@ -7658,8 +10988,11 @@ declare const luna_SessionPackage: typeof SessionPackage;
 type luna_SessionPackageRow = SessionPackageRow;
 type luna_SessionStorage = SessionStorage;
 declare const luna_SessionStorage: typeof SessionStorage;
+type luna_SessionType = SessionType;
 type luna_Sessions = Sessions;
 declare const luna_Sessions: typeof Sessions;
+type luna_SetWarpOptions = SetWarpOptions;
+type luna_SettablePage = SettablePage;
 type luna_SettleOptions = SettleOptions;
 type luna_ShortcutBindings = ShortcutBindings;
 type luna_ShortcutCommand = ShortcutCommand;
@@ -7672,7 +11005,15 @@ type luna_ShortcutsOptions = ShortcutsOptions;
 type luna_SocketConstructor = SocketConstructor;
 type luna_SocketLike = SocketLike;
 type luna_SoloMode = SoloMode;
+type luna_SourceAnalysis = SourceAnalysis;
+declare const luna_SourceAnalysis: typeof SourceAnalysis;
+type luna_SourceDragItems = SourceDragItems;
 type luna_SourceLookup = SourceLookup;
+declare const luna_SourceOrigin: typeof SourceOrigin;
+type luna_SourceUsage = SourceUsage;
+declare const luna_SourceUsage: typeof SourceUsage;
+type luna_SourceUsageEntry = SourceUsageEntry;
+type luna_SourceUse = SourceUse;
 type luna_StatusListener = StatusListener;
 type luna_StemFormat = StemFormat;
 type luna_StorageContext = StorageContext;
@@ -7681,13 +11022,21 @@ type luna_StorageEditOptions = StorageEditOptions;
 type luna_Store = Store;
 declare const luna_Store: typeof Store;
 type luna_SubscribeOptions = SubscribeOptions;
+type luna_SuppressProgressOptions = SuppressProgressOptions;
+declare const luna_THIRTY_SECOND_NOTE: typeof THIRTY_SECOND_NOTE;
 declare const luna_TICKS_PER_BEAT: typeof TICKS_PER_BEAT;
 declare const luna_TICKS_PER_DISPLAY_TICK: typeof TICKS_PER_DISPLAY_TICK;
 declare const luna_TRACK_PRESET_CATEGORIES: typeof TRACK_PRESET_CATEGORIES;
+declare const luna_TRACK_TYPES: typeof TRACK_TYPES;
 type luna_Taper = Taper;
 declare const luna_Taper: typeof Taper;
 type luna_TaperMarksOptions = TaperMarksOptions;
 type luna_TaperName = TaperName;
+type luna_TemplateQueryOptions = TemplateQueryOptions;
+type luna_TempoAnalysis = TempoAnalysis;
+declare const luna_TempoAnalysis: typeof TempoAnalysis;
+type luna_TempoAnalysisResult = TempoAnalysisResult;
+type luna_TempoCandidate = TempoCandidate;
 type luna_TempoEvent = TempoEvent;
 declare const luna_TempoEvent: typeof TempoEvent;
 type luna_TimeSignature = TimeSignature;
@@ -7698,23 +11047,37 @@ type luna_TraceWaveformOptions = TraceWaveformOptions;
 type luna_Track = Track;
 declare const luna_Track: typeof Track;
 type luna_TrackPresetCategory = TrackPresetCategory;
+type luna_TrackPresetPlugin = TrackPresetPlugin;
 type luna_TrackPresetSelection = TrackPresetSelection;
 declare const luna_TrackPresetSelection: typeof TrackPresetSelection;
 type luna_TrackPresetSelectionOptions = TrackPresetSelectionOptions;
 type luna_TrackType = TrackType;
 type luna_TransactionMode = TransactionMode;
 type luna_TransactionOptions = TransactionOptions;
+type luna_TranscribeOptions = TranscribeOptions;
+type luna_TransientAnalysis = TransientAnalysis;
+declare const luna_TransientAnalysis: typeof TransientAnalysis;
+type luna_TransientAnalysisResult = TransientAnalysisResult;
 type luna_Transport = Transport;
 declare const luna_Transport: typeof Transport;
 type luna_TransportLocation = TransportLocation;
 type luna_Unsubscribe = Unsubscribe;
 type luna_Unsupported = Unsupported;
 declare const luna_Unsupported: typeof Unsupported;
+type luna_UnusedMedia = UnusedMedia;
 type luna_UploadOptions = UploadOptions;
 declare const luna_VERSION: typeof VERSION;
 type luna_Verb = Verb;
+type luna_VisibleRowsOptions<T extends FolderChannel = Track | Bus> = VisibleRowsOptions<T>;
+declare const luna_WARP_TRANSIENT_ZONE_NS: typeof WARP_TRANSIENT_ZONE_NS;
 declare const luna_WAVEFORM_PAGE: typeof WAVEFORM_PAGE;
 declare const luna_WHOLE_NOTE: typeof WHOLE_NOTE;
+type luna_Warp = Warp;
+declare const luna_Warp: typeof Warp;
+type luna_WarpMarker = WarpMarker;
+type luna_WarpType = WarpType;
+type luna_Warps = Warps;
+declare const luna_Warps: typeof Warps;
 type luna_WasmEngine = WasmEngine;
 declare const luna_WasmEngine: typeof WasmEngine;
 type luna_WasmHooks = WasmHooks;
@@ -7751,39 +11114,61 @@ declare const luna_bootWasmEngine: typeof bootWasmEngine;
 declare const luna_canDropPaths: typeof canDropPaths;
 declare const luna_clients: typeof clients;
 declare const luna_clipAudio: typeof clipAudio;
+declare const luna_clipGainAt: typeof clipGainAt;
 declare const luna_clipTypeFrom: typeof clipTypeFrom;
 declare const luna_compiledClipAudio: typeof compiledClipAudio;
 declare const luna_connect: typeof connect;
 declare const luna_consoleLog: typeof consoleLog;
+declare const luna_dbToGain: typeof dbToGain;
 declare const luna_decodeMessage: typeof decodeMessage;
 declare const luna_decodeMidiData: typeof decodeMidiData;
 declare const luna_decodeMidiEvents: typeof decodeMidiEvents;
 declare const luna_derived: typeof derived;
+declare const luna_dotted: typeof dotted;
 declare const luna_encodeMidiData: typeof encodeMidiData;
 declare const luna_encodePayload: typeof encodePayload;
 declare const luna_encodeRequest: typeof encodeRequest;
 declare const luna_eventMatches: typeof eventMatches;
 declare const luna_expandMulti: typeof expandMulti;
+declare const luna_fileUrl: typeof fileUrl;
 declare const luna_float: typeof float;
+declare const luna_folderTree: typeof folderTree;
 declare const luna_formatBarBeat: typeof formatBarBeat;
 declare const luna_formatMinSec: typeof formatMinSec;
+declare const luna_formatRollDuration: typeof formatRollDuration;
 declare const luna_formatTimeSignature: typeof formatTimeSignature;
+declare const luna_gainToDb: typeof gainToDb;
 declare const luna_getOptionsToParams: typeof getOptionsToParams;
 declare const luna_hasNativeBridge: typeof hasNativeBridge;
+declare const luna_insertSlotForAlias: typeof insertSlotForAlias;
 declare const luna_isAddOnCategory: typeof isAddOnCategory;
 declare const luna_isEmbeddedInLuna: typeof isEmbeddedInLuna;
+declare const luna_isHiddenSessionType: typeof isHiddenSessionType;
+declare const luna_isInsertAliasPluginId: typeof isInsertAliasPluginId;
 declare const luna_isLunaEnginePort: typeof isLunaEnginePort;
+declare const luna_isLunaExtensionPluginId: typeof isLunaExtensionPluginId;
+declare const luna_isRecordFxSlot: typeof isRecordFxSlot;
+declare const luna_isTerminalJobStatus: typeof isTerminalJobStatus;
 declare const luna_joinPath: typeof joinPath;
 declare const luna_kindForScale: typeof kindForScale;
 declare const luna_listOf: typeof listOf;
 declare const luna_locationOptions: typeof locationOptions;
 declare const luna_midiByte: typeof midiByte;
 declare const luna_normalizeChordName: typeof normalizeChordName;
+declare const luna_normalizePackageUid: typeof normalizePackageUid;
 declare const luna_onPathDrop: typeof onPathDrop;
 declare const luna_pairNotes: typeof pairNotes;
 declare const luna_pairNs: typeof pairNs;
 declare const luna_pairRange: typeof pairRange;
+declare const luna_parseBusType: typeof parseBusType;
 declare const luna_parseChord: typeof parseChord;
+declare const luna_parseControlType: typeof parseControlType;
+declare const luna_parseFolderMode: typeof parseFolderMode;
+declare const luna_parseRollDuration: typeof parseRollDuration;
+declare const luna_parseSessionType: typeof parseSessionType;
+declare const luna_parseStemFormat: typeof parseStemFormat;
+declare const luna_parseTrackType: typeof parseTrackType;
+declare const luna_pluginFormat: typeof pluginFormat;
 declare const luna_pluginVersionMeets: typeof pluginVersionMeets;
 declare const luna_propertyValue: typeof propertyValue;
 declare const luna_requireTick: typeof requireTick;
@@ -7791,13 +11176,17 @@ declare const luna_secondsToTicks: typeof secondsToTicks;
 declare const luna_selectedNotes: typeof selectedNotes;
 declare const luna_settle: typeof settle;
 declare const luna_shallowEquals: typeof shallowEquals;
+declare const luna_sourceDisplayName: typeof sourceDisplayName;
+declare const luna_sourceFilePath: typeof sourceFilePath;
 declare const luna_splitPath: typeof splitPath;
+declare const luna_startSourceDrag: typeof startSourceDrag;
 declare const luna_stripValueSuffix: typeof stripValueSuffix;
 declare const luna_suggestAddOnCategories: typeof suggestAddOnCategories;
 declare const luna_ticksToBeats: typeof ticksToBeats;
 declare const luna_ticksToSeconds: typeof ticksToSeconds;
 declare const luna_toEvent: typeof toEvent;
 declare const luna_traceWaveform: typeof traceWaveform;
+declare const luna_triplet: typeof triplet;
 declare const luna_wasmUpdateToEvent: typeof wasmUpdateToEvent;
 declare const luna_waveformColumns: typeof waveformColumns;
 declare const luna_waveformLanes: typeof waveformLanes;
@@ -7805,7 +11194,7 @@ declare const luna_waveformPeak: typeof waveformPeak;
 declare const luna_writable: typeof writable;
 declare const luna_yieldTask: typeof yieldTask;
 declare namespace luna {
-  export { luna_ADD_ON_CATEGORIES as ADD_ON_CATEGORIES, luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_AddOn as AddOn, type luna_AddOnCategory as AddOnCategory, type luna_AddOnCategoryInfo as AddOnCategoryInfo, type luna_AddOnInstalledFrom as AddOnInstalledFrom, luna_AddOnInstance as AddOnInstance, type luna_AddOnTarget as AddOnTarget, type luna_AlgType as AlgType, luna_Assistant as Assistant, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, luna_Chord as Chord, type luna_ChordSpec as ChordSpec, luna_Chords as Chords, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipNote as ClipNote, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, type luna_ClockOptions as ClockOptions, luna_Collection as Collection, type luna_CommandHandler as CommandHandler, luna_CompiledClip as CompiledClip, type luna_CompiledClipLike as CompiledClipLike, type luna_CompiledClipSnapshot as CompiledClipSnapshot, luna_CompiledClips as CompiledClips, type luna_CompiledFade as CompiledFade, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, luna_Controls as Controls, type luna_CreateSessionOptions as CreateSessionOptions, type luna_CrossfadeAlign as CrossfadeAlign, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, luna_Drivers as Drivers, luna_EDIT_SHORTCUTS as EDIT_SHORTCUTS, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, type Event$1 as Event, type luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, type luna_FadeShape as FadeShape, type luna_FileEntry as FileEntry, luna_FloatLiteral as FloatLiteral, type luna_FolderMode as FolderMode, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, type luna_GetOptions as GetOptions, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, type luna_ImportPathOptions as ImportPathOptions, type luna_InsertClipOptions as InsertClipOptions, type luna_InsertSlot as InsertSlot, luna_Job as Job, luna_Jobs as Jobs, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, luna_LUNA_DEVICE_UID as LUNA_DEVICE_UID, type luna_LengthFollows as LengthFollows, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, type luna_LogFn as LogFn, type luna_LogLevel as LogLevel, luna_MAX_SECRET_BYTES as MAX_SECRET_BYTES, luna_MAX_SECRET_NAME_LENGTH as MAX_SECRET_NAME_LENGTH, luna_MAX_SYSEX_BYTES as MAX_SYSEX_BYTES, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, luna_MidiDevice as MidiDevice, luna_MidiDevices as MidiDevices, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, luna_MidiInput as MidiInput, type luna_MidiInputListenOptions as MidiInputListenOptions, type luna_MidiInputMessage as MidiInputMessage, type luna_MidiInputTarget as MidiInputTarget, type luna_MidiInputType as MidiInputType, type luna_MidiOutputTarget as MidiOutputTarget, luna_MidiPort as MidiPort, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, type luna_MockEngineOptions as MockEngineOptions, type luna_MockMidiRow as MockMidiRow, type luna_MockMidiSent as MockMidiSent, type luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, type luna_MoveToFolderOptions as MoveToFolderOptions, luna_Musical as Musical, type luna_NestedFileEntry as NestedFileEntry, type luna_NewBusOptions as NewBusOptions, type luna_NewFolderOptions as NewFolderOptions, type luna_NewNote as NewNote, type luna_NewTrackFromPresetOptions as NewTrackFromPresetOptions, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, type luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, type luna_PairRange as PairRange, type luna_ParsedChord as ParsedChord, type luna_PathDrop as PathDrop, type luna_PathDropHandlers as PathDropHandlers, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginManifest as PluginManifest, type luna_PluginQueryOptions as PluginQueryOptions, type luna_PluginRequirement as PluginRequirement, type luna_PluginRow as PluginRow, type luna_PluginWindow as PluginWindow, luna_Plugins as Plugins, type luna_Port as Port, type luna_PortStatus as PortStatus, luna_Preferences as Preferences, type luna_PresetQueryOptions as PresetQueryOptions, type luna_PresetRecommendation as PresetRecommendation, type luna_PresetRow as PresetRow, luna_PresetSelection as PresetSelection, type luna_PresetSelectionOptions as PresetSelectionOptions, type luna_PresetTagGroup as PresetTagGroup, luna_Presets as Presets, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, type luna_QwertyKeyEvent as QwertyKeyEvent, luna_QwertyMidi as QwertyMidi, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecordOptions as RecordOptions, luna_RecordTake as RecordTake, luna_RecordTakes as RecordTakes, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, type luna_ReorderOptions as ReorderOptions, luna_RequestTimeout as RequestTimeout, luna_SEND_COUNT as SEND_COUNT, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_Scheduler as Scheduler, type luna_SecretStorage as SecretStorage, luna_Secrets as Secrets, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_SendMidi as SendMidi, type luna_SendMidiTrackTarget as SendMidiTrackTarget, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_SessionStorage as SessionStorage, luna_Sessions as Sessions, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, type luna_SocketConstructor as SocketConstructor, type luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, type luna_SourceLookup as SourceLookup, type luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_StorageContext as StorageContext, type luna_StorageEditOptions as StorageEditOptions, luna_Store as Store, type luna_SubscribeOptions as SubscribeOptions, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TRACK_PRESET_CATEGORIES as TRACK_PRESET_CATEGORIES, luna_Taper as Taper, type luna_TaperMarksOptions as TaperMarksOptions, type luna_TaperName as TaperName, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, type luna_TraceWaveformOptions as TraceWaveformOptions, luna_Track as Track, type luna_TrackPresetCategory as TrackPresetCategory, luna_TrackPresetSelection as TrackPresetSelection, type luna_TrackPresetSelectionOptions as TrackPresetSelectionOptions, type luna_TrackType as TrackType, type luna_TransactionMode as TransactionMode, type luna_TransactionOptions as TransactionOptions, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, type luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, type luna_Verb as Verb, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformPathTarget as WaveformPathTarget, type luna_WaveformRange as WaveformRange, type luna_WaveformScale as WaveformScale, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, type luna_WebSocketPortOptions as WebSocketPortOptions, type luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_addOnTarget as addOnTarget, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindClock as bindClock, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_canDropPaths as canDropPaths, luna_clients as clients, luna_clipAudio as clipAudio, luna_clipTypeFrom as clipTypeFrom, luna_compiledClipAudio as compiledClipAudio, luna_connect as connect, luna_consoleLog as consoleLog, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_decodeMidiEvents as decodeMidiEvents, luna_derived as derived, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_float as float, luna_formatBarBeat as formatBarBeat, luna_formatMinSec as formatMinSec, luna_formatTimeSignature as formatTimeSignature, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_isAddOnCategory as isAddOnCategory, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isLunaEnginePort as isLunaEnginePort, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_normalizeChordName as normalizeChordName, luna_onPathDrop as onPathDrop, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_parseChord as parseChord, luna_pluginVersionMeets as pluginVersionMeets, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_splitPath as splitPath, luna_stripValueSuffix as stripValueSuffix, luna_suggestAddOnCategories as suggestAddOnCategories, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_traceWaveform as traceWaveform, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_waveformPeak as waveformPeak, luna_writable as writable, luna_yieldTask as yieldTask };
+  export { luna_ADD_ON_CATEGORIES as ADD_ON_CATEGORIES, luna_AUTOMATION_MODES as AUTOMATION_MODES, luna_ActiveAudioEngine as ActiveAudioEngine, type luna_ActiveAudioEngineInfo as ActiveAudioEngineInfo, type luna_AddLyricOptions as AddLyricOptions, luna_AddOn as AddOn, type luna_AddOnCategory as AddOnCategory, type luna_AddOnCategoryInfo as AddOnCategoryInfo, type luna_AddOnInstalledFrom as AddOnInstalledFrom, luna_AddOnInstance as AddOnInstance, type luna_AddOnTarget as AddOnTarget, type luna_AffectedTracksOptions as AffectedTracksOptions, type luna_AlgType as AlgType, type luna_AnalysisKind as AnalysisKind, luna_AnalysisNode as AnalysisNode, luna_Assistant as Assistant, type luna_AudioDeviceInfo as AudioDeviceInfo, type luna_AudioHealth as AudioHealth, type luna_AudioInput as AudioInput, luna_AudioSource as AudioSource, luna_AutoGain as AutoGain, luna_AutoGainChannel as AutoGainChannel, type luna_AutoGainStartOptions as AutoGainStartOptions, type luna_AutoGainStatus as AutoGainStatus, type luna_AutoGainTarget as AutoGainTarget, luna_Automation as Automation, type luna_AutomationMode as AutomationMode, type luna_AutomationModeName as AutomationModeName, luna_BUS_TYPES as BUS_TYPES, type luna_BarBeat as BarBeat, luna_Bindings as Bindings, type luna_BootOptions as BootOptions, type luna_BounceOptions as BounceOptions, type luna_Breakpoint as Breakpoint, luna_BreakpointNode as BreakpointNode, luna_Bus as Bus, type luna_BusType as BusType, luna_COARSE_PAIRS_PER_FINE as COARSE_PAIRS_PER_FINE, luna_COARSE_PAIR_NS as COARSE_PAIR_NS, luna_CONTROL_TYPES as CONTROL_TYPES, luna_CUE_COUNT as CUE_COUNT, luna_Cell as Cell, luna_Channel as Channel, type luna_ChannelRef as ChannelRef, luna_Chord as Chord, luna_ChordAnalysis as ChordAnalysis, type luna_ChordAnalysisResult as ChordAnalysisResult, type luna_ChordSegment as ChordSegment, type luna_ChordSpec as ChordSpec, luna_Chords as Chords, luna_Client as Client, luna_Clip as Clip, type luna_ClipAudio as ClipAudio, type luna_ClipLike as ClipLike, type luna_ClipNote as ClipNote, type luna_ClipSnapshot as ClipSnapshot, type luna_ClipType as ClipType, type luna_ClockOptions as ClockOptions, luna_Collection as Collection, type luna_CommandHandler as CommandHandler, luna_CompiledClip as CompiledClip, type luna_CompiledClipLike as CompiledClipLike, type luna_CompiledClipSnapshot as CompiledClipSnapshot, luna_CompiledClips as CompiledClips, type luna_CompiledFade as CompiledFade, type luna_ConnectOptions as ConnectOptions, luna_ConnectionLost as ConnectionLost, luna_Context as Context, type luna_ContextType as ContextType, luna_Control as Control, type luna_ControlBinding as ControlBinding, type luna_ControlType as ControlType, type luna_ControlValue as ControlValue, type luna_ControlValueRange as ControlValueRange, luna_Controls as Controls, type luna_CreateFromTemplateOptions as CreateFromTemplateOptions, type luna_CreateSessionOptions as CreateSessionOptions, type luna_CrossfadeAlign as CrossfadeAlign, luna_DEFAULT_LUNA_PORT as DEFAULT_LUNA_PORT, luna_DEFAULT_SHORTCUTS as DEFAULT_SHORTCUTS, luna_DISPLAY_TICKS_PER_BEAT as DISPLAY_TICKS_PER_BEAT, type luna_Destination as Destination, luna_Device as Device, luna_DeviceInput as DeviceInput, luna_DeviceInputs as DeviceInputs, luna_DeviceOutput as DeviceOutput, luna_DeviceOutputs as DeviceOutputs, luna_Devices as Devices, luna_Disposed as Disposed, type luna_DragOptions as DragOptions, type luna_DragStartLike as DragStartLike, luna_Drivers as Drivers, luna_EDIT_SHORTCUTS as EDIT_SHORTCUTS, luna_EDIT_TIMEOUT_MS as EDIT_TIMEOUT_MS, luna_EIGHTH_NOTE as EIGHTH_NOTE, luna_Effect as Effect, type luna_Engine as Engine, UAError as Error, type luna_ErrorCode as ErrorCode, luna_ErrorCodes as ErrorCodes, luna_ErrorNotice as ErrorNotice, type luna_ErrorNoticeLevel as ErrorNoticeLevel, luna_ErrorNotices as ErrorNotices, type Event$1 as Event, type luna_EventHandler as EventHandler, type luna_ExportOptions as ExportOptions, type luna_ExtractionOptions as ExtractionOptions, luna_FOLDER_MODES as FOLDER_MODES, type luna_FadeShape as FadeShape, type luna_FileEntry as FileEntry, luna_FloatLiteral as FloatLiteral, type luna_FolderAnomaly as FolderAnomaly, type luna_FolderAnomalyKind as FolderAnomalyKind, type luna_FolderChannel as FolderChannel, type luna_FolderMode as FolderMode, type luna_FolderRow as FolderRow, luna_FolderTree as FolderTree, luna_GROUP_ATTRIBUTES as GROUP_ATTRIBUTES, type luna_Gesture as Gesture, type luna_GestureOptions as GestureOptions, type luna_GetOptions as GetOptions, luna_Group as Group, type luna_GroupAttribute as GroupAttribute, luna_Groups as Groups, luna_Gui as Gui, type luna_GuiPage as GuiPage, luna_GuiWindow as GuiWindow, luna_HALF_NOTE as HALF_NOTE, luna_HIDDEN_SESSION_TYPES as HIDDEN_SESSION_TYPES, luna_INPUT_ANALYSIS_KINDS as INPUT_ANALYSIS_KINDS, luna_INSERT_ALIAS_PREFIX as INSERT_ALIAS_PREFIX, type luna_ImportPathOptions as ImportPathOptions, type luna_ImportedFile as ImportedFile, type luna_InputAnalysisKind as InputAnalysisKind, type luna_InsertClipOptions as InsertClipOptions, type luna_InsertSlot as InsertSlot, luna_InstrumentAnalysis as InstrumentAnalysis, type luna_InstrumentAnalysisResult as InstrumentAnalysisResult, luna_Job as Job, type luna_JobCriteria as JobCriteria, type luna_JobResult as JobResult, luna_JobRun as JobRun, type luna_JobRunOptions as JobRunOptions, type luna_JobSnapshot as JobSnapshot, luna_Jobs as Jobs, type luna_KeptReason as KeptReason, luna_KeyAnalysis as KeyAnalysis, type luna_KeyAnalysisResult as KeyAnalysisResult, type luna_KeyCandidate as KeyCandidate, type luna_KeyCombo as KeyCombo, luna_KeySignature as KeySignature, type luna_KnownControlType as KnownControlType, type luna_KnownStemFormat as KnownStemFormat, luna_LUNA_CHANNEL_PLUGIN_ID as LUNA_CHANNEL_PLUGIN_ID, luna_LUNA_DEVICE_UID as LUNA_DEVICE_UID, luna_LUNA_EXTENSION_PLUGIN_IDS as LUNA_EXTENSION_PLUGIN_IDS, type luna_LengthFollows as LengthFollows, type luna_List as List, type luna_Location as Location, type luna_LocationOptions as LocationOptions, type luna_LogFn as LogFn, type luna_LogLevel as LogLevel, luna_Lyric as Lyric, type luna_LyricProviders as LyricProviders, type luna_LyricWord as LyricWord, luna_Lyrics as Lyrics, luna_MAX_CUE_BUSES as MAX_CUE_BUSES, luna_MAX_SECRET_BYTES as MAX_SECRET_BYTES, luna_MAX_SECRET_NAME_LENGTH as MAX_SECRET_NAME_LENGTH, luna_MAX_SYSEX_BYTES as MAX_SYSEX_BYTES, luna_Marker as Marker, luna_Markers as Markers, luna_Meter as Meter, luna_MidiClip as MidiClip, luna_MidiDevice as MidiDevice, luna_MidiDevices as MidiDevices, type luna_MidiEvent as MidiEvent, type luna_MidiHost as MidiHost, luna_MidiInput as MidiInput, type luna_MidiInputListenOptions as MidiInputListenOptions, type luna_MidiInputMessage as MidiInputMessage, type luna_MidiInputTarget as MidiInputTarget, type luna_MidiInputType as MidiInputType, type luna_MidiOperation as MidiOperation, luna_MidiOutputAssignment as MidiOutputAssignment, type luna_MidiOutputDestination as MidiOutputDestination, type luna_MidiOutputTarget as MidiOutputTarget, luna_MidiOutputs as MidiOutputs, luna_MidiPort as MidiPort, type luna_MidiRoute as MidiRoute, type luna_MidiRow as MidiRow, type luna_MidiRowData as MidiRowData, luna_MockEngine as MockEngine, type luna_MockEngineOptions as MockEngineOptions, type luna_MockJobPlan as MockJobPlan, type luna_MockMidiRow as MockMidiRow, type luna_MockMidiSent as MockMidiSent, type luna_MockNodeSpec as MockNodeSpec, luna_MockPort as MockPort, type luna_ModuleFactory as ModuleFactory, type luna_MoveToFolderOptions as MoveToFolderOptions, luna_Musical as Musical, luna_NEG_INFINITY_DB as NEG_INFINITY_DB, type luna_NestedFileEntry as NestedFileEntry, type luna_NewBusOptions as NewBusOptions, type luna_NewFolderOptions as NewFolderOptions, type luna_NewGroupOptions as NewGroupOptions, type luna_NewNote as NewNote, type luna_NewSessionType as NewSessionType, type luna_NewTrackFromPresetOptions as NewTrackFromPresetOptions, type luna_NewTrackOptions as NewTrackOptions, luna_NoSessionOpen as NoSessionOpen, luna_Node as Node, luna_NotRunning as NotRunning, type luna_Note as Note, luna_ONE_TWENTY_EIGHTH_NOTE as ONE_TWENTY_EIGHTH_NOTE, luna_OVERVIEW_PAIR_NS as OVERVIEW_PAIR_NS, type luna_Operation as Operation, luna_Output as Output, type luna_OutputAssignment as OutputAssignment, type luna_Overview as Overview, type luna_OverviewInfo as OverviewInfo, type luna_OverviewKind as OverviewKind, type luna_OverviewOptions as OverviewOptions, luna_PLUGIN_ERROR_MISSING as PLUGIN_ERROR_MISSING, luna_POST_RECORD_COMMANDS as POST_RECORD_COMMANDS, luna_PROGRESS_SUPPRESSION_MAX_MS as PROGRESS_SUPPRESSION_MAX_MS, type luna_PairRange as PairRange, type luna_ParsedChord as ParsedChord, type luna_PathDrop as PathDrop, type luna_PathDropHandlers as PathDropHandlers, luna_Playlist as Playlist, luna_Plugin as Plugin, type luna_PluginFormat as PluginFormat, type luna_PluginManifest as PluginManifest, type luna_PluginQueryOptions as PluginQueryOptions, type luna_PluginRequirement as PluginRequirement, type luna_PluginRow as PluginRow, type luna_PluginSdkType as PluginSdkType, type luna_PluginWindow as PluginWindow, luna_Plugins as Plugins, type luna_Port as Port, type luna_PortStatus as PortStatus, type luna_PostRecordCommand as PostRecordCommand, luna_PreferenceContext as PreferenceContext, luna_Preferences as Preferences, type luna_PresetQueryOptions as PresetQueryOptions, type luna_PresetRecommendation as PresetRecommendation, type luna_PresetRow as PresetRow, luna_PresetSelection as PresetSelection, type luna_PresetSelectionOptions as PresetSelectionOptions, type luna_PresetTagGroup as PresetTagGroup, luna_Presets as Presets, type luna_ProgressSuppression as ProgressSuppression, type luna_ProgressTask as ProgressTask, type luna_Prop as Prop, type luna_PropKey as PropKey, luna_QUARTER_NOTE as QUARTER_NOTE, type luna_QueryOptions as QueryOptions, type luna_QwertyKeyEvent as QwertyKeyEvent, luna_QwertyMidi as QwertyMidi, luna_RECORD_LOOP_MARGIN_TICKS as RECORD_LOOP_MARGIN_TICKS, type luna_RangeOptions as RangeOptions, type luna_RecPlayMode as RecPlayMode, type luna_RecentSessionRow as RecentSessionRow, luna_RecentSessions as RecentSessions, type luna_RecordOptions as RecordOptions, luna_RecordTake as RecordTake, luna_RecordTakes as RecordTakes, type luna_Releasable as Releasable, luna_Render as Render, luna_Renders as Renders, type luna_ReorderOptions as ReorderOptions, luna_RequestTimeout as RequestTimeout, type luna_RollDuration as RollDuration, luna_SEND_COUNT as SEND_COUNT, luna_SESSION_TYPES as SESSION_TYPES, luna_SIXTEENTH_NOTE as SIXTEENTH_NOTE, luna_SIXTY_FOURTH_NOTE as SIXTY_FOURTH_NOTE, luna_STEM_FORMATS as STEM_FORMATS, luna_Scheduler as Scheduler, type luna_SecretStorage as SecretStorage, luna_Secrets as Secrets, type luna_SeekOptions as SeekOptions, type luna_SeekTarget as SeekTarget, type luna_SelectedNotes as SelectedNotes, type luna_SelectionSnapshot as SelectionSnapshot, luna_SendMidi as SendMidi, type luna_SendMidiTrackTarget as SendMidiTrackTarget, luna_Session as Session, luna_SessionPackage as SessionPackage, type luna_SessionPackageRow as SessionPackageRow, luna_SessionStorage as SessionStorage, type luna_SessionType as SessionType, luna_Sessions as Sessions, type luna_SetWarpOptions as SetWarpOptions, type luna_SettablePage as SettablePage, type luna_SettleOptions as SettleOptions, type luna_ShortcutBindings as ShortcutBindings, type luna_ShortcutCommand as ShortcutCommand, type luna_ShortcutKeyEvent as ShortcutKeyEvent, type luna_ShortcutPlatform as ShortcutPlatform, luna_Shortcuts as Shortcuts, type luna_ShortcutsBinding as ShortcutsBinding, type luna_ShortcutsOptions as ShortcutsOptions, type luna_SocketConstructor as SocketConstructor, type luna_SocketLike as SocketLike, type luna_SoloMode as SoloMode, luna_SourceAnalysis as SourceAnalysis, type luna_SourceDragItems as SourceDragItems, type luna_SourceLookup as SourceLookup, luna_SourceOrigin as SourceOrigin, luna_SourceUsage as SourceUsage, type luna_SourceUsageEntry as SourceUsageEntry, type luna_SourceUse as SourceUse, type luna_StatusListener as StatusListener, type luna_StemFormat as StemFormat, luna_StorageContext as StorageContext, type luna_StorageEditOptions as StorageEditOptions, luna_Store as Store, type luna_SubscribeOptions as SubscribeOptions, type luna_SuppressProgressOptions as SuppressProgressOptions, luna_THIRTY_SECOND_NOTE as THIRTY_SECOND_NOTE, luna_TICKS_PER_BEAT as TICKS_PER_BEAT, luna_TICKS_PER_DISPLAY_TICK as TICKS_PER_DISPLAY_TICK, luna_TRACK_PRESET_CATEGORIES as TRACK_PRESET_CATEGORIES, luna_TRACK_TYPES as TRACK_TYPES, luna_Taper as Taper, type luna_TaperMarksOptions as TaperMarksOptions, type luna_TaperName as TaperName, type luna_TemplateQueryOptions as TemplateQueryOptions, luna_TempoAnalysis as TempoAnalysis, type luna_TempoAnalysisResult as TempoAnalysisResult, type luna_TempoCandidate as TempoCandidate, luna_TempoEvent as TempoEvent, luna_TimeSignature as TimeSignature, luna_Timeline as Timeline, type luna_TraceWaveformOptions as TraceWaveformOptions, luna_Track as Track, type luna_TrackPresetCategory as TrackPresetCategory, type luna_TrackPresetPlugin as TrackPresetPlugin, luna_TrackPresetSelection as TrackPresetSelection, type luna_TrackPresetSelectionOptions as TrackPresetSelectionOptions, type luna_TrackType as TrackType, type luna_TransactionMode as TransactionMode, type luna_TransactionOptions as TransactionOptions, type luna_TranscribeOptions as TranscribeOptions, luna_TransientAnalysis as TransientAnalysis, type luna_TransientAnalysisResult as TransientAnalysisResult, luna_Transport as Transport, type luna_TransportLocation as TransportLocation, type luna_Unsubscribe as Unsubscribe, luna_Unsupported as Unsupported, type luna_UnusedMedia as UnusedMedia, type luna_UploadOptions as UploadOptions, luna_VERSION as VERSION, type luna_Verb as Verb, type luna_VisibleRowsOptions as VisibleRowsOptions, luna_WARP_TRANSIENT_ZONE_NS as WARP_TRANSIENT_ZONE_NS, luna_WAVEFORM_PAGE as WAVEFORM_PAGE, luna_WHOLE_NOTE as WHOLE_NOTE, luna_Warp as Warp, type luna_WarpMarker as WarpMarker, type luna_WarpType as WarpType, luna_Warps as Warps, luna_WasmEngine as WasmEngine, type luna_WasmHooks as WasmHooks, type luna_WasmModule as WasmModule, luna_WasmPort as WasmPort, type luna_WasmPortOptions as WasmPortOptions, type luna_WasmState as WasmState, type luna_WaveformChannel as WaveformChannel, type luna_WaveformColumns as WaveformColumns, type luna_WaveformLane as WaveformLane, type luna_WaveformPathTarget as WaveformPathTarget, type luna_WaveformRange as WaveformRange, type luna_WaveformScale as WaveformScale, luna_Waveforms as Waveforms, luna_WebSocketPort as WebSocketPort, type luna_WebSocketPortOptions as WebSocketPortOptions, type luna_WireMessage as WireMessage, luna_Workspace as Workspace, type luna_WritableProp as WritableProp, luna_addOnTarget as addOnTarget, luna_audioNsAtTick as audioNsAtTick, luna_automationModeOrdinal as automationModeOrdinal, luna_beatsToTicks as beatsToTicks, luna_bindClock as bindClock, luna_bindDrag as bindDrag, luna_bindGesture as bindGesture, luna_bindRange as bindRange, luna_bindShortcuts as bindShortcuts, luna_bootWasmEngine as bootWasmEngine, luna_canDropPaths as canDropPaths, luna_clients as clients, luna_clipAudio as clipAudio, luna_clipGainAt as clipGainAt, luna_clipTypeFrom as clipTypeFrom, luna_compiledClipAudio as compiledClipAudio, luna_connect as connect, luna_consoleLog as consoleLog, luna_dbToGain as dbToGain, luna_decodeMessage as decodeMessage, luna_decodeMidiData as decodeMidiData, luna_decodeMidiEvents as decodeMidiEvents, luna_derived as derived, luna_dotted as dotted, luna_encodeMidiData as encodeMidiData, luna_encodePayload as encodePayload, luna_encodeRequest as encodeRequest, luna_eventMatches as eventMatches, luna_expandMulti as expandMulti, luna_fileUrl as fileUrl, luna_float as float, luna_folderTree as folderTree, luna_formatBarBeat as formatBarBeat, luna_formatMinSec as formatMinSec, luna_formatRollDuration as formatRollDuration, luna_formatTimeSignature as formatTimeSignature, luna_gainToDb as gainToDb, luna_getOptionsToParams as getOptionsToParams, luna_hasNativeBridge as hasNativeBridge, luna_insertSlotForAlias as insertSlotForAlias, luna_isAddOnCategory as isAddOnCategory, luna_isEmbeddedInLuna as isEmbeddedInLuna, luna_isHiddenSessionType as isHiddenSessionType, luna_isInsertAliasPluginId as isInsertAliasPluginId, luna_isLunaEnginePort as isLunaEnginePort, luna_isLunaExtensionPluginId as isLunaExtensionPluginId, luna_isRecordFxSlot as isRecordFxSlot, luna_isTerminalJobStatus as isTerminalJobStatus, luna_joinPath as joinPath, luna_kindForScale as kindForScale, luna_listOf as listOf, luna_locationOptions as locationOptions, luna_midiByte as midiByte, luna_normalizeChordName as normalizeChordName, luna_normalizePackageUid as normalizePackageUid, luna_onPathDrop as onPathDrop, luna_pairNotes as pairNotes, luna_pairNs as pairNs, luna_pairRange as pairRange, luna_parseBusType as parseBusType, luna_parseChord as parseChord, luna_parseControlType as parseControlType, luna_parseFolderMode as parseFolderMode, luna_parseRollDuration as parseRollDuration, luna_parseSessionType as parseSessionType, luna_parseStemFormat as parseStemFormat, luna_parseTrackType as parseTrackType, luna_pluginFormat as pluginFormat, luna_pluginVersionMeets as pluginVersionMeets, luna_propertyValue as propertyValue, luna_requireTick as requireTick, luna_secondsToTicks as secondsToTicks, luna_selectedNotes as selectedNotes, luna_settle as settle, luna_shallowEquals as shallowEquals, luna_sourceDisplayName as sourceDisplayName, luna_sourceFilePath as sourceFilePath, luna_splitPath as splitPath, luna_startSourceDrag as startSourceDrag, luna_stripValueSuffix as stripValueSuffix, luna_suggestAddOnCategories as suggestAddOnCategories, luna_ticksToBeats as ticksToBeats, luna_ticksToSeconds as ticksToSeconds, luna_toEvent as toEvent, luna_traceWaveform as traceWaveform, luna_triplet as triplet, luna_wasmUpdateToEvent as wasmUpdateToEvent, luna_waveformColumns as waveformColumns, luna_waveformLanes as waveformLanes, luna_waveformPeak as waveformPeak, luna_writable as writable, luna_yieldTask as yieldTask };
 }
 
 export { luna as Luna };

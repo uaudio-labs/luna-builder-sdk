@@ -18,6 +18,7 @@
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="pluginid"></a> `pluginId` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="sdktype"></a> `sdkType` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`PluginSdkType`](../type-aliases/PluginSdkType.md)\> | The plugin's format as LUNA decides it (`sdk_type`, fact 177). Prefer it to reading the id: a UA-made VST3 or AU wrapper is `'uadx'` although its id says `.vst3.` or `.au.`. `undefined` until loaded, and on a LUNA that does not report it. **Example** `const thirdParty = luna.plugins.items.filter((p) => ['vst', 'vst3', 'au'].includes(p.sdkType.value ?? ''));` | - |
 | <a id="version"></a> `version` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 
 ## Accessors
@@ -119,6 +120,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
 
 ***
 

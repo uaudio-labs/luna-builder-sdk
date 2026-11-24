@@ -61,12 +61,28 @@ export * as Luna from './luna';
 
 `import { Luna } from '@uaudio/luna-builder-sdk'` gives both values and types, so
 `Luna.Session` is usable as a type without a TypeScript `namespace` block. A tsup
-IIFE build exposes `globalThis.Luna` for script-tag Add Ons; this is required
-because Windows loads Add Ons from `file://`, where module scripts are blocked.
+IIFE build exposes `globalThis.Luna` for script-tag Add Ons; this was required
+because LUNA before 3.1.2 loaded Add Ons from `file://` on Windows, where module
+scripts are blocked. Since 3.1.2 Windows serves them from `ua-content://`, as macOS does.
 
 Naming rule: the `UAS` prefix from uanet-clients is dropped and the class lives in
 the namespace. `UASSessions` becomes `Luna.Sessions`, `UASTrack` becomes
 `Luna.Track`, `UASControl` becomes `Luna.Control`.
+
+Properties keep LUNA's wire names, camelCased: `count_in_enabled` is `countInEnabled`, so a
+reader can find the wire property from the SDK's. Methods are named for what an Add On author
+means to do, and their doc names the command they send: `effect.setIn()` posts
+`set_inserts_in_out`, `chords.detect()` posts `extract_chords`, `lyrics.transcribe()`
+`extract_lyrics`. Where LUNA's command name already says it plainly, it is kept
+(`newTracksFromInputs()`). A family of methods is named alike: detection of chords, tempo or
+anything else is `detect…`, whatever LUNA calls the command.
+
+**Optional parts of LUNA's tree.** A part LUNA serves only on some builds or settings (`/gui`
+on a headless engine, `/auto_gain` behind its feature key) answers
+`available(): Promise<boolean>`, cached once answered: `luna.gui.available()`,
+`luna.autoGain.available()`. It lists the parent's children
+(`src/model/presence.ts`), because a `get` of a missing node answers `{}` (fact 10). The SDK
+does not read LUNA's feature keys: it asks whether the part is there.
 
 ## Architecture
 

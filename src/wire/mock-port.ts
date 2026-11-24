@@ -23,7 +23,9 @@
  * await engine.settled();
  */
 import { ConnectionLost, UAError } from './errors';
-import { FloatLiteral } from './codec';
+import { appendParams, FloatLiteral } from './codec';
+import { addClipChildren, controlValuesCommand, warpCommands, type MockHelpers } from './mock-automation';
+import { groupCommands, midiOutputCommand, progressSuppressionCommands, progressSuppressions, resetWebClient } from './mock-parity';
 // The one model import: taper.ts is LUNA's taper tables and imports nothing itself.
 import { Taper } from '../model/taper';
 import {
@@ -45,6 +47,10 @@ import {
 
 /** LUNA's own device, holder of its MIDI devices: `LUNA_DEVICE_UID` in `model/system.ts` (fact 123). */
 const LUNA_DEVICE_UID = 'd37e009d693549a0b6ab1da3fad05443';
+/** The `session_type` values `new_session` accepts (fact 237). */
+const SESSION_TYPES = ['default', 'multi', 'history', 'template', 'track_preset', 'device_mixer', 'volt', 'standalone'] as const;
+/** A workspace row's `session_type`, in the order of the number the query answers. */
+const WORKSPACE_SESSION_TYPES = ['default', 'multi', 'history', 'session_template', 'track_preset', 'device_mixer', 'volt', 'standalone'];
 
 export type CommandHandler = (data: unknown, engine: MockEngine, nodePath: string) => unknown;
 
@@ -64,6 +70,24 @@ interface MockNode {
 interface Fault {
   code: string;
   remaining: number;
+}
+
+/** How {@link MockEngine.startJob} ends the next job; see {@link MockEngine.planNextJob}. */
+export interface MockJobPlan {
+  outcome?: 'completed' | 'empty' | 'failed' | 'instant' | undefined;
+  /** The `job.*` error a `failed` job reports. Default `job.internal`. */
+  error?: string;
+  /** Keep the job running until `engine.finishJob(uid)` or a cancel. */
+  hold?: boolean;
+}
+
+/** The `count` LUNA keeps for an analysis: its entries (fact 205). */
+function analysisCount(kind: string, payload: Record<string, unknown>): number {
+  if (typeof payload['count'] === 'number') return payload['count'];
+  const data = payload['data'] as Record<string, unknown> | unknown[] | undefined;
+  if (Array.isArray(data)) return data.length;
+  if (kind === 'transients') return ((data?.['location'] as unknown[] | undefined) ?? []).length;
+  return 1;
 }
 
 /** A stored fade row, as the mock keeps it under `<clip>/fades/<uid>`. */
@@ -142,6 +166,30 @@ function groupByClip<T extends { clip_uid?: string }>(rows: readonly T[]): Map<s
   return out;
 }
 
+/** An input's analysis results with nothing detected (fact 187). */
+const ANALYSIS_IDLE: Record<string, unknown> = { signal_level_peak: -144, tempo: 0, instrument: null, stereo_detect: false };
+/** The result property of each analysis kind. */
+const ANALYSIS_RESULT: Record<string, string> = { signal_level: 'signal_level_peak', tempo: 'tempo', instrument: 'instrument', stereo_detect: 'stereo_detect' };
+/**
+ * Whether LUNA makes a track for a device input named `name` in `new_tracks_from_inputs`
+ * (Device_AutoCreateTracks::SupportsAutoCreateByName, fact 172).
+ */
+function autoCreatesTrack(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower !== '' && lower !== 'mon' && !['talkback', 'monitor', 'mon ', 'loopback'].some((f) => lower.includes(f));
+}
+
+/** `UA::PluginIDToSDKType` then `SDKTypeToString` (fact 177), with cloud clip effects on. */
+function sdkTypeOf(pluginId: string): string {
+  if (pluginId.includes('.vst.')) return 'vst';
+  if (pluginId.includes('.vst3.')) return 'vst3';
+  if (pluginId.includes('.au.')) return 'au';
+  if (pluginId.startsWith('cloud:')) return 'cloud';
+  if (pluginId.startsWith('localml:')) return 'localml';
+  if (pluginId.startsWith('UAD ')) return 'uad2';
+  return 'uadx';
+}
+
 function normalize(path: string): string {
   const q = path.indexOf('?');
   const clean = q >= 0 ? path.slice(0, q) : path;
@@ -202,6 +250,11 @@ export interface MockEngineOptions {
    * clips. Default `true`; `false` models a LUNA from before they were added (fact 116).
    */
   compiledClipFades?: boolean;
+  /**
+   * Publish LUNA's Auto Gain service at `/auto_gain`. Default `true`; `false` models a LUNA
+   * whose Auto Gain feature is off, where the node does not exist (fact 191).
+   */
+  autoGain?: boolean;
 }
 
 export class MockEngine {
@@ -229,18 +282,39 @@ export class MockEngine {
     this.addNode('/sessions', {
       properties: { focused_session: '' },
       commands: {
+        // Fact 152: the package takes the client's session_package_uid (else a new one) and is
+        // listed in the workspace; session_type 'standalone' with standalone_id puts it in that
+        // standalone sessions subfolder.
         new_session: (data, engine) => {
-          const body = (data ?? {}) as { name?: string };
-          const uid = `s${engine.children('/sessions').length + 1}`;
-          engine.addSession(uid, { name: body.name ?? 'Untitled', focused: false });
+          const body = (data ?? {}) as { name?: string; directory_path?: string; session_uid?: string; session_package_uid?: string; session_type?: string; standalone_id?: string };
+          const uid = body.session_uid || `s${engine.children('/sessions').length + 1}`;
+          const pkg = body.session_package_uid || `pkg_${uid}`;
+          const name = body.name ?? 'Untitled';
+          // LUNA treats a session_type it does not know as 'default'.
+          const type = body.session_type !== undefined && (SESSION_TYPES as readonly string[]).includes(body.session_type) ? body.session_type : 'default';
+          const directory = type === 'standalone' && body.standalone_id !== undefined ? `/tmp/standalone/${body.standalone_id}` : (body.directory_path ?? '/tmp/Sessions');
+          // What LUNA does with the uid of a package it already lists is not measured; the mock replaces the row.
+          if (engine.has(`/workspace/sessions/${pkg}`)) engine.removeNode(`/workspace/sessions/${pkg}`);
+          engine.offlinePackages.delete(pkg);
+          // The workspace row of a standalone package reports session_type 'default' (measured);
+          // the other types' rows are not measured.
+          const rowType = type === 'template' ? 'session_template' : type === 'standalone' ? 'default' : type;
+          engine.addPackage(pkg, { name, directoryPath: `${directory}/${name}`, sessionType: rowType, lastOpened: Date.now() });
+          engine.addSession(uid, { name, focused: false, packageUid: pkg });
           engine.setValue(`/sessions/${uid}`, 'loaded', false);
-          return { session_uid: uid };
+          return { session_package_uid: pkg, session_uid: uid };
         },
         open_session: (data, engine) => {
           const body = (data ?? {}) as { session_package_uid?: string };
           const uid = `s${engine.children('/sessions').length + 1}`;
-          engine.addSession(uid, { name: body.session_package_uid ?? 'Opened', focused: false, ...(body.session_package_uid ? { packageUid: body.session_package_uid } : {}) });
+          // Named from its workspace row, as LUNA names it from the package's file.
+          const row = body.session_package_uid ? `/workspace/sessions/${body.session_package_uid}` : undefined;
+          const fileName = row && engine.has(row) ? engine.value(row, 'file_name') : undefined;
+          const name = typeof fileName === 'string' ? fileName.replace(/\.luna(template)?$/, '') : (body.session_package_uid ?? 'Opened');
+          engine.addSession(uid, { name, focused: false, ...(body.session_package_uid ? { packageUid: body.session_package_uid } : {}) });
           engine.setValue(`/sessions/${uid}`, 'loaded', false);
+          // Opening a package moves it to the top of the recent list (fact 242).
+          if (row && engine.has(row)) engine.setValue(row, 'last_opened', Date.now());
           return { session_uid: uid };
         },
         load_session: (data, engine) => {
@@ -255,6 +329,26 @@ export class MockEngine {
             }
           }, 5);
           return null;
+        },
+        // Fact 151: copies a template package into a new session, under the uid the client
+        // sends (or a new one), which `load_session` then loads.
+        new_session_from_template: (data, engine) => {
+          const body = (data ?? {}) as { name?: string; session_uid?: string; session_package_uid?: string };
+          const pkg = body.session_package_uid ?? '';
+          const template = `/workspace/sessions/${pkg}`;
+          // An unknown uid is device.filesystem_error (measured). LUNA's answer for a package
+          // that is not a template, or whose file is gone, is not measured.
+          if (!pkg || !engine.has(template) || engine.offlinePackages.has(pkg)) {
+            throw new UAError('device.filesystem_error', 'post /sessions/new_session_from_template: device.filesystem_error', { cmd: 'post', path: '/sessions/new_session_from_template' });
+          }
+          if (engine.value(template, 'session_type') !== 'session_template') {
+            throw new UAError('device.database_error', 'new_session_from_template: not a template', { cmd: 'post', path: '/sessions/new_session_from_template' });
+          }
+          const uid = body.session_uid || `s${engine.children('/sessions').length + 1}`;
+          const tracks = engine.templateTracks.get(pkg);
+          engine.addSession(uid, { name: body.name ?? String(engine.value(template, 'file_name') ?? 'Untitled').replace(/\.lunatemplate$/, ''), focused: false, ...(tracks ? { tracks } : {}) });
+          engine.setValue(`/sessions/${uid}`, 'loaded', false);
+          return { session_uid: uid };
         },
         close_session: (data, engine) => {
           const body = (data ?? {}) as { session_uid?: string };
@@ -307,26 +401,36 @@ export class MockEngine {
         },
       },
     });
+    // Fact 173, as Edit_MoveInsert: a root command naming both slots by effect uid.
+    this.nodes.get('/')!.commands.set('move_insert', (data, engine) => engine.moveInsert(data));
     this.addNode('/ping', {});
+    this.addNode('/errors', { properties: { type: 'folder' } });
     this.addNode('/workspace/sessions');
     this.addNode('/workspace', {
       properties: { type: 'folder' },
       commands: {
         query: (data, engine) => {
-          const body = (data ?? {}) as { limit?: number; order_by?: string; order_as?: string; search?: string };
-          let rows = engine.children('/workspace/sessions').map((uid) => ({
+          const body = (data ?? {}) as { limit?: number; order_by?: string; order_as?: string; search?: string; tag?: string | string[]; union?: boolean; factory?: boolean };
+          // A track preset's package (fact 176) is not a session the query lists.
+          let rows = engine.children('/workspace/sessions').filter((uid) => engine.value(`/workspace/sessions/${uid}`, 'session_type') !== 'track_preset').map((uid) => ({
             uid,
             name: String(engine.value(`/workspace/sessions/${uid}`, 'file_name') ?? uid),
             path: `${String(engine.value(`/workspace/sessions/${uid}`, 'directory_path') ?? '')}/${String(engine.value(`/workspace/sessions/${uid}`, 'file_name') ?? '')}`,
-            file_online: true,
-            session_type: 0,
-            factory: false,
+            file_online: !engine.offlinePackages.has(uid),
+            // Columnar like LUNA's: the session type's number, 3 for a template (fact 151), 7 standalone.
+            session_type: Math.max(0, WORKSPACE_SESSION_TYPES.indexOf(String(engine.value(`/workspace/sessions/${uid}`, 'session_type')))),
+            factory: Boolean(engine.value(`/workspace/sessions/${uid}`, 'factory')),
             favorite: Boolean(engine.value(`/workspace/sessions/${uid}`, 'favorite')),
             created: Number(engine.value(`/workspace/sessions/${uid}`, 'created') ?? 0),
             modified: 0,
             last_opened: Number(engine.value(`/workspace/sessions/${uid}`, 'last_opened') ?? 0),
-            tags: [] as string[],
+            tags: [...(engine.packageTags.get(uid) ?? [])],
           }));
+          // `tag` and `factory` are real filters in LUNA's query (facts 161-162); several tags
+          // must all match unless `union`.
+          const wantedTags = (Array.isArray(body.tag) ? body.tag : body.tag !== undefined ? [body.tag] : []).filter((t) => t !== '');
+          if (wantedTags.length) rows = rows.filter((r) => (body.union === true && Array.isArray(body.tag) ? wantedTags.some((t) => r.tags.includes(t)) : wantedTags.every((t) => r.tags.includes(t))));
+          if (typeof body.factory === 'boolean') rows = rows.filter((r) => r.factory === body.factory);
           if (body.search) rows = rows.filter((r) => r.name.toLowerCase().includes(body.search!.toLowerCase()));
           if (body.order_by) {
             const key = body.order_by as keyof (typeof rows)[number];
@@ -339,6 +443,29 @@ export class MockEngine {
           return { results };
         },
         full_text_search: () => ({ results: { num_rows: 0 } }),
+        /**
+         * `Strg_DeleteUnusedMedia` (fact 240): a file no clip of an open session of the package
+         * uses (as source or rendering) is unused, unless `keepMedia()` gave it a reason.
+         * `pre_flight` only reports; otherwise the unused files are removed.
+         */
+        delete_unused_media: (data, engine) => engine.deleteUnusedMedia(data),
+        /**
+         * `Strg_AddTag` for a session package (fact 161): an empty tag is refused, an unknown
+         * package answers `device.database_error`, a factory one `uasrv.read_only_property`.
+         */
+        add_tag: (data, engine) => {
+          const body = (data ?? {}) as { tag?: unknown; session_package_uid?: unknown };
+          const where = { cmd: 'post', path: '/workspace/add_tag' };
+          if (typeof body.tag !== 'string' || body.tag === '') throw new UAError('uasrv.invalid_property', 'add_tag: uasrv.invalid_property', where);
+          if (typeof body.session_package_uid !== 'string') throw new UAError('uasrv.invalid_type', 'add_tag: uasrv.invalid_type', where);
+          const pkg = body.session_package_uid;
+          if (!engine.has(`/workspace/sessions/${pkg}`)) throw new UAError('device.database_error', 'add_tag: device.database_error', where);
+          if (engine.value(`/workspace/sessions/${pkg}`, 'factory') === true) throw new UAError('uasrv.read_only_property', 'add_tag: uasrv.read_only_property', where);
+          const tags = engine.packageTags.get(pkg) ?? [];
+          if (!tags.includes(body.tag)) tags.push(body.tag);
+          engine.packageTags.set(pkg, tags);
+          return null;
+        },
         /**
          * The chunked import protocol (fact 42): `begin` answers a uid, each `transfer`
          * appends base64 bytes, `end` files the finished source under the package's audio
@@ -382,6 +509,15 @@ export class MockEngine {
               return null;
             case 'local_copy':
             default: {
+              // MIDI is filed under the package's `midi` folder; video is kept in the package with
+              // no workspace node (fact 163).
+              if (body.type === 'midi' || body.type === 'video') {
+                const uid = `${body.type}${engine.importedFiles.length + 1}`;
+                engine.importedFiles.push({ pkg, uid, type: body.type, name: body.name ?? uid, path: body.path ?? '' });
+                if (body.type === 'midi') engine.addNode(`/workspace/sessions/${pkg}/midi/${uid}`, { properties: { uid, name: body.name ?? uid } });
+                return { uid };
+              }
+              if (body.type !== undefined && body.type !== 'audio') throw new UAError('uasrv.invalid_property', 'import_file: unknown type', { cmd: 'post', path: '/workspace/import_file' });
               const uid = `src${engine.children(`/workspace/sessions/${pkg}/audio`).length + 1}`;
               engine.addNode(`/workspace/sessions/${pkg}/audio/${uid}`, {
                 properties: { uid, name: body.name ?? uid, stem_format: 'stereo', length: 0, sample_rate: 48000, created: 0, size: 0 },
@@ -421,7 +557,24 @@ export class MockEngine {
     // UA Assistant's connection to LUNA; `setAssistantEnabled` drives it (fact 121).
     this.addNode('/assistant', { properties: { enabled: false }, readOnly: ['enabled'] });
     this.addNode('/drivers', { properties: { connected: [{ id: 'mock', name: 'Mock Device', type: 'built_in', num_inputs: 2, num_outputs: 2 }], unsupported: [], sample_rates: [44100, 48000] } });
-    this.addNode('/preferences', { properties: { io_buffer_size: 256, play_from_stop_location: false, record_mute: false, metronome_sound: 'click', metronome_sounds: ['click', 'beep'] } });
+    this.addNode('/preferences', {
+      properties: { io_buffer_size: 256, play_from_stop_location: false, record_mute: false, metronome_sound: 'click', metronome_sounds: ['click', 'beep'] },
+      commands: {
+        // Fact 232: a context is read from its file only when a preference in it is
+        // initialised; a new preference starts null, an existing one keeps its value.
+        init_preference: (data, engine) => {
+          const body = (data ?? {}) as { context?: string; preference?: string };
+          if (!body.context || !body.preference) throw new UAError('uasrv.missing_field', 'init_preference: context and preference are required', { cmd: 'post', path: '/preferences/init_preference' });
+          const path = `/preferences/${body.context}`;
+          const file = engine.preferenceFiles.get(body.context) ?? {};
+          if (!(body.preference in file)) file[body.preference] = null;
+          engine.preferenceFiles.set(body.context, file);
+          if (!engine.has(path)) engine.addNode(path, { properties: { ...file } });
+          else if (engine.value(path, body.preference) === undefined) engine.setValue(path, body.preference, null);
+          return null;
+        },
+      },
+    });
     // Renders: `new` creates the node in `created`, `start` moves it to `running`, and the
     // test drives it to `completed` with `finishRender` (fact 44).
     this.addNode('/renders', {
@@ -468,12 +621,26 @@ export class MockEngine {
       },
     });
     this.addNode('/jobs');
+    // Read-only and computed when read; LUNA pushes no change to them (fact 204).
+    this.addNode('/lyric_transcription', { properties: { available: true, providers: ['music_ai', 'audioshake'], default_provider: 'music_ai' }, readOnly: ['available', 'providers', 'default_provider'] });
     this.addNode('/devices');
+    // The root's read-only `active_audio_engine` (fact 190); `setActiveAudioEngine` drives it.
+    const root = this.nodes.get('/')!;
+    root.properties.set('active_audio_engine', { enabled: true, audio_engine_type: 'system', devices: [{ id: 'mock', name: 'Mock Device', type: 'built_in', num_inputs: 2, num_outputs: 2 }], outputs: [] });
+    root.readOnly.add('active_audio_engine');
+    if (options.autoGain !== false) this.addAutoGainService();
     this.addNode('/gui', {
-      properties: { prior_launch_count: 1 },
+      // session_storage_path: where LUNA makes new sessions, read-only (fact 160).
+      properties: { prior_launch_count: 1, session_storage_path: '/Users/mock/Music/LUNA' },
+      readOnly: ['session_storage_path'],
       commands: {
+        ...progressSuppressionCommands(),
         set_page: (data, engine) => {
           const body = (data ?? {}) as { page?: string; context_type?: string };
+          // Fact 236: LUNA Play is opened another way; set_page refuses it.
+          if (!['mixer', 'timeline', 'home', 'addon', 'dashboard', 'catalog', 'universe'].includes(body.page ?? '')) {
+            throw new UAError('uasrv.invalid_value', `set_page: no page ${String(body.page)}`, { cmd: 'post', path: '/gui/set_page' });
+          }
           engine.setValue(`/gui/windows/${body.context_type ?? 'main'}`, 'page', body.page ?? 'timeline');
           return null;
         },
@@ -758,7 +925,11 @@ export class MockEngine {
   /** @internal Validate a show_plugin / hide_plugin payload as LUNA does (fact 126). */
   pluginWindowTarget(data: unknown, command: string): { slot: string; key: PluginWindowKey } {
     const fail = (code: string, why: string) => new UAError(code, `${command}: ${why}`, { cmd: 'post', path: `/gui/${command}` });
-    const body = typeof data === 'object' && data !== null ? (data as { session_uid?: unknown; channel_uid?: unknown; insert_type?: unknown }) : {};
+    const body = typeof data === 'object' && data !== null ? (data as { session_uid?: unknown; channel_uid?: unknown; insert_type?: unknown; context_type?: unknown }) : {};
+    // Fact 178: `context_type` picks LUNA's window; a name LUNA does not parse means main, and
+    // a window that is not open is uasrv.invalid_object.
+    const contextType = typeof body.context_type === 'string' && /^(main|editor|alt_\d+|editor_\d+)$/.test(body.context_type) ? body.context_type : 'main';
+    if (!this.has(`/gui/windows/${contextType}`)) throw fail('uasrv.invalid_object', `no ${contextType} window`);
     if (typeof body.channel_uid !== 'string') throw fail('uasrv.missing_field', 'channel_uid is required');
     if (typeof body.insert_type !== 'string') throw fail('uasrv.missing_field', 'insert_type is required');
     if (!/^(effect_\d+|record_fx_\d+|midi_\d+|console|tape|bus_input|instrument|sidechain_filter)$/.test(body.insert_type)) throw fail('uasrv.invalid_value', `unknown insert_type ${body.insert_type}`);
@@ -991,7 +1162,7 @@ export class MockEngine {
    * when absent); `formats` the `[input, output]` stem formats it runs in (any when absent);
    * `version` its installed version (`1.0.0` when absent).
    */
-  addPlugin(pluginId: string, options: { name?: string; manufacturer?: string; categories?: string[]; effectType?: string; formats?: [string, string][]; favorite?: boolean; version?: string } = {}): void {
+  addPlugin(pluginId: string, options: { name?: string; manufacturer?: string; categories?: string[]; effectType?: string; formats?: [string, string][]; favorite?: boolean; version?: string; sdkType?: string } = {}): void {
     const manifest: Record<string, unknown> = { manufacturer: options.manufacturer ?? 'Mock', name: options.name ?? pluginId, plugin_id: pluginId, categories: options.categories ?? [], short_names: [] };
     if (options.effectType !== undefined) manifest['effect_type'] = options.effectType;
     if (options.formats !== undefined) manifest['supported_stream_formats'] = { primary: options.formats };
@@ -1006,7 +1177,10 @@ export class MockEngine {
         authorized: null,
         default_preset_uid: null,
         manifest,
+        // LUNA's format for it (fact 177): from the id, as UA::PluginIDToSDKType, unless given.
+        sdk_type: options.sdkType ?? sdkTypeOf(pluginId),
       },
+      readOnly: ['sdk_type'],
     });
   }
 
@@ -1071,14 +1245,15 @@ export class MockEngine {
    * Add a preset for a plugin to the library (fact 98), with any `tags` (fact 120). Returns
    * its uid.
    */
-  addPreset(pluginId: string, name: string, options: { uid?: string; factory?: boolean; favorite?: boolean; version?: number; tags?: string[] } = {}): string {
+  addPreset(pluginId: string, name: string, options: { uid?: string; factory?: boolean; favorite?: boolean; version?: number; tags?: string[]; description?: string } = {}): string {
     this.ensurePresetPlugin(pluginId);
     const root = `/presets/plugins/${pluginId}/presets`;
     const uid = options.uid ?? `preset_${this.children(root).length + 1}_${pluginId}`;
     // `path` is the folder holding the preset: the plugin's factory or user root (fact 132).
     const folder = this.value(`/presets/plugins/${pluginId}`, options.factory ? 'factory_root' : 'user_root');
     this.addNode(`${root}/${uid}`, {
-      properties: { uid, preset_name: name, version: options.version ?? 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: folder },
+      // `description` is a node property the query does not return (fact 175).
+      properties: { uid, preset_name: name, version: options.version ?? 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: folder, description: options.description ?? '' },
     });
     this.addNode(`${root}/${uid}/tags`, { properties: { type: 'tags' } });
     for (const tag of options.tags ?? []) {
@@ -1149,14 +1324,17 @@ export class MockEngine {
    * track) besides any `tags`. `new_track` with it makes one track of `trackType` named after
    * it, or, with `trackNames`, a track per name, named as the preset saved them. Returns its uid.
    */
-  addTrackPreset(name: string, options: { uid?: string; trackType?: 'audio' | 'instrument' | 'bus'; trackNames?: string[]; factory?: boolean; favorite?: boolean; tags?: string[] } = {}): string {
+  addTrackPreset(name: string, options: { uid?: string; trackType?: 'audio' | 'instrument' | 'bus'; trackNames?: string[]; factory?: boolean; favorite?: boolean; tags?: string[]; description?: string; plugins?: { plugin_id: string; name: string }[] } = {}): string {
     const root = '/presets/devices/track/presets';
     const uid = options.uid ?? `track_preset_${this.children(root).length + 1}`;
     const trackType = options.trackType ?? 'audio';
     const count = options.trackNames?.length ?? 1;
     this.addNode(`${root}/${uid}`, {
-      properties: { uid, preset_name: name, version: 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: '', track_type: trackType, track_names: options.trackNames ?? null },
+      properties: { uid, preset_name: name, version: 1, favorite: options.favorite ?? false, factory: options.factory ?? false, path: '', track_type: trackType, track_names: options.trackNames ?? null, description: options.description ?? '' },
     });
+    // A track preset is a session package too, whose `plugins` is a JSON text of
+    // `[{ plugin_id, name }]` (fact 176). Only made when `plugins` is given.
+    if (options.plugins) this.addNode(`/workspace/sessions/${uid}`, { properties: { uid, file_name: `${name}.lunapreset`, session_type: 'track_preset', plugins: JSON.stringify(options.plugins) } });
     this.addNode(`${root}/${uid}/tags`, { properties: { type: 'tags' } });
     const category = count > 1 ? 'Multi-Track' : { audio: 'Audio', instrument: 'Instrument', bus: 'Bus' }[trackType];
     for (const tag of [category, ...(options.tags ?? [])]) {
@@ -1182,6 +1360,176 @@ export class MockEngine {
     return undefined;
   }
 
+  /**
+   * @internal `post /move_insert` (fact 173), as Edit_MoveInsert: the source slot's plugin,
+   * power, preset and parameters go to the destination slot, named by effect uid on any
+   * channel of the session. A move clears the source first. An occupied `effect_N` or
+   * `record_fx_N` destination first shuffles its neighbours toward the nearest empty slot of
+   * its kind, below it, else above it. Like LUNA, nothing checks that the two slots are of
+   * one kind.
+   */
+  moveInsert(data: unknown): null {
+    const body = (data ?? {}) as { session_uid?: string; source_uid?: string; destination_uid?: string; copy?: boolean };
+    const where = { cmd: 'post', path: '/move_insert' };
+    const base = `/sessions/${body.session_uid ?? ''}`;
+    if (!body.session_uid || !body.destination_uid || !this.has(base)) throw new UAError('uasrv.invalid_object', 'move_insert: session_uid and destination_uid are required', where);
+    const find = (uid: string): string | undefined => {
+      for (const kind of ['tracks', 'buses']) {
+        for (const ch of this.children(`${base}/${kind}`)) {
+          for (const slot of this.children(`${base}/${kind}/${ch}/effects`)) {
+            const path = `${base}/${kind}/${ch}/effects/${slot}`;
+            if (this.value(path, 'uid') === uid) return path;
+          }
+        }
+      }
+      return undefined;
+    };
+    const src = body.source_uid ? find(body.source_uid) : undefined;
+    const dst = find(body.destination_uid);
+    if ((body.source_uid && !src) || !dst) throw new UAError('device.database_error', 'move_insert: no such insert', where);
+    const state = src ? this.slotState(src) : undefined;
+    if (src && body.copy !== true) this.clearSlot(src);
+    const family = /^(effect_|record_fx_)(\d+)$/.exec(splitPath(dst).name);
+    if (family && this.value(dst, 'plugin_id')) {
+      const effects = splitPath(dst).node;
+      const prefix = family[1]!;
+      const at = Number(family[2]);
+      const slot = (i: number) => `${effects}/${prefix}${i}`;
+      const empty = (i: number) => !this.value(slot(i), 'plugin_id');
+      const count = this.children(effects).filter((c) => c.startsWith(prefix)).length;
+      let free = -1;
+      for (let i = at - 1; i >= 0; i--) {
+        if (empty(i)) {
+          free = i;
+          break;
+        }
+      }
+      if (free >= 0) {
+        for (let i = free; i < at; i++) this.applySlotState(slot(i), this.slotState(slot(i + 1)));
+      } else {
+        for (let i = at + 1; i < count; i++) {
+          if (empty(i)) {
+            free = i;
+            break;
+          }
+        }
+        if (free >= 0) for (let i = free; i > at; i--) this.applySlotState(slot(i), this.slotState(slot(i - 1)));
+      }
+    }
+    if (state) this.applySlotState(dst, state);
+    return null;
+  }
+
+  private static readonly SLOT_STATE = ['plugin_id', 'plugin_name', 'plugin_power', 'enabled', 'preset_name', 'preset_uid', 'preset_uid_dirty', 'bypass_control', 'bypass_control_active_low', 'plugin_error', 'external_sdk_instance_id'];
+
+  private slotState(path: string): { props: Record<string, unknown>; controls: [string, Record<string, unknown>][] } {
+    const props: Record<string, unknown> = {};
+    for (const k of MockEngine.SLOT_STATE) props[k] = this.value(path, k);
+    const controls = this.children(`${path}/controls`).map((c) => [c, this.properties(`${path}/controls/${c}`)] as [string, Record<string, unknown>]);
+    return { props, controls };
+  }
+
+  private applySlotState(path: string, state: { props: Record<string, unknown>; controls: [string, Record<string, unknown>][] }): void {
+    for (const c of this.children(`${path}/controls`)) this.removeNode(`${path}/controls/${c}`);
+    for (const [k, v] of Object.entries(state.props)) this.setValue(path, k, k === 'external_sdk_instance_id' && v !== null && v !== undefined ? this.nextRow() : v);
+    for (const [name, props] of state.controls) {
+      const control = `${path}/controls/${name}`;
+      this.addControl(control, String(props['control_type'] ?? 'parameter'), { discrete: props['discrete'] === true, value: Number(props['value'] ?? 0), real: (props['real_value'] as number | boolean) ?? 0, str: String(props['string_value'] ?? ''), automatable: props['automatable'] === true });
+      for (const [k, v] of Object.entries(props)) if (k !== 'uid') this.nodes.get(control)!.properties.set(k, v);
+    }
+  }
+
+  private clearSlot(path: string): void {
+    for (const c of this.children(`${path}/controls`)) this.removeNode(`${path}/controls/${c}`);
+    const cleared: Record<string, unknown> = { plugin_id: null, plugin_name: null, plugin_power: true, preset_name: null, preset_uid: null, preset_uid_dirty: false, bypass_control: null, bypass_control_active_low: null, plugin_error: null, external_sdk_instance_id: null };
+    for (const [k, v] of Object.entries(cleared)) this.setValue(path, k, v);
+  }
+
+  /**
+   * @internal `delete_playlists` (fact 170), as Edit_DeletePlaylists with no edit groups:
+   * with `context_type`, each listed playlist's track is affected. A playlist a track is not
+   * using is deleted. Listing only playlists in use deletes them, each track switching to
+   * the version before (after, for the first); `delete_unused` deletes every playlist the
+   * affected tracks are not using instead. Nothing to delete is `uasrv.invalid_value`.
+   */
+  deletePlaylists(sessionUid: string, data: unknown): null {
+    const base = `/sessions/${sessionUid}`;
+    const body = (data ?? {}) as { playlist_uid?: string | string[]; delete_unused?: boolean; context_type?: string };
+    const listed = Array.isArray(body.playlist_uid) ? body.playlist_uid : typeof body.playlist_uid === 'string' ? [body.playlist_uid] : [];
+    const trackOf = (pl: string) => this.value(`${base}/playlists/${pl}`, 'track_uid') as string | undefined;
+    const current = (pl: string) => this.children(`${base}/tracks`).some((t) => this.value(`${base}/tracks/${t}`, 'playlist_uid') === pl);
+    const versionOf = (pl: string) => Number(this.value(`${base}/playlists/${pl}`, 'version'));
+    const ofTrack = (t: string) => this.children(`${base}/playlists`).filter((p) => trackOf(p) === t).sort((a, b) => versionOf(a) - versionOf(b));
+    const doomed = new Set(listed.filter((p) => this.has(`${base}/playlists/${p}`) && !current(p)));
+    const tracks = new Set<string>();
+    let deleteCurrent = body.delete_unused !== true;
+    if (body.context_type !== undefined) {
+      for (const p of listed) {
+        const t = trackOf(p);
+        if (t) tracks.add(t);
+        deleteCurrent = deleteCurrent && current(p);
+      }
+    }
+    const switchAway = (t: string) => {
+      const list = ofTrack(t);
+      const now = this.value(`${base}/tracks/${t}`, 'playlist_uid') as string;
+      const i = list.indexOf(now);
+      if (list.length < 2 || i < 0) return;
+      this.setValue(`${base}/tracks/${t}`, 'playlist_uid', list[i === 0 ? 1 : i - 1]);
+      doomed.add(now);
+    };
+    if (!deleteCurrent && body.delete_unused !== true && listed.length) {
+      const version = versionOf(listed[0]!);
+      for (const t of tracks) {
+        for (const p of ofTrack(t)) {
+          if (versionOf(p) !== version) continue;
+          if (current(p)) switchAway(t);
+          else doomed.add(p);
+        }
+      }
+    } else if (body.delete_unused === true) {
+      for (const t of tracks) for (const p of ofTrack(t)) if (!current(p)) doomed.add(p);
+    } else {
+      for (const t of tracks) switchAway(t);
+    }
+    if (doomed.size === 0) throw new UAError('uasrv.invalid_value', 'delete_playlists: nothing to delete', { cmd: 'post', path: `${base}/delete_playlists` });
+    for (const p of doomed) this.removeNode(`${base}/playlists/${p}`);
+    return null;
+  }
+
+  /**
+   * @internal `new_tracks_from_inputs` (fact 172), as Edit_NewTracksFromInputs: one audio
+   * track per device input LUNA would auto-create for (not talkback, monitor, loopback),
+   * named after the input (made unique), in the input's stem format unless `stem_format`
+   * overrides it, with the input assigned, armed with `record_enable`. Answers
+   * `{ new_tracks: [uid, ...] }`. Like LUNA, it never answers when no input is left or an
+   * input is unknown. Auto gain is not modelled.
+   */
+  newTracksFromInputs(sessionUid: string, data: unknown): unknown {
+    const base = `/sessions/${sessionUid}`;
+    const body = (data ?? {}) as { input_uids?: string[]; record_enable?: boolean; auto_gain?: boolean; stem_format?: string };
+    const ids = (Array.isArray(body.input_uids) ? body.input_uids : []).filter((u) => typeof u === 'string' && u !== '');
+    if (!ids.length) throw new UAError('uasrv.default_error', 'new_tracks_from_inputs: input_uids is required', { cmd: 'post', path: `${base}/new_tracks_from_inputs` });
+    const inputs = ids.map((id) => this.children('/devices').map((d) => `/devices/${d}/inputs/${id}`).find((p) => this.has(p)));
+    const never = () => new Promise<never>(() => undefined);
+    if (inputs.some((p) => p === undefined)) return never();
+    const usable = (inputs as string[]).filter((p) => autoCreatesTrack(String(this.value(p, 'name') ?? '')));
+    if (!usable.length) return never();
+    const made: string[] = [];
+    for (const input of [...new Set(usable)]) {
+      const taken = new Set(this.children(`${base}/tracks`).map((t) => String(this.value(`${base}/tracks/${t}`, 'name'))));
+      const wanted = String(this.value(input, 'name'));
+      let name = wanted;
+      for (let n = 2; taken.has(name); n++) name = `${wanted} ${n}`;
+      const id = `t${this.children(`${base}/tracks`).length + 1}`;
+      this.addTrack(sessionUid, id, { name, trackType: 'audio', stemFormat: body.stem_format || String(this.value(input, 'stem_format') ?? 'mono') });
+      this.setValue(`${base}/tracks/${id}`, 'input_node_uid', splitPath(input).name);
+      if (body.record_enable === true) this.setValue(`${base}/tracks/${id}`, 'record_enabled', true);
+      made.push(id);
+    }
+    return { new_tracks: made };
+  }
+
   /** @internal Put a plugin on a track's instrument slot (or first effect slot), on a preset. */
   putPluginPreset(track: string, pluginId: string, presetPath: string): void {
     const instrument = this.instrumentPluginIds().includes(pluginId);
@@ -1203,12 +1551,14 @@ export class MockEngine {
    * `name_modified` is true; a name set through `set` does not make it so.
    */
   loadTrackPreset(data: unknown): null {
-    const body = (data ?? {}) as { session_uid?: string; uid?: string; preset_uid?: string };
+    const body = (data ?? {}) as { session_uid?: string; uid?: string; preset_uid?: string; is_bus?: boolean };
     const where = { cmd: 'post', path: '/presets/devices/track/load' };
-    const track = `/sessions/${body.session_uid ?? ''}/tracks/${body.uid ?? ''}`;
+    // A bus is named the same way, with `is_bus` (fact 169); a plugin preset is refused there.
+    const track = `/sessions/${body.session_uid ?? ''}/${body.is_bus === true ? 'buses' : 'tracks'}/${body.uid ?? ''}`;
     if (!body.session_uid || !body.preset_uid) throw new UAError('uasrv.invalid_property', 'load: session_uid and preset_uid required', where);
     const preset = this.findPreset(body.preset_uid);
     if (!preset || !this.has(track)) throw new UAError('device.database_error', 'load: no such track or preset', where);
+    if (preset.kind === 'plugin' && body.is_bus === true) throw new UAError('uasrv.invalid_type', 'load: a plugin preset cannot go on a bus', where);
     if (preset.kind === 'plugin') {
       if (this.instrumentPluginIds().includes(preset.pluginId) && this.value(track, 'track_type') !== 'instrument') throw new UAError('uasrv.invalid_value', 'load: an instrument preset needs an instrument track', where);
       this.putPluginPreset(track, preset.pluginId, preset.path);
@@ -1325,12 +1675,428 @@ export class MockEngine {
     return undefined;
   }
 
-  /** Register a session package in the workspace. */
-  addPackage(uid: string, options: { name?: string; lastOpened?: number; favorite?: boolean } = {}): void {
-    this.addNode(`/workspace/sessions/${uid}`, {
-      properties: { uid, file_name: `${options.name ?? uid}.luna`, directory_path: `/tmp/${options.name ?? uid}`, session_type: 'default', factory: false, favorite: options.favorite ?? false, created: options.lastOpened ?? 0, modified: 0, last_opened: options.lastOpened ?? 0, comments: '' },
+  /**
+   * Add an analysis result to a source (fact 205): `<source>/analysis/<kind>` with `count`,
+   * `md5` and versions, and its stored result as `payload`, which a `file/data` read answers.
+   * `transients` pages by `index`/`count` like LUNA; the others answer whole. Pass the payload
+   * in LUNA's shape (fact 207), e.g. `{ data: { keyData: [{ key: 'C major', confidence: 0.9 }] } }`.
+   * Adding it again updates the node, as a re-analysis does (fact 206).
+   *
+   * @example
+   * engine.addAnalysis('pkg1', 'src1', 'instrument', { instrument: 'vocals', confidence: 0.8 });
+   */
+  addAnalysis(packageUid: string, sourceUid: string, kind: string, payload: Record<string, unknown>, options: { count?: number; md5?: string | null; sourcePath?: string } = {}): void {
+    const path = `${options.sourcePath ?? `/workspace/sessions/${packageUid}/audio/${sourceUid}`}/analysis/${kind}`;
+    const count = options.count ?? analysisCount(kind, payload);
+    const md5 = options.md5 === undefined ? `md5-${sourceUid}-${kind}-${this.nextRow()}` : options.md5;
+    if (this.has(path)) {
+      this.setValue(`${path}/file`, 'payload', payload);
+      this.setValue(path, 'count', count);
+      this.setValue(path, 'md5', md5);
+      return;
+    }
+    const version = Number(payload['version'] ?? 1);
+    const versionMinor = Number(payload['version_minor'] ?? 0);
+    this.addNode(path, { properties: { type: kind, version, version_minor: versionMinor, count, md5 }, readOnly: ['type', 'version', 'version_minor', 'count', 'md5'] });
+    this.addNode(`${path}/file`, { properties: { payload } });
+  }
+
+  /** A `file/data` read of a non-overview analysis: LUNA answers nothing without a count (fact 205). */
+  private analysisPage(path: string, params: Record<string, string>): unknown {
+    const holder = this.nodes.get(splitPath(path).node);
+    const payload = holder?.properties.get('payload') as Record<string, unknown> | undefined;
+    const count = Number(params['count'] ?? 0);
+    if (!payload || count === 0) return undefined;
+    if (!path.includes('/analysis/transients/')) return payload;
+    const data = (payload['data'] ?? {}) as { location?: number[]; level?: number[] };
+    const total = data.location?.length ?? 0;
+    const index = Math.min(Math.max(0, Number(params['index'] ?? 0)), total);
+    const n = count < 0 ? total - index : Math.min(count, total - index);
+    return { ...payload, index, count: n, data: { ...data, location: (data.location ?? []).slice(index, index + n), level: (data.level ?? []).slice(index, index + n) } };
+  }
+
+  /**
+   * How the next job the mock starts ends (facts 200-202): `completed` (default), `empty`
+   * (LUNA's `failed` with `job.no_result`), `failed` with `error`, or `instant`, where the job
+   * is added, finished and removed in one turn, as LUNA's cached-analysis path can (fact 202).
+   * `hold` keeps it running until {@link finishJob} or a cancel.
+   *
+   * @example
+   * engine.planNextJob({ outcome: 'failed', error: 'job.provider_unavailable' });
+   */
+  planNextJob(plan: MockJobPlan): void {
+    this.jobPlans.push(plan);
+  }
+
+  /**
+   * Start a job under `/jobs/<uid>` as deviced's Job_Service does (fact 200): the node appears
+   * (status `queued`) a turn after the command answers, runs and reports progress a turn at a
+   * time, then publishes its error and terminal status and is removed in the same turn.
+   * `work` runs just before it ends and answers whether anything was found. Returns the uid.
+   *
+   * @example
+   * const uid = engine.startJob({ sessionUid: 'abc', jobType: 'chord_extraction' });
+   */
+  startJob(spec: { sessionUid: string; jobType: string; targetUid?: string; work?: () => boolean }): string {
+    const plan: MockJobPlan = { ...(this.jobPlans.shift() ?? {}) };
+    const uid = (0x10000000 + this.nextRow()).toString(16).padStart(32, '0');
+    const path = `/jobs/${uid}`;
+    const properties: Record<string, unknown> = {
+      uid,
+      session_uid: spec.sessionUid,
+      job_type: spec.jobType,
+      status: 'queued',
+      stage: '',
+      error: '',
+      warning: '',
+      cancellable: true,
+      percent_complete: 0,
+    };
+    // `target_uid` is left out when the job has none (Job_Object).
+    if (spec.targetUid) properties['target_uid'] = spec.targetUid;
+    let canceled = false;
+    const end = (): void => {
+      if (!this.has(path)) return;
+      let status = 'completed';
+      let error = '';
+      if (canceled) status = 'canceled';
+      else if (plan.outcome === 'failed') {
+        status = 'failed';
+        error = plan.error ?? 'job.internal';
+      } else {
+        const found = spec.work ? spec.work() : true;
+        if (plan.outcome === 'empty' || !found) {
+          status = 'failed';
+          error = 'job.no_result';
+        }
+      }
+      // FailJob posts the error ahead of the terminal status; FinishJob publishes the status,
+      // drops cancellability and removes the node in the same turn (fact 200).
+      if (error) this.setValue(path, 'error', error);
+      if (status === 'completed') this.setValue(path, 'percent_complete', 100);
+      this.setValue(path, 'status', status);
+      this.setValue(path, 'cancellable', false);
+      this.jobFinishers.delete(uid);
+      this.removeNode(path);
+    };
+    const commands: Record<string, CommandHandler> = {
+      cancel_job: (_d, engine) => {
+        if (engine.value(path, 'cancellable') !== true || engine.value(path, 'status') === 'canceling') throw new UAError('uasrv.invalid_value', 'cancel_job: no longer cancellable', { cmd: 'post', path: `${path}/cancel_job` });
+        canceled = true;
+        engine.setValue(path, 'status', 'canceling');
+        return null;
+      },
+    };
+    // Posted as `<job>/commands/cancel_job`, as `Job.cancel()` does.
+    const add = (): void => {
+      this.addNode(path, { properties, readOnly: Object.keys(properties) });
+      this.nodes.get(path)!.children = [];
+      this.nodes.set(`${path}/commands`, { properties: new Map(), readOnly: new Set(), commands: new Map(Object.entries(commands)), children: [] });
+    };
+    if (plan.outcome === 'instant') {
+      // Added, finished and removed in one turn: a client's read of the new node finds nothing.
+      plan.outcome = undefined;
+      setTimeout(() => {
+        add();
+        end();
+      }, 0);
+      return uid;
+    }
+    this.jobFinishers.set(uid, end);
+    const steps: (() => void)[] = [
+      add,
+      () => {
+        this.setValue(path, 'status', 'running');
+        this.setValue(path, 'stage', 'processing');
+        this.setValue(path, 'percent_complete', 40);
+      },
+      () => this.setValue(path, 'percent_complete', 80),
+    ];
+    const tick = (i: number): void => {
+      setTimeout(() => {
+        if (i < steps.length) {
+          if (i === 0 || this.has(path)) steps[i]!();
+          tick(i + 1);
+        } else if (!plan.hold || canceled) end();
+        else tick(i);
+      }, 0);
+    };
+    tick(0);
+    return uid;
+  }
+
+  /** End a job started under a `hold` plan (see {@link planNextJob}). */
+  finishJob(uid: string): void {
+    this.jobFinishers.get(uid)?.();
+  }
+
+  private readonly jobPlans: MockJobPlan[] = [];
+  private readonly jobFinishers = new Map<string, () => void>();
+
+  /**
+   * `extract_chords` and `extract_lyrics` on the session's main context (facts 203, 204): a
+   * clip, or the context's selected playlists; the job targets the clip's track. What they
+   * find is the mock's stand-in, not a detector's: chords `C G Am F` a bar apart over the clip,
+   * and one transcribed line per second of source.
+   */
+  private installExtractionCommands(sessionUid: string, packageUid: string): void {
+    const base = `/sessions/${sessionUid}`;
+    const node = this.nodes.get(`${base}/contexts/main/commands`);
+    if (!node) return;
+    const fail = (cmd: string, code: string, why: string): UAError => new UAError(code, `${cmd}: ${why}`, { cmd: 'post', path: `${base}/contexts/main/commands/${cmd}` });
+    const target = (body: { clip_uid?: string }, cmd: string): { clips: string[]; track: string | undefined } => {
+      if (body.clip_uid !== undefined) {
+        const clip = this.findClip(base, body.clip_uid);
+        if (!clip) throw fail(cmd, 'device.no_selection', 'no such clip');
+        const pl = clip.slice(0, clip.lastIndexOf('/clips/'));
+        return { clips: [clip], track: String(this.value(pl, 'track_uid') ?? '') || undefined };
+      }
+      const pls = (this.value(`${base}/contexts/main`, 'selection_playlists') as string[] | null) ?? [];
+      // Chords all land on the one ruler, so LUNA takes one track for them.
+      if (cmd === 'extract_chords' ? pls.length !== 1 : pls.length === 0) throw fail(cmd, 'device.no_selection', 'nothing (or more than one track) selected');
+      const pl = `${base}/playlists/${pls[0]}`;
+      return { clips: this.children(`${pl}/clips`).map((c) => `${pl}/clips/${c}`), track: String(this.value(pl, 'track_uid') ?? '') || undefined };
+    };
+    node.commands.set('extract_chords', (data) => {
+      const body = (data ?? {}) as { session_uid?: string; clip_uid?: string };
+      if (!body.session_uid) throw fail('extract_chords', 'uasrv.missing_field', 'session_uid is required');
+      const { clips, track } = target(body, 'extract_chords');
+      this.startJob({
+        sessionUid,
+        jobType: 'chord_extraction',
+        ...(track ? { targetUid: track } : {}),
+        work: () => {
+          const names = ['C', 'G', 'Am', 'F'];
+          let found = false;
+          for (const clip of clips) {
+            const start = Number(this.value(clip, 'start') ?? 0);
+            const stop = Number(this.value(clip, 'stop') ?? start);
+            const segments: { chord_complex_pop: string; start: number; end: number }[] = [];
+            for (let t = start, i = 0; t < stop; t += 4 * 96e9, i++) {
+              this.addChord(sessionUid, t, names[i % 4]!);
+              segments.push({ chord_complex_pop: names[i % 4]!, start: i * 2, end: i * 2 + 2 });
+              found = true;
+            }
+            const source = this.value(clip, 'source_uid');
+            if (typeof source === 'string' && source) this.addAnalysis(packageUid, source, 'chord', { version: 1, index: 0, count: segments.length, key: 'C major', data: segments });
+          }
+          return found;
+        },
+      });
+      return null;
+    });
+    node.commands.set('extract_lyrics', (data) => {
+      const body = (data ?? {}) as { session_uid?: string; clip_uid?: string; provider?: string; add_to_session?: boolean };
+      if (!body.session_uid) throw fail('extract_lyrics', 'uasrv.missing_field', 'session_uid is required');
+      const { clips, track } = target(body, 'extract_lyrics');
+      const known = (this.value('/lyric_transcription', 'providers') as string[] | undefined) ?? [];
+      // An unknown provider is not refused up front: the job fails with this error (Edit_ExtractLyrics).
+      if (body.provider !== undefined && !known.includes(body.provider)) this.jobPlans.unshift({ outcome: 'failed', error: 'job.provider_unavailable' });
+      this.startJob({
+        sessionUid,
+        jobType: 'lyric_transcription',
+        ...(track ? { targetUid: track } : {}),
+        work: () => {
+          let found = false;
+          for (const clip of clips) {
+            const source = this.value(clip, 'source_uid');
+            if (typeof source !== 'string' || !source) continue;
+            const from = Number(this.value(clip, 'source_start') ?? 0);
+            const to = Number(this.value(clip, 'source_stop') ?? from);
+            for (let ns = from, n = 1; ns < to; ns += 1e9, n++) {
+              const text = `line ${n}`;
+              this.addLyric(sessionUid, { sourceUid: source, location: ns, length: 8e8, text, words: [{ word: 'line', offset: 0, length: 4e8 }, { word: String(n), offset: 4e8, length: 4e8 }] });
+              if (body.add_to_session === true) this.addLyric(sessionUid, { location: Number(this.value(clip, 'start') ?? 0) + (n - 1) * 2 * 96e9, length: 96e9, text });
+              found = true;
+            }
+          }
+          return found;
+        },
+      });
+      return null;
     });
   }
+
+  /**
+   * Add a lyric line to a session (fact 152): a ruler line at a tick, or with `sourceUid` a line
+   * transcribed from that source, at nanoseconds into it. `words` is stored as LUNA sends it, a
+   * JSON string. Answers the line's rowid.
+   */
+  addLyric(session: string, line: { location: number; text: string; length?: number; sourceUid?: string; words?: { word: string; offset: number; length: number }[]; rowid?: number }): number {
+    const base = `/sessions/${session}/lyrics`;
+    const rowid = line.rowid ?? this.children(base).length + 1;
+    this.addNode(`${base}/${rowid}`, {
+      properties: {
+        type: 'lyric',
+        rowid,
+        source_uid: line.sourceUid ?? '00000000000000000000000000000000',
+        // LUNA's units: 0 ticks (a ruler line), 1 time (a transcribed line).
+        units: line.sourceUid ? 1 : 0,
+        length: line.length ?? 0,
+        location: line.location,
+        text: line.text,
+        words: JSON.stringify({ words: line.words ?? [] }),
+      },
+      readOnly: ['rowid'],
+    });
+    return rowid;
+  }
+
+  /**
+   * @internal The rowid of the lyric line at `location` among the ruler's lines, or with
+   * `sourceUid` among that source's lines (fact 153).
+   */
+  lyricAt(session: string, location: number, sourceUid?: string): string | undefined {
+    const base = `/sessions/${session}/lyrics`;
+    const isRuler = (v: unknown): boolean => /^[0-]*$/.test(String(v ?? ''));
+    return this.children(base).find((row) => {
+      const src = this.value(`${base}/${row}`, 'source_uid');
+      const sameKind = sourceUid === undefined ? isRuler(src) : src === sourceUid;
+      return sameKind && this.value(`${base}/${row}`, 'location') === location;
+    });
+  }
+
+  /**
+   * @internal Re-derive the ticks of a session's time signatures from the first, keeping each
+   * one's bar, as deviced's `Edit_TimeSignatures` does after a set or a delete (fact 154).
+   */
+  retickTimeSignatures(sessionBase: string): void {
+    const folder = `${sessionBase}/time_signatures`;
+    const rows = this.children(folder)
+      .map((id) => ({ id, bar: Number(this.value(`${folder}/${id}`, 'bar') ?? 1), tick: Number(this.value(`${folder}/${id}`, 'tick') ?? 0), n: Number(this.value(`${folder}/${id}`, 'numerator') ?? 4), d: Number(this.value(`${folder}/${id}`, 'denominator') ?? 4) }))
+      .sort((a, b) => a.bar - b.bar);
+    let prev = rows[0];
+    for (const row of rows.slice(1)) {
+      const tick = prev!.tick + (row.bar - prev!.bar) * prev!.n * ((4 * 96_000_000_000) / prev!.d);
+      if (tick !== row.tick) this.setValue(`${folder}/${row.id}`, 'tick', tick);
+      row.tick = tick;
+      prev = row;
+    }
+  }
+
+  /**
+   * Register a session package in the workspace. `template` makes it a session template
+   * (`.lunatemplate`) that `new_session_from_template` copies, with `tracks` as the new
+   * session's tracks; `online: false` is one whose file is missing. `sessionType` is the
+   * row's `session_type` (`'default'`, `'standalone'`, ...), `directoryPath` its folder.
+   */
+  addPackage(uid: string, options: { name?: string; lastOpened?: number; favorite?: boolean; factory?: boolean; template?: boolean; tracks?: string[]; online?: boolean; directoryPath?: string; sessionType?: string } = {}): void {
+    const ext = options.template ? 'lunatemplate' : 'luna';
+    this.addNode(`/workspace/sessions/${uid}`, {
+      properties: { uid, file_name: `${options.name ?? uid}.${ext}`, directory_path: options.directoryPath ?? `/tmp/${options.name ?? uid}`, session_type: options.sessionType ?? (options.template ? 'session_template' : 'default'), factory: options.factory ?? false, favorite: options.favorite ?? false, created: options.lastOpened ?? 0, modified: 0, last_opened: options.lastOpened ?? 0, comments: '' },
+    });
+    if (options.tracks) this.templateTracks.set(uid, options.tracks);
+    if (options.online === false) this.offlinePackages.add(uid);
+  }
+
+  /** @internal Files `delete_unused_media` keeps for a reason the mock does not model (undo, versions, backups). */
+  readonly keptMedia = new Map<string, string>();
+
+  /**
+   * Make `delete_unused_media` keep a file of a package for `reason` (`'undo'`, `'version'`,
+   * `'backup'`, ...), as LUNA keeps one undo history or a saved version still uses (fact 240).
+   *
+   * @example engine.keepMedia('pkg_abc', 'src3', 'undo');
+   */
+  keepMedia(packageUid: string, uid: string, reason: string): void {
+    this.keptMedia.set(`${packageUid}:${uid}`, reason);
+  }
+
+  /** @internal The `delete_unused_media` handler. */
+  deleteUnusedMedia(data: unknown): Record<string, unknown> {
+    const body = (data ?? {}) as { session_package_uid?: unknown; pre_flight?: unknown; clear_undo?: unknown; delete_auto_backups?: unknown };
+    const where = { cmd: 'post', path: '/workspace/delete_unused_media' };
+    if (typeof body.session_package_uid !== 'string' || body.session_package_uid === '') throw new UAError('uasrv.missing_field', 'delete_unused_media: session_package_uid is required', where);
+    const pkg = body.session_package_uid;
+    const folder = `/workspace/sessions/${pkg}/audio`;
+    const all = this.has(folder) ? this.children(folder) : [];
+    const used = new Set<string>();
+    for (const session of this.children('/sessions')) {
+      if (String(this.value(`/sessions/${session}`, 'session_package_uid')) !== pkg) continue;
+      for (const playlist of this.children(`/sessions/${session}/playlists`)) {
+        for (const clip of this.children(`/sessions/${session}/playlists/${playlist}/clips`)) {
+          const path = `/sessions/${session}/playlists/${playlist}/clips/${clip}`;
+          for (const prop of ['source_uid', 'render_source_uid']) {
+            const v = this.value(path, prop);
+            if (typeof v === 'string' && v) used.add(v);
+          }
+        }
+      }
+    }
+    const unused: string[] = [];
+    const kept: { uid: string; reason: string }[] = [];
+    for (const uid of all) {
+      let reason = used.has(uid) ? 'session' : this.keptMedia.get(`${pkg}:${uid}`);
+      if (reason === 'undo' && body.clear_undo === true) reason = undefined;
+      if (reason === 'backup' && body.delete_auto_backups === true) reason = undefined;
+      if (reason) kept.push({ uid, reason });
+      else unused.push(uid);
+    }
+    if (body.pre_flight !== true) {
+      for (const uid of unused) {
+        this.removeNode(`${folder}/${uid}`);
+        this.keptMedia.delete(`${pkg}:${uid}`);
+      }
+    }
+    return {
+      total_files: all.length,
+      total_unused_files: unused.length,
+      files_only_in_backups: kept.filter((k) => k.reason === 'backup').length,
+      unused_files: unused,
+      kept_files: kept,
+    };
+  }
+
+  /**
+   * Publish whether `command` on `nodePath` is enabled, as LUNA does at
+   * `<nodePath>/<command>/enabled` (fact 234), and push changes. Posting the command is not
+   * affected: LUNA's own handlers decide what a disabled command does.
+   */
+  setCommandEnabled(nodePath: string, command: string, enabled: boolean): void {
+    const path = `${nodePath}/${command}`;
+    if (this.has(path)) this.setValue(path, 'enabled', enabled);
+    else this.addNode(path, { properties: { enabled } });
+  }
+
+  /**
+   * Raise an error notice in `/errors` (fact 235), as LUNA's error service does: `group` is
+   * stored as LUNA stores it, JSON text. Answers its uid.
+   */
+  addErrorNotice(notice: { level?: string; code: string; title?: string; payload?: string; groups?: string[]; uid?: string; timestamp?: number }): string {
+    if (!this.has('/errors')) this.addNode('/errors', { properties: { type: 'folder' } });
+    const uid = notice.uid ?? `err${this.children('/errors').length + 1}`;
+    this.addNode(`/errors/${uid}`, {
+      properties: {
+        uid,
+        error_timestamp: notice.timestamp ?? Math.floor(Date.now() / 1000),
+        error_level: notice.level ?? 'error',
+        error_code: notice.code,
+        error_title: notice.title ?? '',
+        error_payload: notice.payload ?? '',
+        error_btn_title: '',
+        error_parent_uuid: null,
+        error_group: JSON.stringify(notice.groups ?? []),
+      },
+    });
+    return uid;
+  }
+
+  /** Per template package, the tracks a session made from it starts with. */
+  readonly templateTracks = new Map<string, string[]>();
+  /**
+   * Preference contexts as LUNA keeps them on disk, one record per context (fact 232): a
+   * context is loaded into `/preferences/<context>` only when `init_preference` names it.
+   * Seed one to model values left by an earlier run.
+   */
+  readonly preferenceFiles = new Map<string, Record<string, unknown>>();
+  /** Packages whose file is missing: the query answers `file_online: false` for them. */
+  readonly offlinePackages = new Set<string>();
+  /** @internal The highest lyric rowid handed out per session: deleted rows keep theirs (fact 153). */
+  readonly lyricRowHigh = new Map<string, number>();
+  /** Tags per session package, added with `/workspace/add_tag` or set here (fact 161). */
+  readonly packageTags = new Map<string, string[]>();
+  /** MIDI and video files `import_file` copied into packages (fact 163). */
+  readonly importedFiles: { pkg: string; uid: string; type: 'midi' | 'video'; name: string; path: string }[] = [];
 
   /** A new client connection. */
   port(): MockPort {
@@ -1362,7 +2128,19 @@ export class MockEngine {
     }
     if (!existed && clean !== '/') this.push({ path: clean, operation: 'added' }, undefined);
     this.clipChanged(clean);
+    // Every clip has a gain control and a warps folder (facts 228-229).
+    if (!existed && /^\/sessions\/[^/]+\/playlists\/[^/]+\/clips\/[^/]+$/.test(clean)) {
+      addClipChildren(this, clean, (path, gain) => this.addControl(path, 'gain', { discrete: false, value: gain, real: gain, str: gain.toFixed(1), automatable: true, normalized: Taper.named(Taper.DEFAULT_NAME)!.toNormalized(gain) }));
+    }
   }
+
+  /** @internal What mock-automation.ts needs from inside the engine. */
+  private readonly editHelpers: MockHelpers = {
+    zeroControl: (path) => {
+      for (const [prop, v] of Object.entries({ value: 0, real_value: 0, normalized_value: FADER_ZERO, string_value: '0.0' })) if (this.value(path, prop) !== v) this.setValue(path, prop, v);
+    },
+    tickAfter: (sessionPath, tick, seconds) => this.tickAfter(sessionPath, tick, seconds),
+  };
 
   /** Remove a node and its subtree. Pushes `removed` to subscribers. */
   removeNode(path: string): void {
@@ -1389,7 +2167,7 @@ export class MockEngine {
     const node = this.nodes.get(clean);
     if (!node) throw new Error(`MockEngine: no node ${nodePath}`);
     node.properties.set(property, value);
-    this.push({ path: `${clean}/${property}/value`, data: value }, undefined);
+    this.push({ path: `${clean === '/' ? '' : clean}/${property}/value`, data: value }, undefined);
     this.clipChanged(clean);
     // Stopped, the location follows the play start (fact 90) — engine-side too, so a test
     // moving the play start behaves like LUNA whichever side set it.
@@ -1540,10 +2318,14 @@ export class MockEngine {
 
   private fadeCounter = 0;
 
-  /** @internal A clip uid free on the playlist: `clip<n>`, counting on from the clips there. */
+  /**
+   * @internal A clip uid free in the whole session, as LUNA's are: `clip<n>`, counting on from
+   * the clips on the playlist and skipping any uid another playlist already uses.
+   */
   nextClipId(base: string, playlist: string): string {
-    const taken = new Set(this.children(`${base}/playlists/${playlist}/clips`));
-    let n = taken.size + 1;
+    const here = this.children(`${base}/playlists/${playlist}/clips`);
+    const taken = new Set(this.children(`${base}/playlists`).flatMap((pl) => this.children(`${base}/playlists/${pl}/clips`)));
+    let n = here.length + 1;
     while (taken.has(`clip${n}`)) n++;
     return `clip${n}`;
   }
@@ -1742,7 +2524,14 @@ export class MockEngine {
         const stop = Number(body['stop'] ?? this.value(ctx, 'selection_stop'));
         const location = Number(body['location']);
         if (!Number.isFinite(location)) throw new UAError('uasrv.invalid_property', 'move_clips: location is required', { cmd: 'post', path: `${ctx}/commands/move_clips` });
-        for (const pl of this.editPlaylists(base, body)) {
+        // `playlists` remaps source to destination playlists and replaces the edit's playlists
+        // entirely (fact 174): the clips land on the destination, leaving the source.
+        const remap = Array.isArray(body['playlists'])
+          ? (body['playlists'] as { source_playlist?: string; destination_playlist?: string }[]).filter((e) => e?.source_playlist && e.destination_playlist).map((e) => [e.source_playlist!, e.destination_playlist!] as const)
+          : [];
+        const pairs = remap.length ? remap : this.editPlaylists(base, body).map((pl) => [pl, pl] as const);
+        for (const [pl, dstPl] of pairs) {
+          if (!this.has(`${base}/playlists/${pl}`) || !this.has(`${base}/playlists/${dstPl}/clips`)) continue;
           // LUNA moves the pieces that show, not clips (Edit_MoveClipsHelper, fact 119): each
           // clip with a piece wholly inside the range moves that part of itself. If the clip
           // also shows outside the range it is split there and the part moves as a new clip;
@@ -1756,9 +2545,10 @@ export class MockEngine {
             const moved = { start: dest, stop: dest + (to - from), source_start: at(from), source_stop: at(to) };
             const before = segments.some((s) => s.clip === clip && s.stop <= start);
             const after = segments.some((s) => s.clip === clip && s.start >= stop);
-            if (body['copy'] === true) { newClipFrom(pl, clip.path, moved); continue; }
-            if (!before && !after) { for (const [k, v] of Object.entries(moved)) this.setValue(clip.path, k, v); continue; }
-            newClipFrom(pl, clip.path, moved);
+            if (body['copy'] === true) { newClipFrom(dstPl, clip.path, moved); continue; }
+            if (!before && !after && dstPl === pl) { for (const [k, v] of Object.entries(moved)) this.setValue(clip.path, k, v); continue; }
+            newClipFrom(dstPl, clip.path, moved);
+            if (!before && !after) { this.removeNode(clip.path); continue; }
             if (before && after) newClipFrom(pl, clip.path, { start: to, stop: clip.stop, source_start: at(to), source_stop: clip.sourceStop });
             if (before) { this.setValue(clip.path, 'stop', from); this.setValue(clip.path, 'source_stop', at(from)); }
             else { this.setValue(clip.path, 'start', to); this.setValue(clip.path, 'source_start', at(to)); }
@@ -2002,6 +2792,144 @@ export class MockEngine {
   }
 
   /**
+   * @internal `midi_operation` as deviced's `Edit_MIDIOperation` applies it (fact 158), on the
+   * main context's selected notes (focus `notes`). The payload is checked as
+   * `UAMIDIOperation::FromVar` does, refusing with `uasrv.invalid_property`. Modelled: velocity,
+   * velocity_percent, transpose, duration (`bar|beat|tick`, in the first time signature),
+   * duration_percent (with the exact `num/den`), staccato, legato (to the next selected start
+   * in the clip, else the next beat), reverse_time (inside the selection range) and the three
+   * chromatic inverts; a scale is checked but inverts stay chromatic. Other focuses, and a
+   * selection with no notes, change nothing and answer success, as LUNA's "nothing to operate
+   * on" does. The selected notes are rewritten to follow, as LUNA re-selects them.
+   */
+  midiOperation(sessionBase: string, data: unknown): null {
+    const where = { cmd: 'post', path: `${sessionBase}/contexts/main/commands/midi_operation` };
+    const refuse = () => new UAError('uasrv.invalid_property', 'midi_operation: uasrv.invalid_property', where);
+    const op = ((data ?? {}) as { midi_operation?: unknown }).midi_operation as { operation?: unknown; value?: unknown; value_str?: unknown; scale_root?: unknown; scale_mask?: unknown } | undefined;
+    if (!op || typeof op !== 'object' || typeof op.operation !== 'string') throw refuse();
+    const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+    const name = op.operation;
+    const value = op.value;
+    const needsValue = ['velocity', 'velocity_percent', 'transpose', 'duration_percent'];
+    const known = [...needsValue, 'duration', 'legato', 'staccato', 'reverse_time', 'invert_notes', 'invert_notes_first', 'invert_notes_root'];
+    if (!known.includes(name)) throw refuse();
+    if (needsValue.includes(name) && !isInt(value)) throw refuse();
+    const v = value as number;
+    if (name === 'velocity' && (v < 1 || v > 127)) throw refuse();
+    if (name === 'velocity_percent' && (v < 1 || v > 200)) throw refuse();
+    if (name === 'duration_percent' && v < 1) throw refuse();
+    if (name === 'transpose' && (v < -24 || v > 24)) throw refuse();
+    if (name === 'duration' && (typeof op.value_str !== 'string' || op.value_str === '')) throw refuse();
+    if (name.startsWith('invert')) {
+      const hasRoot = op.scale_root !== undefined;
+      if (hasRoot !== (op.scale_mask !== undefined)) throw refuse();
+      if (hasRoot && (!isInt(op.scale_root) || !isInt(op.scale_mask) || op.scale_root < 0 || op.scale_root > 11 || op.scale_mask < 1 || op.scale_mask > 4095 || (op.scale_mask & (1 << op.scale_root)) === 0)) throw refuse();
+    }
+    const ctx = `${sessionBase}/contexts/main`;
+    if (this.value(ctx, 'focus') !== 'notes') return null;
+    const TICKS_PER_DISPLAY = 100_000_000;
+    const BEAT = 960 * TICKS_PER_DISPLAY;
+    // Notes per clip: the note-on row and its note-off, in table ticks.
+    type Pair = { clip: string; on: Required<MockMidiRow>; off: Required<MockMidiRow> | undefined };
+    const pairs: Pair[] = [];
+    for (const [clip, rows] of this.selectedRows(sessionBase)) {
+      for (const on of rows.filter((r) => r.noteOn)) {
+        const off = rows.find((r) => !r.noteOn && r.data1 === on.data1 && r.tick >= on.tick);
+        pairs.push({ clip, on, off });
+      }
+    }
+    if (!pairs.length) return null;
+    const length = (p: Pair): number => (p.off ? p.off.tick - p.on.tick : 0);
+    let newStart = (p: Pair): number => p.on.tick;
+    let newLength = (p: Pair): number => length(p);
+    let newPitch = (p: Pair): number => p.on.data1;
+    let newVelocity = (p: Pair): number => p.on.data2;
+    const pitches = pairs.map((p) => p.on.data1);
+    const lo = Math.min(...pitches);
+    const hi = Math.max(...pitches);
+    switch (name) {
+      case 'velocity':
+        newVelocity = () => v;
+        break;
+      case 'velocity_percent':
+        newVelocity = (p) => Math.min(127, Math.max(1, Math.trunc((p.on.data2 * v) / 100)));
+        break;
+      case 'transpose':
+        newPitch = (p) => Math.min(127, Math.max(0, p.on.data1 + v));
+        break;
+      case 'staccato':
+        newLength = () => 100 * TICKS_PER_DISPLAY;
+        break;
+      case 'duration_percent': {
+        const exact = typeof op.value_str === 'string' ? /^(\d+)\/(\d+)$/.exec(op.value_str) : null;
+        const num = exact ? Number(exact[1]) : 0;
+        const den = exact ? Number(exact[2]) : 0;
+        newLength = (p) => (num > 0 && den > 0 ? Math.floor((length(p) * num + Math.floor(den / 2)) / den) : Math.trunc((length(p) * v) / 100));
+        break;
+      }
+      case 'duration': {
+        const parts = String(op.value_str).match(/-?\d+/g)?.map(Number) ?? [];
+        if (parts.length === 0) throw refuse();
+        // FromDisplayString with reverse defaults: 3 parts bar|beat|tick, 2 beat|tick, 1 tick.
+        const [bars, beats, tick] = parts.length >= 3 ? [parts[0]!, parts[1]!, parts[2]!] : parts.length === 2 ? [0, parts[0]!, parts[1]!] : [0, 0, parts[0]!];
+        const ticks = tick < 3840 ? tick * TICKS_PER_DISPLAY : tick;
+        const first = this.children(`${sessionBase}/time_signatures`).map((id) => this.properties(`${sessionBase}/time_signatures/${id}`)).sort((a, b) => Number(a['tick'] ?? 0) - Number(b['tick'] ?? 0))[0] ?? {};
+        const beatTicks = (4 * BEAT) / Number(first['denominator'] ?? 4);
+        const total = bars * Number(first['numerator'] ?? 4) * beatTicks + beats * beatTicks + ticks;
+        newLength = () => total;
+        break;
+      }
+      case 'legato': {
+        const nextBeat = (t: number): number => (t % BEAT === 0 ? t : Math.ceil(t / BEAT) * BEAT);
+        newLength = (p) => {
+          const stop = p.on.tick + length(p);
+          const later = pairs.filter((q) => q.clip === p.clip && q.on.tick > p.on.tick).map((q) => q.on.tick);
+          const target = later.length ? later.reduce((best, t) => (Math.abs(t - stop) < Math.abs(best - stop) ? t : best)) : nextBeat(stop);
+          return target - p.on.tick;
+        };
+        break;
+      }
+      case 'reverse_time': {
+        // Selection bounds are session ticks; table tick = session tick + midi_source_start - clip start (fact 41).
+        const start = Number(this.value(ctx, 'selection_start') ?? 0);
+        const stop = Number(this.value(ctx, 'selection_stop') ?? 0);
+        newStart = (p) => {
+          const offset = Number(this.value(p.clip, 'midi_source_start') ?? 0) - Number(this.value(p.clip, 'start') ?? 0);
+          return start + offset + (stop + offset - (p.on.tick + length(p)));
+        };
+        break;
+      }
+      case 'invert_notes':
+      case 'invert_notes_root':
+        newPitch = (p) => Math.min(127, Math.max(0, lo + hi - p.on.data1));
+        break;
+      case 'invert_notes_first': {
+        const first = [...pairs].sort((a, b) => a.on.tick - b.on.tick)[0]!.on.data1;
+        newPitch = (p) => Math.min(127, Math.max(0, 2 * first - p.on.data1));
+        break;
+      }
+    }
+    const byClip = new Map<string, Required<MockMidiRow>[]>();
+    const selection = new Map<string, number[][]>();
+    for (const p of pairs) {
+      const start = newStart(p);
+      const pitch = newPitch(p);
+      const rows = byClip.get(p.clip) ?? [];
+      rows.push({ ...p.on, tick: start, data1: pitch, data2: newVelocity(p) });
+      if (p.off) rows.push({ ...p.off, tick: start + newLength(p), data1: pitch });
+      byClip.set(p.clip, rows);
+      const playlist = p.clip.split('/')[4]!;
+      const offset = Number(this.value(p.clip, 'midi_source_start') ?? 0) - Number(this.value(p.clip, 'start') ?? 0);
+      const notes = selection.get(playlist) ?? [];
+      notes.push([pitch, start - offset, start - offset + newLength(p), p.on.rowid]);
+      selection.set(playlist, notes);
+    }
+    for (const [clip, rows] of byClip) this.midiEdit(clip, 'changed', rows);
+    this.setValue(ctx, 'selection_notes', [...selection].map(([playlist_uid, notes]) => ({ playlist_uid, notes })));
+    return null;
+  }
+
+  /**
    * @internal The rows `selection_notes` names, per clip. The selection holds
    * `[pitch, start, stop, rowid]` in absolute ticks, so rows are matched by rowid and the
    * note-off that terminates each one is included.
@@ -2071,15 +2999,17 @@ export class MockEngine {
 
   /**
    * Replace the handler of the command at `path` (for example
-   * `/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71).
+   * `/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71),
+   * or add a command the mock does not model to a node it has.
    *
    * @example
    * engine.overrideCommand('/sessions/abc/delete_clip', () => null);
+   * engine.overrideCommand('/workspace/some_new_command', (data) => ({ ok: true }));
    */
   overrideCommand(path: string, handler: CommandHandler): void {
     const { node: nodePath, name } = splitPath(normalize(path));
     const node = this.nodes.get(nodePath);
-    if (!node || !node.commands.has(name)) throw new UAError('uasrv.invalid_object', `overrideCommand: no command at ${path}`, { path });
+    if (!node) throw new UAError('uasrv.invalid_object', `overrideCommand: no node at ${nodePath}`, { path });
     node.commands.set(name, handler);
   }
 
@@ -2140,15 +3070,47 @@ export class MockEngine {
         return { deleted_channels: ids };
       },
       duplicate_tracks: (data, engine) => {
-        const body = (data ?? {}) as { track_uid?: string[] };
+        // `destination_track_uid` names the copies, index for index; `before_uid` places them
+        // right AFTER that track or bus, whatever its name says (fact 166, measured). The master
+        // bus is skipped. Content is not copied.
+        const body = (data ?? {}) as { track_uid?: unknown; destination_track_uid?: string[]; before_uid?: string; include_content?: boolean };
+        if (body.track_uid === undefined) throw new UAError('uasrv.missing_field', 'duplicate_tracks: track_uid is required', { cmd: 'post', path: `${base}/duplicate_tracks` });
+        if (!Array.isArray(body.track_uid)) throw new UAError('uasrv.invalid_type', 'duplicate_tracks: track_uid must be an array', { cmd: 'post', path: `${base}/duplicate_tracks` });
         const out: string[] = [];
-        for (const id of body.track_uid ?? []) {
-          const copy = `${id}_copy`;
-          engine.addTrack(uid, copy, { name: `${String(engine.value(`${base}/tracks/${id}`, 'name'))} copy` });
+        (body.track_uid as string[]).forEach((id, i) => {
+          if (engine.value(`${base}/buses/${id}`, 'bus_type') === 'master') return;
+          const copy = body.destination_track_uid?.[i] || `${id}_copy`;
+          const src = `${base}/tracks/${id}`;
+          engine.addTrack(uid, copy, { name: `${String(engine.value(src, 'name'))} copy`, trackType: String(engine.value(src, 'track_type') ?? 'audio'), stemFormat: String(engine.value(src, 'stem_format') ?? 'mono') });
           out.push(copy);
+        });
+        if (body.before_uid && out.length && engine.channelIds(uid).includes(body.before_uid)) {
+          const ids = engine.channelIds(uid).filter((c) => !out.includes(c));
+          const at = ids.indexOf(body.before_uid) + 1;
+          engine.renumber(uid, [...ids.slice(0, at), ...out, ...ids.slice(at)]);
         }
         return { duplicated_channels: out.map((id) => ({ channel_id: id })) };
       },
+      // Fact 168, as Edit_DeleteBus: the master is refused with device.database_error, a cue
+      // bus or an unknown one with uasrv.invalid_type. A folder's contents stay, outside it.
+      delete_bus: (data, engine) => {
+        const body = (data ?? {}) as { bus_uid?: string };
+        const where = { cmd: 'post', path: `${base}/delete_bus` };
+        if (!body.bus_uid) throw new UAError('uasrv.missing_field', 'delete_bus: bus_uid is required', where);
+        const bus = `${base}/buses/${body.bus_uid}`;
+        const type = String(engine.value(bus, 'bus_type') ?? '');
+        if (!engine.has(bus) || type.startsWith('cue_')) throw new UAError('uasrv.invalid_type', 'delete_bus: no such bus, or a cue bus', where);
+        if (type === 'master') throw new UAError('device.database_error', 'delete_bus: the master bus cannot be deleted', where);
+        if (engine.isFolder(uid, body.bus_uid)) engine.setFolderMode(uid, body.bus_uid, 'none');
+        engine.removeNode(bus);
+        engine.danglingAssignments(uid, body.bus_uid);
+        engine.renumber(uid);
+        return null;
+      },
+      // Fact 170: as Edit_DeletePlaylists, without edit groups.
+      delete_playlists: (data, engine) => engine.deletePlaylists(uid, data),
+      // Fact 172: as Edit_NewTracksFromInputs.
+      new_tracks_from_inputs: (data, engine) => engine.newTracksFromInputs(uid, data),
       begin_transaction: (_d, engine) => {
         engine.transactions.push('begin');
         return null;
@@ -2311,10 +3273,56 @@ export class MockEngine {
         for (const id of engine.children(`${base}/tempo_map`)) if (engine.value(`${base}/tempo_map/${id}`, 'tick') === body.tick && body.tick !== 0) engine.removeNode(`${base}/tempo_map/${id}`);
         return null;
       },
+      /**
+       * As `Edit_TimeSignatures::SetTimeSignatureAtBar`: the signature at `bar` is rewritten or
+       * a new one added there, and every signature after it keeps its bar and moves to the tick
+       * the signatures before it give that bar (fact 154).
+       */
       set_time_signature: (data, engine) => {
         const body = (data ?? {}) as { numerator?: number; denominator?: number; bar?: number };
-        const id = engine.children(`${base}/time_signatures`).length + 1;
-        engine.addNode(`${base}/time_signatures/${id}`, { properties: { tick: 0, bar: body.bar ?? 1, partial: false, numerator: body.numerator ?? 4, denominator: body.denominator ?? 4 } });
+        const bar = body.bar ?? 1;
+        const n = body.numerator ?? 4;
+        const d = body.denominator ?? 4;
+        const existing = engine.children(`${base}/time_signatures`).find((id) => engine.value(`${base}/time_signatures/${id}`, 'bar') === bar);
+        if (existing !== undefined) {
+          engine.setValue(`${base}/time_signatures/${existing}`, 'numerator', n);
+          engine.setValue(`${base}/time_signatures/${existing}`, 'denominator', d);
+        } else {
+          const id = Math.max(0, ...engine.children(`${base}/time_signatures`).map(Number).filter(Number.isFinite)) + 1;
+          engine.addNode(`${base}/time_signatures/${id}`, { properties: { tick: 0, bar, partial: false, numerator: n, denominator: d } });
+        }
+        engine.retickTimeSignatures(base);
+        return null;
+      },
+      /**
+       * As `Edit_DeleteTimeSignature`: by `bar`, removes the signature starting there and re-ticks
+       * the later ones (keeping their bars); a bar with none answers success and changes nothing.
+       * By `tick`, removes the one at that tick; tick 0 or no signature there is refused (fact 154).
+       */
+      delete_time_signature: (data, engine) => {
+        const body = (data ?? {}) as { bar?: number; tick?: number };
+        const refuse = () => new UAError('uasrv.invalid_property', 'delete_time_signature: uasrv.invalid_property', { cmd: 'post', path: `${base}/delete_time_signature` });
+        const rows = engine.children(`${base}/time_signatures`);
+        if (body.bar !== undefined) {
+          const row = rows.find((id) => engine.value(`${base}/time_signatures/${id}`, 'bar') === body.bar);
+          if (row !== undefined) engine.removeNode(`${base}/time_signatures/${row}`);
+          engine.retickTimeSignatures(base);
+          return null;
+        }
+        if (body.tick === undefined || body.tick === 0) throw refuse();
+        const row = rows.find((id) => engine.value(`${base}/time_signatures/${id}`, 'tick') === body.tick);
+        if (row === undefined) throw refuse();
+        engine.removeNode(`${base}/time_signatures/${row}`);
+        return null;
+      },
+      /** As `Edit_DeleteKeySignature`: tick 0, a missing tick or no key there is refused (fact 154). */
+      delete_key_signature: (data, engine) => {
+        const body = (data ?? {}) as { tick?: number };
+        const row = engine.children(`${base}/key_signatures`).find((id) => engine.value(`${base}/key_signatures/${id}`, 'tick') === body.tick);
+        if (typeof body.tick !== 'number' || body.tick === 0 || row === undefined) {
+          throw new UAError('uasrv.invalid_property', 'delete_key_signature: uasrv.invalid_property', { cmd: 'post', path: `${base}/delete_key_signature` });
+        }
+        engine.removeNode(`${base}/key_signatures/${row}`);
         return null;
       },
       /** One key signature per tick: setting one where a row already sits rewrites that row (fact 113). */
@@ -2336,9 +3344,17 @@ export class MockEngine {
       set_automode_on_tracks: (data, engine) => {
         const body = (data ?? {}) as { tracks?: string[]; automation_mode?: number };
         const names = ['off', 'read', 'write', 'touch', 'latch'];
-        for (const t of body.tracks ?? []) if (engine.has(`${base}/tracks/${t}`)) engine.setValue(`${base}/tracks/${t}`, 'automation_mode', names[body.automation_mode ?? 1] ?? 'read');
+        // Tracks and buses alike (fact 167).
+        for (const t of body.tracks ?? []) {
+          const path = engine.has(`${base}/tracks/${t}`) ? `${base}/tracks/${t}` : `${base}/buses/${t}`;
+          if (engine.has(path)) engine.setValue(path, 'automation_mode', names[body.automation_mode ?? 1] ?? 'read');
+        }
         return null;
       },
+      // Range automation edits and warp markers (facts 227, 230-231), in mock-automation.ts.
+      write_control_values: (data) => controlValuesCommand('write_control_values', base, this, this.editHelpers)(data),
+      trim_control_values: (data) => controlValuesCommand('trim_control_values', base, this, this.editHelpers)(data),
+      ...warpCommands(base, this, this.editHelpers),
       insert_bp: (data, engine) => {
         const body = (data ?? {}) as { control_uid?: string; values?: { location: number; value: unknown }[]; start?: number; stop?: number };
         const ctl = engine.controlPathByUid(body.control_uid ?? '');
@@ -2514,6 +3530,62 @@ export class MockEngine {
         for (const row of rows) engine.removeNode(`${base}/chords/${row}`);
         return null;
       },
+      /**
+       * As `Edit_SetLyric` (fact 153). With `rowid`: a `location` first deletes the line of the
+       * same kind (ruler, or `source_uid`'s) at that location, this one included, then moves the
+       * row; a non-empty `text` rewrites it, an empty one is skipped. Without `rowid`, a
+       * `location` adds a line, replacing the one of the same kind already there.
+       */
+      set_lyric: (data, engine) => {
+        const body = (data ?? {}) as { session_uid?: unknown; rowid?: number; location?: number; length?: number; text?: string; source_uid?: string };
+        const where = { cmd: 'post', path: `${base}/set_lyric` };
+        if (typeof body.session_uid !== 'string') throw new UAError('uasrv.invalid_property', 'set_lyric: uasrv.invalid_property', where);
+        if (body.rowid !== undefined) {
+          const path = `${base}/lyrics/${body.rowid}`;
+          if (!engine.has(path)) throw new UAError('device.database_error', 'set_lyric: no such rowid', where);
+          if (body.location !== undefined) {
+            const occupant = engine.lyricAt(uid, body.location, body.source_uid);
+            if (occupant !== undefined) engine.removeNode(`${base}/lyrics/${occupant}`);
+            if (engine.has(path)) engine.setValue(path, 'location', body.location);
+          }
+          if (body.text && engine.has(path)) engine.setValue(path, 'text', body.text);
+          return null;
+        }
+        if (body.location === undefined) throw new UAError('uasrv.missing_field', 'set_lyric: location is required to add a lyric', where);
+        const occupant = engine.lyricAt(uid, body.location, body.source_uid);
+        if (occupant !== undefined) engine.removeNode(`${base}/lyrics/${occupant}`);
+        // The lyrics table soft-deletes (`UndoableRowIDTable`), so a rowid is never reused (fact 153).
+        const rowid = Math.max(engine.lyricRowHigh.get(uid) ?? 0, ...engine.children(`${base}/lyrics`).map(Number).filter(Number.isFinite)) + 1;
+        engine.lyricRowHigh.set(uid, rowid);
+        engine.addLyric(uid, { rowid, location: body.location, text: body.text ?? '', ...(body.length !== undefined ? { length: body.length } : {}), ...(body.source_uid !== undefined ? { sourceUid: body.source_uid } : {}) });
+        return null;
+      },
+      /**
+       * As `Edit_DeleteLyric` (fact 153): by `rowid`, by `location` (a ruler line, or
+       * `source_uid`'s), or every line of `source_uids`. A row or location that is not there
+       * answers success, as deviced ignores the delete's own result.
+       */
+      delete_lyric: (data, engine) => {
+        const body = (data ?? {}) as { rowid?: number; location?: number; source_uid?: string; source_uids?: unknown };
+        const where = { cmd: 'post', path: `${base}/delete_lyric` };
+        const rows = engine.children(`${base}/lyrics`);
+        if (body.rowid === undefined && body.location === undefined && body.source_uids !== undefined) {
+          if (!Array.isArray(body.source_uids)) throw new UAError('uasrv.invalid_property', 'delete_lyric: source_uids must be an array', where);
+          const sources = body.source_uids as unknown[];
+          for (const row of rows) if (sources.includes(engine.value(`${base}/lyrics/${row}`, 'source_uid'))) engine.removeNode(`${base}/lyrics/${row}`);
+          return null;
+        }
+        if (body.rowid !== undefined) {
+          if (engine.has(`${base}/lyrics/${body.rowid}`)) engine.removeNode(`${base}/lyrics/${body.rowid}`);
+          return null;
+        }
+        if (body.location !== undefined) {
+          const row = engine.lyricAt(uid, body.location, body.source_uid);
+          if (row !== undefined) engine.removeNode(`${base}/lyrics/${row}`);
+          return null;
+        }
+        throw new UAError('uasrv.missing_field', 'delete_lyric: rowid, location or source_uids is required', where);
+      },
     };
     this.addNode(base, {
       properties: {
@@ -2522,11 +3594,15 @@ export class MockEngine {
         loaded: true,
         read_only: false,
         session_package_uid: pkg,
-        session_package_path: `/tmp/${uid}.luna`,
+        // The package folder, `<directory_path>/<file_name>` of its workspace row (fact 239).
+        session_package_path: this.has(`/workspace/sessions/${pkg}`)
+          ? `${String(this.value(`/workspace/sessions/${pkg}`, 'directory_path'))}/${String(this.value(`/workspace/sessions/${pkg}`, 'file_name'))}`
+          : `/tmp/${options.name ?? uid}/${options.name ?? uid}.luna`,
         can_undo: false,
         can_redo: false,
         change_count: 0,
-        solo_mode: 'latch',
+        // LUNA's tokens for UA::ESoloMode (fact 157).
+        solo_mode: 'latching',
         tempo_established: false,
         command_status: null,
         command_percent_complete: 0,
@@ -2543,22 +3619,47 @@ export class MockEngine {
         punched_in: false,
         max_tick: 0,
         tempo_percent: 100,
+        enable_tempo_percent: false,
         rec_play_mode: 'normal',
         count_in_enabled: false,
         pre_roll_enabled: false,
         post_roll_enabled: false,
+        // Session settings (facts 155-156): rolls are "bars,beats,ticks" text, empty until set;
+        // the click flags default on, as the session table declares them.
+        pre_roll: '',
+        post_roll: '',
+        click_during_play: true,
+        click_during_record: true,
+        click_during_count_in: true,
+        merge_midi: false,
       },
       readOnly: ['uid', 'loaded', 'session_package_uid', 'can_undo', 'can_redo', 'change_count', 'location'],
-      commands: sessionCommands,
+      commands: { ...sessionCommands, ...groupCommands(uid) },
     });
     this.addNode(`${base}/tracks`);
     this.addNode(`${base}/playlists`);
     this.addNode(`${base}/buses`);
     this.addNode(`${base}/contexts/main`, {
-      properties: { context_type: 'main', focus: 'tracks', selection_start: null, selection_stop: null, selection_tracks: null, selection_playlists: null, selection_notes: null, last_selected_track: null, pixels_per_tick: 1e-10, grid_enable: true, grid: '1_4', settings: '{}' },
+      properties: { context_type: 'main', focus: 'tracks', selection_start: null, selection_stop: null, selection_tracks: null, selection_playlists: null, selection_notes: null, last_selected_track: null, pixels_per_tick: 1e-10, timeline_view_start_tick: null, grid_enable: true, grid: '1_4', settings: '{}' },
     });
     this.addNode(`${base}/contexts/main/commands`, {
       commands: {
+        set_midi_output_assignments: midiOutputCommand(uid),
+        // Fact 171, as Edit_SetInsertsPower: `plugin_power` of each named slot, `value` true
+        // when left out; a frozen slot is skipped; an unknown slot is device.database_error.
+        set_inserts_power: (data, engine) => {
+          const body = (data ?? {}) as { channel_uid?: string; inserts?: string[]; value?: boolean };
+          const channel = engine.has(`${base}/tracks/${body.channel_uid}`) ? `${base}/tracks/${body.channel_uid}` : `${base}/buses/${body.channel_uid}`;
+          const where = { cmd: 'post', path: `${base}/contexts/main/commands/set_inserts_power` };
+          if (!Array.isArray(body.inserts)) throw new UAError('uasrv.invalid_property', 'set_inserts_power: inserts is required', where);
+          for (const slot of body.inserts) {
+            const path = `${channel}/effects/${slot}`;
+            if (!engine.has(path)) throw new UAError('device.database_error', `set_inserts_power: no slot ${slot}`, where);
+            if (engine.value(path, 'frozen') === true) continue;
+            engine.setValue(path, 'plugin_power', body.value !== false);
+          }
+          return null;
+        },
         set_inserts_in_out: (data, engine) => {
           const body = (data ?? {}) as { channel_uid?: string; inserts?: string[]; value?: boolean };
           const channel = engine.has(`${base}/tracks/${body.channel_uid}`) ? `${base}/tracks/${body.channel_uid}` : `${base}/buses/${body.channel_uid}`;
@@ -2690,6 +3791,8 @@ export class MockEngine {
           engine.setValue(`${base}/contexts/main`, 'selection_notes', [{ playlist_uid: playlist, notes: selected }]);
           return null;
         },
+        /** LUNA's MIDI operations on the selection (fact 158); see {@link MockEngine.midiOperation}. */
+        midi_operation: (data, engine) => engine.midiOperation(base, data),
         /** Addresses rows by rowid, unlike the other two (fact 74). */
         change_velocity: (data, engine) => {
           const body = (data ?? {}) as { notes?: { rowid?: number; velocity?: number }[] };
@@ -2750,9 +3853,13 @@ export class MockEngine {
     this.addNode(`${base}/time_signatures/1`, { properties: { tick: 0, bar: 1, partial: false, numerator: 4, denominator: 4 } });
     this.addNode(`${base}/key_signatures`);
     this.addNode(`${base}/markers`);
+    this.addNode(`${base}/lyrics`, { properties: { type: 'lyrics' } });
+    this.addNode(`${base}/groups`);
     this.addNode(`${base}/chords`);
     this.addNode(`${base}/storage`, { commands: storageCommands(`${base}/storage`) });
-    this.addPackage(pkg, { name: options.name ?? uid, lastOpened: Date.now() });
+    // An opened or newly made package keeps the row it has.
+    if (!this.has(`/workspace/sessions/${pkg}`)) this.addPackage(pkg, { name: options.name ?? uid, lastOpened: Date.now() });
+    this.installExtractionCommands(uid, pkg);
     // Folder tracks (fact 136): a folder is an aux bus whose folder_mode is not none.
     const moveToFolderCommand: CommandHandler = (data, engine) => {
       const body = (data ?? {}) as { folder_uid?: string; before_uid?: string; after_uids?: string[] };
@@ -2796,6 +3903,24 @@ export class MockEngine {
           engine.setFolderMode(uid, body.bus_uid, body.folder_mode as string);
           return null;
         },
+        // Fact 168, as Edit_DeleteFolderContents: the folder, and everything inside it.
+        delete_folder_with_contents: (data, engine) => {
+          const body = (data ?? {}) as { session_uid?: string; bus_uid?: string };
+          const where = { cmd: 'post', path: `${base}/buses/delete_folder_with_contents` };
+          if (!body.session_uid || !body.bus_uid) throw new UAError('uasrv.invalid_property', 'delete_folder_with_contents: session_uid and bus_uid are required', where);
+          if (!engine.isFolder(uid, body.bus_uid)) throw new UAError('uasrv.invalid_value', 'delete_folder_with_contents: not a folder', where);
+          const doomed = [body.bus_uid];
+          for (let i = 0; i < doomed.length; i++) for (const id of engine.channelIds(uid)) if (engine.folderOf(uid, id) === doomed[i] && !doomed.includes(id)) doomed.push(id);
+          for (const id of doomed.reverse()) {
+            if (engine.has(`${base}/tracks/${id}`)) engine.removeNode(`${base}/tracks/${id}`);
+            else {
+              engine.removeNode(`${base}/buses/${id}`);
+              engine.danglingAssignments(uid, id);
+            }
+          }
+          engine.renumber(uid);
+          return null;
+        },
       },
     });
     // LUNA gives every session four cue buses before anything else (fact 83).
@@ -2803,6 +3928,9 @@ export class MockEngine {
     this.addBus(uid, `master_${uid}`, { name: 'Main Output', busType: 'master', stemFormat: 'stereo', color: 4294948970 });
     this.addNode(`/workspace/sessions/${pkg}/audio`);
     for (const name of options.tracks ?? []) this.addTrack(uid, name, { name });
+    // A new session publishes these disabled: nothing to paste, nothing to redo (fact 234).
+    this.setCommandEnabled(`${base}/contexts/main/commands`, 'paste', false);
+    this.setCommandEnabled(base, 'redo', false);
     if (options.focused ?? true) this.setValue('/sessions', 'focused_session', uid);
   }
 
@@ -2866,12 +3994,27 @@ export class MockEngine {
         record_mute: false,
         preset_uid: null,
         preset_name: null,
+        supports_auto_gain: false,
+        name_modified: false,
+        post_record_commands: [],
+        instrument_determined: null,
       },
       options.stemFormat === 'stereo',
     );
     this.routeCues(sessionUid, `${base}/tracks/${id}`);
     this.addNode(`${base}/playlists/${playlist}`, { properties: { uid: playlist, name: 'V1', track_uid: id, version: 1, stem_format: options.stemFormat ?? 'mono', frozen: false, enable_compiled_clips: false } });
     this.addNode(`${base}/playlists/${playlist}/clips`);
+    this.addNode(`${base}/tracks/${id}/midi_output_assignments`);
+  }
+
+  /** The `/gui` progress suppression handles held, uid (no dashes) to owner (fact 223). */
+  get progressSuppressions(): ReadonlyMap<string, string> {
+    return progressSuppressions(this);
+  }
+
+  /** An embedded LUNA page (`dashboard`, `luna_play`, ...) reloading: drops its and every legacy suppression (fact 224). */
+  resetWebClient(owner: string): void {
+    resetWebClient(this, owner);
   }
 
   /**
@@ -2879,12 +4022,14 @@ export class MockEngine {
    * carries a fine and a coarse overview, sized from its length the way LUNA's is: one fine
    * pair per 125 samples at 48 kHz, one coarse pair per twelve fine (fact 72).
    */
-  addSource(packageUid: string, uid: string, options: { name?: string; stemFormat?: string; lengthNs?: number; sampleRate?: number; analysis?: boolean } = {}): void {
+  addSource(packageUid: string, uid: string, options: { name?: string; unnamed?: boolean; stemFormat?: string; lengthNs?: number; sampleRate?: number; analysis?: boolean; origin?: number; format?: string } = {}): void {
     const path = `/workspace/sessions/${packageUid}/audio/${uid}`;
     const lengthNs = options.lengthNs ?? 1_000_000_000;
     const channels = options.stemFormat === 'stereo' ? 2 : 1;
+    // `unnamed`: LUNA names some files with their own uid (fact 238).
+    const name = options.unnamed ? uid : (options.name ?? `${uid}.wav`);
     this.addNode(path, {
-      properties: { uid, name: options.name ?? `${uid}.wav`, stem_format: options.stemFormat ?? 'mono', length: lengthNs, sample_rate: options.sampleRate ?? 48000 },
+      properties: { uid, name, stem_format: options.stemFormat ?? 'mono', length: lengthNs, sample_rate: options.sampleRate ?? 48000, origin: options.origin ?? 2, format: options.format ?? 'wav' },
     });
     if (options.analysis === false) return;
     for (const [kind, pairNs] of [
@@ -2898,19 +4043,222 @@ export class MockEngine {
   }
 
   /**
-   * Add a hardware device with `inputs` named inputs, the shape `luna.audioInputs()` reads
-   * (fact 76).
+   * Add a hardware device with `inputs` named inputs (uids `in_1`, `in_2`, ...) and `outputs`
+   * named outputs (`out_1`, ...), with the properties LUNA's input and output nodes publish
+   * (facts 76, 185, 189). Each input carries the four live analyses, off (fact 186). With
+   * `autoGain`, tracks routed to its inputs report `supports_auto_gain` (fact 194).
    *
    * @example
-   * engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'] });
+   * engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'], outputs: ['Monitor'], autoGain: true });
    */
-  addDevice(id: string, options: { inputs?: string[]; stemFormat?: string; online?: boolean } = {}): void {
+  addDevice(id: string, options: { inputs?: string[]; outputs?: string[]; stemFormat?: string; online?: boolean; autoGain?: boolean; ioType?: string } = {}): void {
     const path = `/devices/${id}`;
     this.addNode(path, { properties: { name: id, device_type: 'audio', online: options.online ?? true, sample_rate: 48000, clock_source: 'internal' } });
+    if (options.autoGain) this.autoGainDevices.add(id);
     this.addNode(`${path}/inputs`);
-    (options.inputs ?? []).forEach((name, i) => {
-      this.addNode(`${path}/inputs/in_${i + 1}`, { properties: { name, stem_format: options.stemFormat ?? 'mono', device_id: id, in_use: false } });
+    this.addNode(`${path}/outputs`);
+    (options.inputs ?? []).forEach((name, i) =>
+      this.addDeviceInput(id, name, { uid: `in_${i + 1}`, channel: i, ...(options.stemFormat ? { stemFormat: options.stemFormat } : {}), ...(options.ioType ? { ioType: options.ioType } : {}) }),
+    );
+    (options.outputs ?? []).forEach((name, i) => {
+      const stem = options.stemFormat ?? 'mono';
+      const channels = stem === 'stereo' ? [2 * i, 2 * i + 1] : [i];
+      this.addNode(`${path}/outputs/out_${i + 1}`, {
+        properties: { type: 'output', uid: `out_${i + 1}`, name, stem_format: stem, device_name: id, device_id: id, device_channels: channels, hardware_insert: false, in_use: false, IOType: options.ioType ? [options.ioType] : [], ChannelIndex: channels, Name: [name], DeviceHwID: [], Active: [true] },
+        readOnly: ['type', 'uid', 'device_name', 'device_id', 'device_channels', 'hardware_insert', 'in_use', 'IOType', 'ChannelIndex', 'Name', 'DeviceHwID', 'Active'],
+      });
     });
+  }
+
+  /**
+   * Plug an input into a device that exists (hotplug): LUNA pushes it as `added` (fact 185).
+   * Unplug one with `removeNode`.
+   *
+   * @example
+   * engine.addDeviceInput('Apollo', 'Hi-Z', { uid: 'hiz' });
+   */
+  addDeviceInput(deviceId: string, name: string, options: { uid?: string; stemFormat?: string; channel?: number; ioType?: string } = {}): string {
+    const folder = `/devices/${deviceId}/inputs`;
+    const uid = options.uid ?? `in_${this.children(folder).length + 1}`;
+    const stem = options.stemFormat ?? 'mono';
+    const ch = options.channel ?? this.children(folder).length;
+    const channels = stem === 'stereo' ? [2 * ch, 2 * ch + 1] : [ch];
+    const ioType = options.ioType ? [options.ioType] : [];
+    const ioDesc = { name, stem_format: stem, device_channels: channels, IOType: ioType, ChannelIndex: channels, Name: [name], DeviceHwID: [], hardware_index: ch };
+    this.addNode(`${folder}/${uid}`, {
+      properties: {
+        type: 'input',
+        uid,
+        name,
+        stem_format: stem,
+        device_name: deviceId,
+        device_id: deviceId,
+        device_channels: channels,
+        hardware_insert: false,
+        in_use: this.inputUsed(uid),
+        IOType: ioType,
+        ChannelIndex: channels,
+        Name: [name],
+        DeviceHwID: [],
+        Active: [true],
+        enabled: true,
+        io_desc: ioDesc,
+        ...ANALYSIS_IDLE,
+        signal_level_analysis_enabled: false,
+        tempo_analysis_enabled: false,
+        instrument_analysis_enabled: false,
+        stereo_detect_analysis_enabled: false,
+      },
+      // Everything but the analysis switches is read-only, `name` included (fact 185).
+      readOnly: ['type', 'uid', 'name', 'stem_format', 'device_name', 'device_id', 'device_channels', 'hardware_insert', 'in_use', 'IOType', 'ChannelIndex', 'Name', 'DeviceHwID', 'Active', 'enabled', 'io_desc', 'signal_level_peak', 'tempo', 'instrument', 'stereo_detect'],
+    });
+    return uid;
+  }
+
+  /**
+   * Publish analysis results on a device input, as LUNA does when a result is due (fact 187).
+   * A result for an analysis that is off is dropped, as LUNA has nothing running to produce it;
+   * returns whether anything was published. A signal-level peak also reaches any Auto Gain
+   * channel listening to a track on that input (fact 191).
+   *
+   * @example
+   * engine.setInputAnalysis('Apollo', 'in_1', { signalLevelPeak: 0.5, tempo: 120 });
+   */
+  setInputAnalysis(deviceId: string, inputUid: string, results: { signalLevelPeak?: number; tempo?: number; instrument?: string | null; stereoDetect?: boolean }): boolean {
+    const path = `/devices/${deviceId}/inputs/${inputUid}`;
+    if (!this.has(path)) throw new Error(`MockEngine.setInputAnalysis: no input ${path}`);
+    let any = false;
+    const put = (kind: string, prop: string, value: unknown) => {
+      if (value === undefined || this.value(path, `${kind}_analysis_enabled`) !== true) return;
+      this.setValue(path, prop, value);
+      any = true;
+    };
+    put('signal_level', 'signal_level_peak', results.signalLevelPeak);
+    put('tempo', 'tempo', results.tempo);
+    put('instrument', 'instrument', results.instrument);
+    put('stereo_detect', 'stereo_detect', results.stereoDetect);
+    if (results.signalLevelPeak !== undefined && this.value(path, 'signal_level_analysis_enabled') === true) {
+      for (const ch of this.children('/auto_gain/channels')) {
+        const chPath = `/auto_gain/channels/${ch}`;
+        if (this.inputOfChannel(String(this.value(chPath, 'session_uid')), String(this.value(chPath, 'channel_uid'))) === path) this.setValue(chPath, 'signal_level_peak', results.signalLevelPeak);
+      }
+    }
+    return any;
+  }
+
+  /**
+   * Change the root's `active_audio_engine` (fact 190), as LUNA does when the driver or the
+   * audio setting changes.
+   *
+   * @example
+   * engine.setActiveAudioEngine({ enabled: false, audio_engine_type: '', devices: [] });
+   */
+  setActiveAudioEngine(info: { enabled: boolean; audio_engine_type: string; devices: unknown[]; outputs?: unknown[] }): void {
+    this.setValue('/', 'active_audio_engine', { outputs: [], ...info });
+  }
+
+  /** Devices whose inputs support Auto Gain (`addDevice({ autoGain })`). */
+  private readonly autoGainDevices = new Set<string>();
+  /** @internal The last `duration` a `start_auto_gain` carried, in seconds (fact 192). */
+  autoGainDuration: number | undefined;
+
+  /** True when a track in any session is routed to the input `uid` (fact 185). */
+  private inputUsed(uid: string): boolean {
+    for (const session of this.children('/sessions')) {
+      for (const track of this.children(`/sessions/${session}/tracks`)) {
+        if (this.value(`/sessions/${session}/tracks/${track}`, 'input_node_uid') === uid) return true;
+      }
+    }
+    return false;
+  }
+
+  /** The device input path a track is routed to, if it names one. */
+  private inputOfChannel(sessionUid: string, trackUid: string): string | undefined {
+    const uid = this.value(`/sessions/${sessionUid}/tracks/${trackUid}`, 'input_node_uid');
+    if (typeof uid !== 'string' || !uid) return undefined;
+    for (const device of this.children('/devices')) {
+      const path = `/devices/${device}/inputs/${uid}`;
+      if (this.has(path)) return path;
+    }
+    return undefined;
+  }
+
+  /** After a routing change: every input's `in_use`, and the track's `supports_auto_gain` (facts 185, 194). */
+  private routingChanged(trackPath: string): void {
+    for (const device of this.children('/devices')) {
+      for (const input of this.children(`/devices/${device}/inputs`)) {
+        const path = `/devices/${device}/inputs/${input}`;
+        const used = this.inputUsed(input);
+        if (this.value(path, 'in_use') !== used) this.setValue(path, 'in_use', used);
+      }
+    }
+    const [, , session, , track] = trackPath.split('/');
+    const input = this.inputOfChannel(session ?? '', track ?? '');
+    const supports = input !== undefined && this.autoGainDevices.has(input.split('/')[2] ?? '');
+    if (this.value(trackPath, 'supports_auto_gain') !== supports) this.setValue(trackPath, 'supports_auto_gain', supports);
+  }
+
+  /** An analysis switch moved: LUNA republishes the result at its no-result value (facts 186-187). */
+  private analysisSwitched(inputPath: string, flag: string): void {
+    const prop = ANALYSIS_RESULT[flag.slice(0, -'_analysis_enabled'.length)];
+    if (prop) this.setValue(inputPath, prop, ANALYSIS_IDLE[prop]);
+  }
+
+  /** LUNA itself moving an input's signal-level switch (Auto Gain, fact 188): pushed to every client. */
+  private switchSignalLevel(sessionUid: string, trackUid: string, on: boolean): void {
+    const input = this.inputOfChannel(sessionUid, trackUid);
+    if (!input || this.value(input, 'signal_level_analysis_enabled') === on) return;
+    this.setValue(input, 'signal_level_analysis_enabled', on);
+    this.analysisSwitched(input, 'signal_level_analysis_enabled');
+  }
+
+  /** `/auto_gain`, its `channels` and its commands (facts 191-193). */
+  private addAutoGainService(): void {
+    const removeChannel = (engine: MockEngine, name: string) => {
+      const path = `/auto_gain/channels/${name}`;
+      engine.switchSignalLevel(String(engine.value(path, 'session_uid')), String(engine.value(path, 'channel_uid')), false);
+      engine.removeNode(path);
+    };
+    this.addNode('/auto_gain', {
+      properties: { status: 'stopped', status_str: '', info: '', count_down: 0 },
+      readOnly: ['status', 'status_str', 'info', 'count_down'],
+      commands: {
+        // LUNA answers null whatever it did; a body it cannot read does nothing (fact 192).
+        start_auto_gain: (data, engine) => {
+          const body = (typeof data === 'object' && data !== null ? data : {}) as { session_uid?: unknown; channel_uid?: unknown; auto_start?: unknown; duration?: unknown; all?: unknown };
+          if (typeof body.duration === 'number' && body.duration > 0) engine.autoGainDuration = Math.trunc(body.duration);
+          if (body.all === true) {
+            if (engine.children('/auto_gain/channels').length) engine.setValue('/auto_gain', 'status', 'waiting_for_signal');
+            return null;
+          }
+          if (typeof body.session_uid !== 'string' || typeof body.channel_uid !== 'string') return null;
+          const path = `/auto_gain/channels/${body.session_uid}.${body.channel_uid}`;
+          if (!engine.has(path)) {
+            engine.addNode(path, { properties: { session_uid: body.session_uid, channel_uid: body.channel_uid, signal_level_peak: 0 }, readOnly: ['session_uid', 'channel_uid', 'signal_level_peak'] });
+            engine.switchSignalLevel(body.session_uid, body.channel_uid, true);
+          }
+          // Only a channel on hardware that supports it gets an algorithm and starts (fact 194).
+          const supported = engine.value(`/sessions/${body.session_uid}/tracks/${body.channel_uid}`, 'supports_auto_gain') === true;
+          if (body.auto_start === true && supported) engine.setValue('/auto_gain', 'status', 'waiting_for_signal');
+          return null;
+        },
+        stop_auto_gain: (data, engine) => {
+          const body = (typeof data === 'object' && data !== null ? data : {}) as { session_uid?: unknown; channel_uid?: unknown; all?: unknown };
+          if (body.all === true) {
+            for (const name of engine.children('/auto_gain/channels')) removeChannel(engine, name);
+          } else if (typeof body.session_uid === 'string' && typeof body.channel_uid === 'string') {
+            const name = `${body.session_uid}.${body.channel_uid}`;
+            if (engine.has(`/auto_gain/channels/${name}`)) removeChannel(engine, name);
+          }
+          if (engine.children('/auto_gain/channels').length === 0) {
+            if (engine.value('/auto_gain', 'status') !== 'stopped') engine.setValue('/auto_gain', 'status', 'stopped');
+            if (engine.value('/auto_gain', 'count_down') !== 0) engine.setValue('/auto_gain', 'count_down', 0);
+          }
+          return null;
+        },
+      },
+    });
+    this.addNode('/auto_gain/channels');
   }
 
   /**
@@ -3019,10 +4367,11 @@ export class MockEngine {
     const pkg = String(this.value(base, 'session_package_uid'));
     const n = this.children(`${base}/playlists/${playlist}/clips`).length + 1;
     const clipUid = `take${n}`;
-    const sourceUid = `src_${clipUid}`;
+    // Unique across tracks: LUNA's file uids are UUIDs, never shared between takes.
+    const sourceUid = `src_${trackUid}_${clipUid}`;
     const startTick = options.startTick ?? 0;
     const stopTick = options.stopTick ?? startTick + 96e9 * 4;
-    this.addSource(pkg, sourceUid, { name: `${options.name ?? 'Take'}.wav`, lengthNs: ((stopTick - startTick) / 96e9) * 0.5e9 });
+    this.addSource(pkg, sourceUid, { name: `${options.name ?? 'Take'}.wav`, lengthNs: ((stopTick - startTick) / 96e9) * 0.5e9, origin: 1 });
     this.addNode(`${base}/playlists/${playlist}/clips/${clipUid}`, {
       properties: {
         uid: clipUid,
@@ -3119,7 +4468,7 @@ export class MockEngine {
     const order = this.channelIds(sessionUid).length + 1; // appended to the one shared order (fact 137)
     this.addChannel(
       `${base}/buses/${id}`,
-      { uid: id, name: options.name ?? id, bus_type: busType, order, stem_format: options.stemFormat ?? 'stereo', color: options.color ?? 4282400832, folder_mode: 'none', folder_uid: null, automation_mode: 'read', frozen: false, enabled: true, comments: '' },
+      { uid: id, name: options.name ?? id, bus_type: busType, order, stem_format: options.stemFormat ?? 'stereo', color: options.color ?? 4282400832, folder_mode: 'none', folder_uid: null, automation_mode: 'read', frozen: false, enabled: true, comments: '', preset_uid: null, preset_name: null },
       stereo,
       !busType.startsWith('cue_'),
     );
@@ -3412,7 +4761,7 @@ export class MockEngine {
         return this.get(path, params);
       case 'set':
         if (this.ignoresBareWhole(path, data)) return null;
-        return this.set(from, path, data instanceof FloatLiteral ? data.value : data);
+        return this.set(from, path, data instanceof FloatLiteral ? data.value : data, params);
       case 'post':
         return this.post(path, data);
       case 'subscribe':
@@ -3423,7 +4772,11 @@ export class MockEngine {
 
   private get(path: string, params: Record<string, string>): unknown {
     if (path === '/ping') return null;
-    if (path.endsWith('/file/data') && path.includes('/analysis/')) return { value: this.overviewPage(path, params) };
+    if (path.endsWith('/file/data') && path.includes('/analysis/')) {
+      const kind = splitPath(splitPath(splitPath(path).node).node).name;
+      if (kind === 'overview' || kind === 'overview_coarse') return { value: this.overviewPage(path, params) };
+      return { value: this.analysisPage(path, params) };
+    }
     const node = this.nodes.get(path);
     if (node) return this.describe(path, node, params, params['recursive'] === '1' ? Infinity : Number(params['levels'] ?? 1));
     const { node: nodePath, name } = splitPath(path);
@@ -3514,12 +4867,19 @@ export class MockEngine {
     throw new UAError('uasrv.invalid_value', `set ${path}: uasrv.invalid_value`, { cmd: 'set', path });
   }
 
-  private set(from: MockPort, path: string, data: unknown): null {
+  private set(from: MockPort, path: string, data: unknown, params: Record<string, string> = {}): null {
     if (this.nodes.has(path)) {
       throw new UAError('uasrv.invalid_property', `set ${path}: uasrv.invalid_property`, { cmd: 'set', path });
     }
     let { node: nodePath, name } = splitPath(path);
     if (name === 'value') ({ node: nodePath, name } = splitPath(nodePath));
+    // An Add On's preference context (fact 232): LUNA writes the value to its file at once.
+    const pref = /^\/preferences\/([^/]+)$/.exec(nodePath);
+    if (pref && this.nodes.has(nodePath)) {
+      const file = this.preferenceFiles.get(pref[1]!) ?? {};
+      file[name] = data;
+      this.preferenceFiles.set(pref[1]!, file);
+    }
     const node = this.nodes.get(nodePath);
     if (!node || !node.properties.has(name)) {
       throw new UAError('uasrv.invalid_object', `set ${path}: uasrv.invalid_object`, { cmd: 'set', path });
@@ -3531,6 +4891,10 @@ export class MockEngine {
       this.resizeAddOnInstance(nodePath, name, data, path);
       return null;
     }
+    // Only LUNA's two solo-mode tokens are stored (fact 157).
+    if (name === 'solo_mode' && /^\/sessions\/[^/]+$/.test(nodePath) && data !== 'latching' && data !== 'exclusive') {
+      throw new UAError('uasrv.invalid_value', `set ${path}: uasrv.invalid_value`, { cmd: 'set', path });
+    }
     // Record mute (no Apollo) refuses turning a track's monitor on (fact 88).
     const isTrack = /^\/sessions\/[^/]+\/tracks\/[^/]+$/.test(nodePath);
     if (isTrack && name === 'input_monitor' && data === true && this.value('/preferences', 'record_mute') === true) {
@@ -3540,8 +4904,16 @@ export class MockEngine {
       this.writeControl(nodePath, node, name, data, from);
       return null;
     }
+    // A track rename with request parameter `name_modified=true` marks the name as the
+    // user's, so a later preset load keeps it (fact 165). Without it the flag is untouched.
+    if (isTrack && name === 'name' && params['name_modified'] === 'true') this.setValue(nodePath, 'name_modified', true);
     node.properties.set(name, data);
     this.push({ path: `${nodePath}/${name}/value`, data }, from);
+    // `UpdateClipGain`: a clip's gain is also its gain control's value (fact 228).
+    if (name === 'gain' && typeof data === 'number' && /\/playlists\/[^/]+\/clips\/[^/]+$/.test(nodePath) && this.has(`${nodePath}/controls/gain`)) {
+      const ctl = `${nodePath}/controls/gain`;
+      for (const [prop, v] of Object.entries({ value: data, real_value: data, normalized_value: Taper.named(Taper.DEFAULT_NAME)!.toNormalized(data), string_value: data.toFixed(1) })) if (this.value(ctl, prop) !== v) this.setValue(ctl, prop, v);
+    }
     this.clipChanged(nodePath);
     if (name === 'enable_compiled_clips' && /^\/sessions\/[^/]+\/playlists\/[^/]+$/.test(nodePath)) this.compilePlaylist(nodePath);
     if (name === 'record_enabled' && /^\/sessions\/[^/]+$/.test(nodePath)) this.runRecord(nodePath, data === true || data === 1);
@@ -3549,6 +4921,8 @@ export class MockEngine {
     if (name === 'play_start' && /^\/sessions\/[^/]+$/.test(nodePath) && node.properties.get('playing') !== true) this.setValue(nodePath, 'location', this.locationAt(nodePath, Number(data)));
     // The live state follows the switch (fact 88); auto-monitoring an armed track is not modelled.
     if (isTrack && name === 'input_monitor') this.setValue(nodePath, 'input_monitor_state', data === true);
+    if (isTrack && name === 'input_node_uid') this.routingChanged(nodePath);
+    if (name.endsWith('_analysis_enabled') && /^\/devices\/[^/]+\/inputs\/[^/]+$/.test(nodePath)) this.analysisSwitched(nodePath, name);
     return null;
   }
 
@@ -3828,8 +5202,8 @@ export class MockPort implements Port {
     return this.request('get', query ? `${path}${path.includes('?') ? '&' : '?'}${query}` : path, undefined);
   }
 
-  async set(path: string, data: unknown): Promise<void> {
-    await this.request('set', path, data);
+  async set(path: string, data: unknown, params?: Record<string, string>): Promise<void> {
+    await this.request('set', appendParams(path, params), data);
   }
 
   post(path: string, data?: unknown): Promise<unknown> {

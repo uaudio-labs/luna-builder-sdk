@@ -7,20 +7,26 @@
  *   ua-builder probe <url> [--expr <js>] [--wait <js>] [--settle <ms>] [--timeout <ms>] [--mock [setup.js]] [--luna-bridge] [--screenshot <file.png>] [--chrome <path>]
  *   ua-builder install [dir] [--name "Link Name"]
  *   ua-builder pack [dir] [--out Name.lunaaddon] [--source-maps]
- *   ua-builder eject-wasm [dir] [--engine <dir>] [--out <folder>]   (hidden: not in usage() until wasm ships)
+ *   ua-builder eject-wasm [dir] [--engine <dir> | --luna-version <x.y.z> [--engine-base <url>]] [--out <folder>]   (hidden: not in usage() until wasm ships)
+ *   ua-builder publish-engine <engine dir> --luna-version <x.y.z> --to <remote folder>   (hidden, internal: stands in for the release step)
+ *   ua-builder selftest [--junit results.xml] [--only area,check.id] [--list] [--host h] [--port 4718]   (hidden: QA's check of the SDK against a LUNA build)
  *   ua-builder doctor
+ *   ua-builder feedback <improvement|bug|feature|feedback> --title "..." [--body "..." | --body-file <file|->] [--luna-version x.y.z] [--print]
  *   ua-builder tree [path] [--levels N] [--out file.json]
  */
 import { doctor } from './doctor';
 import { ejectWasm } from './eject-wasm';
+import { feedback } from './feedback';
+import { publishEngineCommand } from './engine-remote';
 import { install } from './install';
 import { newAddOn } from './new';
 import { pack } from './pack';
 import { probe } from './probe';
+import { selftest } from './selftest';
 import { serve } from './serve';
 import { test } from './test';
 import { tree } from './tree';
-import { ensureExecutable, parseArgs, usage } from './util';
+import { ensureExecutable, errorMessage, parseArgs, usage } from './util';
 import { fileURLToPath } from 'node:url';
 
 async function main(): Promise<number> {
@@ -46,12 +52,18 @@ async function main(): Promise<number> {
       return pack(args);
     case 'eject-wasm':
       return ejectWasm(args);
+    case 'publish-engine':
+      return publishEngineCommand(args);
+    case 'selftest':
+      return selftest(args);
     case 'probe':
       return probe(args);
     case 'doctor':
       return doctor(args);
     case 'tree':
       return tree(args);
+    case 'feedback':
+      return feedback(args);
     case undefined:
     case 'help':
     case '--help':
@@ -68,7 +80,7 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (err) => {
-    console.error(err instanceof Error ? err.message : String(err));
+    console.error(errorMessage(err));
     process.exit(1);
   },
 );

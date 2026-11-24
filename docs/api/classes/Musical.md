@@ -62,6 +62,37 @@ await session.musical.clearChords();
 
 ***
 
+### deleteKeySignature()
+
+```ts
+deleteKeySignature(tick): Promise<void>;
+```
+
+Delete the key signature at `tick` and resolve once it has left [keySignatures](#keysignatures).
+One undo entry. Rejects with `out_of_range` for tick 0, the session's key, which LUNA
+refuses to delete (change it with [setKeySignature](#setkeysignature)), and with `not_found` when no
+loaded key signature is at `tick` (fact 154).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tick` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.musical.ready();
+const key = session.musical.keySignatureAt(session.transport.tick);
+if (key && key.tick.value !== 0) await session.musical.deleteKeySignature(key.tick.value!);
+```
+
+***
+
 ### deleteTempo()
 
 ```ts
@@ -77,6 +108,39 @@ deleteTempo(tick): Promise<unknown>;
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### deleteTimeSignature()
+
+```ts
+deleteTimeSignature(bar): Promise<void>;
+```
+
+Delete the time signature that starts at `bar` and resolve once it has left
+[timeSignatures](#timesignatures). The signatures after it keep their bar numbers and move to the
+ticks the earlier signature now gives them, as LUNA's ruler does (fact 154). One undo
+entry. Rejects with `not_found` when no loaded signature starts at `bar` (LUNA answers
+success and changes nothing), and with `out_of_range` for the session's first signature,
+which every bar is counted from.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `bar` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.musical.ready();
+await session.musical.setTimeSignature(3, 4, 9);
+await session.musical.deleteTimeSignature(9);   // back to the signature before bar 9
+```
 
 ***
 

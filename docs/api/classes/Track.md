@@ -22,19 +22,24 @@
 | <a id="inputmonitor"></a> `inputMonitor` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | The track's input monitor switch (`input_monitor`). LUNA can monitor the input while this is off, for example auto-monitoring an armed track; read `inputMonitoring` for what is happening now. Turning it on rejects with `uasrv.invalid_value` while the record mute preference is on and no Apollo is active (fact 88). **Example** `await t.inputMonitor.set(true); t.inputMonitor.onChange(() => console.log('switch', t.inputMonitor.value));` | - |
 | <a id="inputmonitoring"></a> `inputMonitoring` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | Whether LUNA is monitoring this track's input right now (`input_monitor_state`, read-only). It can be true while `inputMonitor` is false: an armed track is monitored while stopped or punched in (fact 88). **Example** `t.inputMonitoring.onChange(() => led.classList.toggle('on', t.inputMonitoring.value === true));` | - |
 | <a id="inputnodeuid"></a> `inputNodeUid` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string` \| `null`\> | - | - |
+| <a id="instrumentdetermined"></a> `instrumentDetermined` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | The instrument LUNA detected on this track (`instrument_determined`), e.g. `"Electric Guitar"`, or `null` (fact 233). Read-only here: it is LUNA's analysis result. **Example** `label.textContent = track.instrumentDetermined.value ?? '';` | - |
 | <a id="iotype"></a> `ioType` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="main"></a> `main` | `readonly` | [`Output`](Output.md) | The `main` output, always present. | [`Channel`](Channel.md).[`main`](Channel.md#main) |
+| <a id="midioutputs"></a> `midiOutputs` | `readonly` | [`MidiOutputs`](MidiOutputs.md) | Where this track sends its MIDI (facts 219-220). `await track.midiOutputs.load()` once. **Example** `await track.midiOutputs.set([{ track: synth, channel: 0 }]);` | - |
 | <a id="name"></a> `name` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`\> | - | [`Channel`](Channel.md).[`name`](Channel.md#name) |
+| <a id="namemodified"></a> `nameModified` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | True once the name was set as the user's own (LUNA's rename, or [rename](#rename)): a track or instrument preset loaded later keeps it (fact 165). `name.set` leaves it as it is. | - |
 | <a id="order"></a> `order` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | [`Channel`](Channel.md).[`order`](Channel.md#order) |
 | <a id="outputs"></a> `outputs` | `readonly` | [`Collection`](Collection.md)\<[`Output`](Output.md)\> | - | [`Channel`](Channel.md).[`outputs`](Channel.md#outputs) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Channel`](Channel.md).[`path`](Channel.md#path) |
 | <a id="playlistuid"></a> `playlistUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | Uid of the active playlist; the playlist object lives under `session.playlists`. | - |
+| <a id="postrecordcommands"></a> `postRecordCommands` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<(`"extract_chords"` \| `"extract_lyrics"`)[]\> | What LUNA runs on each audio take this track records, once the take lands (fact 233): `extract_lyrics` transcribes it into `session.lyrics`, `extract_chords` detects its chords. LUNA keeps the list while the session is open, not in the session file: set it again after reopening. `[]` runs nothing. **Example** `await track.postRecordCommands.set(['extract_lyrics']);` | - |
 | <a id="presetname"></a> `presetName` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | That preset's name, or null. | - |
 | <a id="presetuid"></a> `presetUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | The uid of the track preset (or instrument plugin preset) the track was made from or last had applied, or null (fact 132). | - |
 | <a id="recordenabled"></a> `recordEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="recordmute"></a> `recordMute` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | Uid of the owning session, for session-level commands that name this channel. | [`Channel`](Channel.md).[`sessionUid`](Channel.md#sessionuid) |
-| <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | [`Channel`](Channel.md).[`stemFormat`](Channel.md#stemformat) |
+| <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`StemFormat`](../type-aliases/StemFormat.md)\> | - | [`Channel`](Channel.md).[`stemFormat`](Channel.md#stemformat) |
+| <a id="supportsautogain"></a> `supportsAutoGain` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | Whether Auto Gain can run on this track's input (`supports_auto_gain`, read-only): true for an input on hardware whose preamp LUNA can set. LUNA works it out after the input changes, so it can arrive a moment later (fact 194). **Example** `button.disabled = track.supportsAutoGain.value !== true;` | - |
 | <a id="tracktype"></a> `trackType` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`TrackType`](../type-aliases/TrackType.md)\> | - | - |
 | <a id="uid"></a> `uid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | [`Channel`](Channel.md).[`uid`](Channel.md#uid) |
 
@@ -248,6 +253,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Channel`](Channel.md).[`commandEnabled`](Channel.md#commandenabled)
+
+***
+
 ### delete()
 
 ```ts
@@ -265,21 +304,35 @@ Delete this track.
 ### duplicate()
 
 ```ts
-duplicate(options): Promise<unknown>;
+duplicate(options): Promise<Track>;
 ```
 
-Duplicate this track. Resolves to the reply, which names the new channel.
+Duplicate this track in one undo step and resolve to the new Track once
+`session.tracks` lists it with its properties loaded. LUNA copies clips and automation
+unless `includeContent` is false (then routing, plugins and I/O only). The copy goes
+right after the track or bus `after` names, else right after this track. (LUNA's field is
+`before_uid`, but it places the copy after that channel: fact 166.) The SDK names the new
+uid up front (`destination_track_uid`), so nothing is found by name.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `options` | \{ `includeContent?`: `boolean`; \} |
+| `options` | \{ `after?`: `string` \| [`Channel`](Channel.md); `includeContent?`: `boolean`; `timeoutMs?`: `number`; \} |
+| `options.after?` | `string` \| [`Channel`](Channel.md) |
 | `options.includeContent?` | `boolean` |
+| `options.timeoutMs?` | `number` |
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<`Track`\>
+
+#### Example
+
+```ts
+const copy = await track.duplicate({ includeContent: false, after: otherTrack });
+copy.name.value; // LUNA's name for the copy
+```
 
 ***
 
@@ -343,7 +396,7 @@ Apply a preset to this track in one undo step, as LUNA's track header PRESETS > 
 does (fact 132). A track preset replaces the track's plugins, sends and mixer settings; an
 instrument plugin's preset replaces the instrument only, and needs an instrument track. The
 track takes the preset's name unless it was renamed in LUNA; a name set with `name.set`
-does not count, and is replaced. `presetUid` follows.
+does not count, and is replaced; use [rename](#rename) for a name that stays. `presetUid` follows.
 
 #### Parameters
 
@@ -474,23 +527,67 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 
 ***
 
+### rename()
+
+```ts
+rename(name): Promise<void>;
+```
+
+Rename the track as LUNA's own rename does: the write carries request parameter
+`name_modified=true`, so LUNA marks the name as the user's and a track or instrument preset
+loaded later keeps it (fact 165). `name.set` renames without that mark, and the next
+[loadPreset](#loadpreset) replaces the name. Optimistic like `name.set`; [nameModified](#namemodified)
+follows on LUNA's push.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `name` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await track.rename('Lead Vocal');
+await track.loadPreset(preset); // still 'Lead Vocal'
+```
+
+***
+
 ### setAutomationMode()
 
 ```ts
 setAutomationMode(mode): Promise<unknown>;
 ```
 
-Set the automation mode (`off | read | write | touch | latch`).
+Set this track's or bus's automation mode (`off | read | write | touch | latch`) in one
+undo step. `set_automode_on_tracks` takes track and bus uids alike (fact 167);
+[automationMode](Channel.md#automationmode) follows on LUNA's push.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `mode` | `"latch"` \| `"read"` \| `"off"` \| `"write"` \| `"touch"` |
+| `mode` | `"read"` \| `"off"` \| `"write"` \| `"touch"` \| `"latch"` |
 
 #### Returns
 
 `Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+await track.setAutomationMode('touch');
+await session.master!.setAutomationMode('read');
+```
+
+#### Inherited from
+
+[`Channel`](Channel.md).[`setAutomationMode`](Channel.md#setautomationmode)
 
 ***
 

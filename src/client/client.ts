@@ -3,7 +3,7 @@
  * domain objects. `raw` is the only escape hatch to paths; prefer a typed member when one exists.
  */
 import type { Port, PortStatus, Unsubscribe } from '../wire/port';
-import { NoSessionOpen } from '../wire/errors';
+import { NoSessionOpen, RequestTimeout } from '../wire/errors';
 import { Cell, type Prop } from '../store/prop';
 import { Store } from '../store/store';
 import type { Session } from '../model/session';
@@ -13,6 +13,9 @@ import { Assistant, Presets } from '../model/presets';
 import { Workspace } from '../model/workspace';
 import { Devices, Drivers, Jobs, MidiDevices, Preferences, Renders, type AudioInput } from '../model/system';
 import { Gui } from '../model/gui';
+import { ActiveAudioEngine } from '../model/devices';
+import { AutoGain } from '../model/auto-gain';
+import { ErrorNotices } from '../model/error-notices';
 import { Secrets } from './secrets';
 import type { WasmEngine } from '../engine/loader';
 import { WasmPort } from '../wire/wasm-port';
@@ -44,6 +47,18 @@ export class Client {
   readonly devices: Devices;
   /** The MIDI devices LUNA sees (`/devices/<LUNA>/midi`), `All` and `None` included. */
   readonly midiDevices: MidiDevices;
+  /** The audio engine LUNA is running: on or off, its kind, the drivers it uses (fact 190). */
+  readonly activeAudioEngine: ActiveAudioEngine;
+  /** LUNA's Auto Gain service (`/auto_gain`, fact 191). Check `available()` first. */
+  readonly autoGain: AutoGain;
+  /**
+   * LUNA's error notices (fact 235), read-only. Follows LUNA once watched.
+   *
+   * @example
+   * await luna.errors.watch().ready;
+   * luna.errors.sorted.map((e) => `${e.level.value}: ${e.title.value}`);
+   */
+  readonly errors: ErrorNotices;
   readonly preferences: Preferences;
   readonly renders: Renders;
   readonly jobs: Jobs;
@@ -72,6 +87,9 @@ export class Client {
     this.drivers = new Drivers(this);
     this.devices = new Devices(this);
     this.midiDevices = new MidiDevices(this);
+    this.activeAudioEngine = new ActiveAudioEngine(this);
+    this.autoGain = new AutoGain(this);
+    this.errors = new ErrorNotices(this);
     this.preferences = new Preferences(this);
     this.renders = new Renders(this);
     this.jobs = new Jobs(this);
@@ -82,15 +100,53 @@ export class Client {
   /**
    * The focused session (or the first open one), subscribed and loaded.
    *
+   * With no session open it rejects at once with {@link NoSessionOpen}, unless `wait` is set:
+   * then it waits for the user to open or create one. Loading is bounded by `timeoutMs`
+   * (default 15 000 ms; with `wait`, no limit unless given), after which it rejects with
+   * `RequestTimeout` rather than hanging.
+   *
    * @example
    * const session = await luna.session();
    * console.log(session.name.value, session.tracks.items.length);
+   *
+   * // A page that opens before any session does:
+   * const s = await luna.session({ wait: true });
    */
-  async session(): Promise<Session> {
-    await this.sessions.ready();
-    const current = this.sessions.current();
-    if (!current) throw new NoSessionOpen();
-    await current.ready();
+  async session(options: { wait?: boolean; timeoutMs?: number } = {}): Promise<Session> {
+    const timeoutMs = options.timeoutMs ?? (options.wait ? Infinity : 15_000);
+    const deadline = Date.now() + timeoutMs;
+    const bounded = <T>(work: Promise<T>, what: string): Promise<T> => {
+      const left = deadline - Date.now();
+      if (!Number.isFinite(left)) return work;
+      return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new RequestTimeout(what, '/sessions', timeoutMs)), Math.max(0, left));
+        work.then(
+          (v) => { clearTimeout(timer); resolve(v); },
+          (e: unknown) => { clearTimeout(timer); reject(e); },
+        );
+      });
+    };
+    await bounded(this.sessions.ready(), 'session');
+    let current = this.sessions.current();
+    if (!current) {
+      if (!options.wait) throw new NoSessionOpen();
+      current = await bounded(
+        new Promise<Session>((resolve) => {
+          const check = (): void => {
+            const found = this.sessions.current();
+            if (!found) return;
+            stopItems();
+            stopFocus();
+            resolve(found);
+          };
+          const stopItems = this.sessions.items.onChange(check);
+          const stopFocus = this.sessions.focused.onChange(check);
+          check();
+        }),
+        'session',
+      );
+    }
+    await bounded(current.ready(), 'session');
     return current;
   }
 
@@ -99,7 +155,8 @@ export class Client {
    * one with `track.inputNodeUid.set(input.uid)`, or pass it to `session.record()`.
    *
    * Read on each call and not cached: devices come and go, and `inUse` changes as tracks are
-   * armed.
+   * armed. To follow those changes, watch `device.inputs` on each of `luna.devices` instead
+   * (fact 185); `input.snapshot()` gives the same record.
    *
    * @example
    * const inputs = await luna.audioInputs();

@@ -39,6 +39,18 @@ export interface PresetRow {
   pluginId?: string;
   /** That plugin's name, for example `Moog Minimoog Synth`. */
   pluginName?: string;
+  /**
+   * The preset's description, `''` when it has none. Present only when the query asked for
+   * it (`withDescriptions`, fact 175).
+   */
+  description?: string;
+}
+
+/** One plugin a track preset uses, from {@link Presets.trackPresetPlugins}. */
+export interface TrackPresetPlugin {
+  pluginId: string;
+  /** The name the preset saved, which may differ from the installed plugin's. */
+  name: string;
 }
 
 export interface PresetQueryOptions {
@@ -54,6 +66,8 @@ export interface PresetQueryOptions {
   matchAnyTag?: boolean;
   /** Include each preset's tags in the rows. */
   withTags?: boolean;
+  /** Include each preset's `description`: one more read per plugin or device type listed (fact 175). */
+  withDescriptions?: boolean;
   /** Only favorites. */
   favorite?: boolean;
   /** Maximum number of rows. */
@@ -140,7 +154,77 @@ export class Presets extends Node {
     const reply = (await this.post('query', payload)) as { results?: Record<string, unknown[]> & { num_rows?: number } } | null;
     const rows = rowsFrom(reply?.results);
     if (rows.some((r) => r.isInstrumentPreset)) await this.namePlugins(rows);
+    if (options.withDescriptions && rows.length) await this.describeRows(rows, options);
     return rows;
+  }
+
+  /**
+   * Fill each row's `description` from its preset node (fact 175): the query does not
+   * return it, so read each owner's `presets` folder once, description only.
+   */
+  private async describeRows(rows: PresetRow[], options: PresetQueryOptions): Promise<void> {
+    const owners = new Map<string, PresetRow[]>();
+    for (const row of rows) {
+      const owner = presetOwner(row, options.pluginId, options.deviceTypeId);
+      owners.set(owner, [...(owners.get(owner) ?? []), row]);
+    }
+    await Promise.all(
+      [...owners].map(async ([owner, list]) => {
+        const reply = (await this.wire.get(`${owner}/presets`, { children: true, levels: 2, properties: true, commands: false, flatvalue: true, propfilter: ['description'] })) as TreeNode | null;
+        const byUid = new Map<string, unknown>();
+        for (const child of reply?.children ?? []) if (child.path) byUid.set(child.path.slice(child.path.lastIndexOf('/') + 1), child.properties?.['description']);
+        for (const row of list) {
+          const text = byUid.get(row.uid);
+          row.description = typeof text === 'string' ? text : '';
+        }
+      }),
+    );
+  }
+
+  /**
+   * Mark a preset a favorite, or not (fact 175): a write of its `favorite`, which LUNA keeps
+   * per owner. A plugin's preset is under its plugin: pass `pluginId` (the one you queried
+   * with), or a row that carries one (an instrument preset in a track query). Anything else is
+   * taken as a track preset. A row passed in has its `favorite` updated once LUNA accepts.
+   *
+   * @example
+   * const [row] = await luna.presets.query({ pluginId: 'uaudio_qi', search: 'Vocal' });
+   * await luna.presets.setFavorite(row, true, { pluginId: 'uaudio_qi' });
+   * const [track] = await luna.presets.query({ deviceTypeId: 'track', search: 'Bass Rig' });
+   * await luna.presets.setFavorite(track, true);
+   */
+  async setFavorite(preset: string | (Pick<PresetRow, 'uid'> & Partial<Pick<PresetRow, 'pluginId' | 'favorite'>>), favorite: boolean, options: { pluginId?: string; deviceTypeId?: string } = {}): Promise<void> {
+    const row: Pick<PresetRow, 'uid' | 'pluginId'> = typeof preset === 'string' ? { uid: preset } : preset;
+    const owner = presetOwner(row, options.pluginId, options.deviceTypeId);
+    await this.wire.set(`${owner}/presets/${row.uid}/favorite`, favorite);
+    if (typeof preset !== 'string') preset.favorite = favorite;
+  }
+
+  /**
+   * The plugins a track preset uses, as LUNA's preset browser checks them before applying
+   * one (fact 176): read from the preset's package, `/workspace/sessions/<uid>`. Resolves to
+   * `undefined` when LUNA reports no list (not a track preset, or an older LUNA): that means
+   * unknown, not "no plugins".
+   *
+   * @example
+   * const needs = await luna.presets.trackPresetPlugins(row);
+   * const missing = needs?.filter((p) => !luna.plugins.byId(p.pluginId)?.installed.value) ?? [];
+   */
+  async trackPresetPlugins(preset: string | Pick<PresetRow, 'uid'>): Promise<TrackPresetPlugin[] | undefined> {
+    const uid = typeof preset === 'string' ? preset : preset.uid;
+    const reply = (await this.wire.get(`/workspace/sessions/${uid}`, { properties: true, children: false, commands: false, flatvalue: true, propfilter: ['plugins'] })) as TreeNode | null;
+    let raw = reply?.properties?.['plugins'];
+    if (typeof raw === 'string') {
+      try {
+        raw = JSON.parse(raw) as unknown;
+      } catch {
+        return undefined;
+      }
+    }
+    if (!Array.isArray(raw)) return undefined;
+    return raw
+      .filter((e): e is { plugin_id: string; name?: unknown } => typeof (e as { plugin_id?: unknown } | null)?.plugin_id === 'string' && (e as { plugin_id: string }).plugin_id !== '')
+      .map((e) => ({ pluginId: e.plugin_id, name: typeof e.name === 'string' ? e.name : '' }));
   }
 
   /** Give each instrument preset its plugin, by the preset folder that holds it (fact 132). */
@@ -760,6 +844,16 @@ interface TreeNode {
   path?: string;
   properties?: Record<string, unknown>;
   children?: TreeNode[];
+}
+
+/**
+ * The node a preset lives under (fact 175): its plugin's, `/presets/plugins/<id>`, given or
+ * carried by the row; else the device type's, `/presets/devices/<type>` (`track` by default).
+ */
+function presetOwner(row: Pick<PresetRow, 'pluginId'>, pluginId: string | undefined, deviceTypeId: string | undefined): string {
+  const plugin = pluginId ?? row.pluginId;
+  if (plugin) return `/presets/plugins/${plugin}`;
+  return `/presets/devices/${deviceTypeId ?? 'track'}`;
 }
 
 function asError(err: unknown): UAError {

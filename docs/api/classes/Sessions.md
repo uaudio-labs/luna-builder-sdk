@@ -57,6 +57,37 @@ Last path segment: the uid or name the engine addresses this node by.
 
 ## Methods
 
+### byPackageUid()
+
+```ts
+byPackageUid(packageUid): Session | undefined;
+```
+
+The open session whose package is `packageUid`, or `undefined`. Dashes and case are
+ignored, so a uid from `workspace.recent()` or `query()` matches however it was written.
+Call after `ready()`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+
+#### Returns
+
+[`Session`](Session.md) \| `undefined`
+
+#### Example
+
+```ts
+await luna.sessions.ready();
+const open = luna.sessions.byPackageUid(row.uid);
+if (open) await luna.sessions.focusedUid.set(open.uid);
+else await luna.sessions.open(row.uid);
+```
+
+***
+
 ### close()
 
 ```ts
@@ -108,6 +139,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
 ### create()
 
 ```ts
@@ -125,6 +190,49 @@ Create a new session, load it and wait until the engine reports it loaded.
 #### Returns
 
 `Promise`\<[`Session`](Session.md)\>
+
+#### Example
+
+```ts
+const s = await luna.sessions.create({ name: 'Demo' });
+
+// An Add On's own session, found again by a fixed package uid (fact 237):
+const sessionPackageUid = '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7';
+const row = (await luna.workspace.query()).find((r) => r.uid === sessionPackageUid);
+const own = row?.online
+  ? await luna.sessions.open(sessionPackageUid)
+  : await luna.sessions.create({ name: 'My Add On', sessionPackageUid });
+```
+
+***
+
+### createFromTemplate()
+
+```ts
+createFromTemplate(options): Promise<Session>;
+```
+
+Create a session copied from a session template (see `workspace.templates()`), load it
+and wait until the engine reports it loaded. The new session is its own package; the
+template is never changed.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`CreateFromTemplateOptions`](../interfaces/CreateFromTemplateOptions.md) |
+
+#### Returns
+
+`Promise`\<[`Session`](Session.md)\>
+
+#### Example
+
+```ts
+const [template] = await luna.workspace.templates();
+const session = await luna.sessions.createFromTemplate({ templatePackageUid: template.uid, name: 'My Song' });
+session.sessionPackageUid.value;   // the copy's own package, to reopen later with sessions.open()
+```
 
 ***
 
@@ -239,6 +347,34 @@ Open an existing session package by its uid (see `/workspace/sessions`).
 
 ***
 
+### openOrFocus()
+
+```ts
+openOrFocus(packageUid, timeoutMs?): Promise<Session>;
+```
+
+Switch to the session of a package if it is open, else open it: the "open this" of a
+recent-sessions list.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `packageUid` | `string` |
+| `timeoutMs?` | `number` |
+
+#### Returns
+
+`Promise`\<[`Session`](Session.md)\>
+
+#### Example
+
+```ts
+row.onclick = () => void luna.sessions.openOrFocus(entry.uid);
+```
+
+***
+
 ### property()
 
 ```ts
@@ -283,7 +419,9 @@ await track.property<string>('comments').set('take 3')
 ready(): Promise<void>;
 ```
 
-Subscribe to `/sessions` and load the list. Idempotent.
+Subscribe to `/sessions` and load the list, with each open session's own properties
+(name, `sessionPackageUid`, `loaded`) but not its contents. Idempotent. A session opened
+later has its properties read as it appears (`await luna.settled()` waits for that).
 
 #### Returns
 

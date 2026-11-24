@@ -1,30 +1,11 @@
 /** `ua-builder eject-wasm` copies a built Add On and a wasm engine into a folder a browser runs on its own. */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ENGINE_META, ejectFolderName, ejectWasm, withEngineMeta } from '../../cli/eject-wasm';
-import { newAddOn } from '../../cli/new';
 import { pack } from '../../cli/pack';
 import { bundlePath, parseArgs } from '../../cli/util';
-
-const dirs: string[] = [];
-
-function temp(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'ua-eject-'));
-  dirs.push(dir);
-  return dir;
-}
-
-async function quietly<T>(run: () => Promise<T>): Promise<{ result: T; out: string }> {
-  const lines: string[] = [];
-  const spies = (['log', 'warn', 'error'] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void lines.push(a.join(' '))));
-  try {
-    return { result: await run(), out: lines.join('\n') };
-  } finally {
-    for (const s of spies) s.mockRestore();
-  }
-}
+import { fakeEngine, quietly, removeTemps, scaffold, temp } from '../helpers/cli';
 
 /** Run `run` with `cwd` as the current directory, where the default output goes. */
 async function inDir<T>(cwd: string, run: () => Promise<T>): Promise<T> {
@@ -34,25 +15,6 @@ async function inDir<T>(cwd: string, run: () => Promise<T>): Promise<T> {
   } finally {
     spy.mockRestore();
   }
-}
-
-async function scaffold(...argv: string[]): Promise<{ parent: string; dir: string }> {
-  const parent = temp();
-  await quietly(() => newAddOn(parseArgs(['demo', '--dir', parent, ...argv])));
-  return { parent, dir: join(parent, 'demo') };
-}
-
-/** An engine stage as the wasm_engine build lays it out, with the files an eject leaves behind. */
-function fakeEngine(): string {
-  const dir = temp();
-  writeFileSync(join(dir, 'luna-engine.js'), 'var createLunaEngineModule = () => {};');
-  writeFileSync(join(dir, 'luna-engine.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d]));
-  writeFileSync(join(dir, 'build.json'), JSON.stringify({ config: 'Release', engine_id: 'abc123' }));
-  mkdirSync(join(dir, 'plugins', 'uaudio_luna_channel'), { recursive: true });
-  writeFileSync(join(dir, 'plugins', 'uaudio_luna_channel', 'plugin.wasm'), 'p');
-  writeFileSync(join(dir, 'plugins', '.DS_Store'), 'x');
-  for (const f of ['index.html', 'serve.py', 'serve_lan.py', 'wasm_socket.js', 'wasm_uanet_link.js']) writeFileSync(join(dir, f), f);
-  return dir;
 }
 
 /** Every file under `dir`, `/`-separated and relative to it. */
@@ -86,9 +48,7 @@ beforeAll(() => {
   if (!bundlePath()) throw new Error('run "npm run build" first: the scaffold vendors dist/luna.global.js');
 });
 
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+afterEach(removeTemps);
 
 describe('ua-builder eject-wasm', () => {
   it('puts the engine meta first in <head>, and leaves a page that names an engine alone', () => {
@@ -155,7 +115,7 @@ describe('ua-builder eject-wasm', () => {
     const { parent, dir } = await scaffold();
     const { result: code, out: log } = await inDir(parent, () => quietly(() => ejectWasm(parseArgs([dir, '--engine', temp()]))));
     expect(code).toBe(1);
-    expect(log).toMatch(/not a wasm engine build \(no luna-engine\.js or luna-engine\.wasm\)/);
+    expect(log).toMatch(/--engine .* holds no luna-engine\.js/);
     expect(existsSync(join(parent, 'demo-web'))).toBe(false);
     expect(existsSync(join(parent, 'demo-web.zip'))).toBe(false);
   });

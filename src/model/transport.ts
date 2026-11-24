@@ -79,11 +79,46 @@ export class Transport extends Node {
   readonly countingIn: Prop<boolean>;
   readonly punchedIn: Prop<boolean>;
   readonly maxTick: Prop<number>;
-  readonly tempoPercent: Prop<number>;
+  /**
+   * Playback speed as a percentage of the tempo map (100 is as written), applied only while
+   * {@link enableTempoPercent} is on. Not undoable. LUNA publishes both only when its
+   * tempo-percent feature is enabled; elsewhere they stay `undefined` (fact 155).
+   *
+   * @example
+   * await t.tempoPercent.set(80);
+   * await t.enableTempoPercent.set(true);   // practice at 80%
+   */
+  readonly tempoPercent: WritableProp<number>;
+  /** Whether {@link tempoPercent} applies (fact 155). @example await t.enableTempoPercent.set(false); */
+  readonly enableTempoPercent: WritableProp<boolean>;
   readonly recPlayMode: Prop<RecPlayMode>;
   readonly countInEnabled: WritableProp<boolean>;
   readonly preRollEnabled: WritableProp<boolean>;
   readonly postRollEnabled: WritableProp<boolean>;
+  /**
+   * How long the pre-roll is, as LUNA stores it: a `"bars,beats,ticks"` duration string
+   * (`"1,0,0"` is one bar, `"0,2,0"` two beats; ticks are engine ticks). Read and write it with
+   * `Luna.parseRollDuration` and `Luna.formatRollDuration`. Used while
+   * {@link preRollEnabled} is on (fact 156).
+   *
+   * @example await t.preRoll.set(Luna.formatRollDuration({ bars: 2 }));
+   */
+  readonly preRoll: WritableProp<string>;
+  /** How long the post-roll is, in the same form as {@link preRoll} (fact 156). @example await t.postRoll.set('1,0,0'); */
+  readonly postRoll: WritableProp<string>;
+  /** Whether the click sounds during playback (fact 155). @example await t.clickDuringPlay.set(false); */
+  readonly clickDuringPlay: WritableProp<boolean>;
+  /** Whether the click sounds while recording (fact 155). @example await t.clickDuringRecord.set(true); */
+  readonly clickDuringRecord: WritableProp<boolean>;
+  /** Whether the click sounds during the count-in (fact 155). @example await t.clickDuringCountIn.set(true); */
+  readonly clickDuringCountIn: WritableProp<boolean>;
+  /**
+   * Whether MIDI recorded over an existing MIDI clip merges into it (on) or makes a new take
+   * (off) (fact 155).
+   *
+   * @example await t.mergeMidi.set(true);
+   */
+  readonly mergeMidi: WritableProp<boolean>;
 
   /** @internal */
   constructor(
@@ -105,11 +140,18 @@ export class Transport extends Node {
     this.countingIn = this.prop<boolean>('counting_in');
     this.punchedIn = this.prop<boolean>('punched_in');
     this.maxTick = this.prop<number>('max_tick');
-    this.tempoPercent = this.prop<number>('tempo_percent');
+    this.tempoPercent = this.writableProp<number>('tempo_percent');
+    this.enableTempoPercent = this.writableProp<boolean>('enable_tempo_percent');
     this.recPlayMode = this.prop<RecPlayMode>('rec_play_mode');
     this.countInEnabled = this.writableProp<boolean>('count_in_enabled');
     this.preRollEnabled = this.writableProp<boolean>('pre_roll_enabled');
     this.postRollEnabled = this.writableProp<boolean>('post_roll_enabled');
+    this.preRoll = this.writableProp<string>('pre_roll');
+    this.postRoll = this.writableProp<string>('post_roll');
+    this.clickDuringPlay = this.writableProp<boolean>('click_during_play');
+    this.clickDuringRecord = this.writableProp<boolean>('click_during_record');
+    this.clickDuringCountIn = this.writableProp<boolean>('click_during_count_in');
+    this.mergeMidi = this.writableProp<boolean>('merge_midi');
   }
 
   /** Current playhead in ticks: the live location while playing, else the play start. */

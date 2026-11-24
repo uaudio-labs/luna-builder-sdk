@@ -4,10 +4,13 @@
 
 | Property | Modifier | Type | Description |
 | ------ | ------ | ------ | ------ |
+| <a id="activeaudioengine"></a> `activeAudioEngine` | `readonly` | [`ActiveAudioEngine`](ActiveAudioEngine.md) | The audio engine LUNA is running: on or off, its kind, the drivers it uses (fact 190). |
 | <a id="assistant"></a> `assistant` | `readonly` | [`Assistant`](Assistant.md) | Whether UA Assistant is connected to LUNA (`/assistant`); preset recommendations need it. |
+| <a id="autogain"></a> `autoGain` | `readonly` | [`AutoGain`](AutoGain.md) | LUNA's Auto Gain service (`/auto_gain`, fact 191). Check `available()` first. |
 | <a id="devices"></a> `devices` | `readonly` | [`Devices`](Devices.md) | - |
 | <a id="drivers"></a> `drivers` | `readonly` | [`Drivers`](Drivers.md) | - |
 | <a id="engine"></a> `engine` | `readonly` | `Engine` | Which engine this client is talking to: `'luna'` or `'mock'`. |
+| <a id="errors"></a> `errors` | `readonly` | [`ErrorNotices`](ErrorNotices.md) | LUNA's error notices (fact 235), read-only. Follows LUNA once watched. **Example** `await luna.errors.watch().ready; luna.errors.sorted.map((e) => `${e.level.value}: ${e.title.value}`);` |
 | <a id="gui"></a> `gui` | `readonly` | [`Gui`](Gui.md) | LUNA's host surface (dialogs, pages, Add Ons). Only present inside LUNA. |
 | <a id="jobs"></a> `jobs` | `readonly` | [`Jobs`](Jobs.md) | - |
 | <a id="mididevices"></a> `midiDevices` | `readonly` | [`MidiDevices`](MidiDevices.md) | The MIDI devices LUNA sees (`/devices/<LUNA>/midi`), `All` and `None` included. |
@@ -65,7 +68,8 @@ The device inputs a track can record from (`/devices/<device>/inputs`, fact 76).
 one with `track.inputNodeUid.set(input.uid)`, or pass it to `session.record()`.
 
 Read on each call and not cached: devices come and go, and `inUse` changes as tracks are
-armed.
+armed. To follow those changes, watch `device.inputs` on each of `luna.devices` instead
+(fact 185); `input.snapshot()` gives the same record.
 
 #### Returns
 
@@ -98,10 +102,23 @@ Disconnect and release everything.
 ### session()
 
 ```ts
-session(): Promise<Session>;
+session(options): Promise<Session>;
 ```
 
 The focused session (or the first open one), subscribed and loaded.
+
+With no session open it rejects at once with [NoSessionOpen](NoSessionOpen.md), unless `wait` is set:
+then it waits for the user to open or create one. Loading is bounded by `timeoutMs`
+(default 15 000 ms; with `wait`, no limit unless given), after which it rejects with
+`RequestTimeout` rather than hanging.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `timeoutMs?`: `number`; `wait?`: `boolean`; \} |
+| `options.timeoutMs?` | `number` |
+| `options.wait?` | `boolean` |
 
 #### Returns
 
@@ -112,6 +129,9 @@ The focused session (or the first open one), subscribed and loaded.
 ```ts
 const session = await luna.session();
 console.log(session.name.value, session.tracks.items.length);
+
+// A page that opens before any session does:
+const s = await luna.session({ wait: true });
 ```
 
 ***

@@ -18,7 +18,9 @@
 | <a id="context"></a> `context` | `readonly` | [`Context`](Context.md) | The `main` edit context: selection, zoom and the context edit commands. | - |
 | <a id="contexts"></a> `contexts` | `readonly` | [`Collection`](Collection.md)\<[`Context`](Context.md)\> | Edit contexts (`main`, `editor`, `alt_<n>`). | - |
 | <a id="focusedtrack"></a> `focusedTrack` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`Track`](Track.md)\> | The track the user is working on: the main context's `lastSelectedTrack`, else the first selected track, else the first visible track. `undefined` only when the session has no visible track. Notifies when the answer moves to a different track, not on every selection write. The last fallback follows tracks being added and removed, not a reorder. **Example** `const draw = () => (label.textContent = session.focusedTrack.value?.name.value ?? 'No track'); session.focusedTrack.onChange(draw); draw();` | - |
+| <a id="groups"></a> `groups` | `readonly` | [`Groups`](Groups.md) | Mix, edit, plugin and send groups (facts 215-218). Not loaded by `ready()`: `await session.groups.load()`. | - |
 | <a id="loaded"></a> `loaded` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
+| <a id="lyrics"></a> `lyrics` | `readonly` | [`Lyrics`](Lyrics.md) | The session's lyrics, ruler and transcribed (fact 152). | - |
 | <a id="markers"></a> `markers` | `readonly` | [`Markers`](Markers.md) | - | - |
 | <a id="musical"></a> `musical` | `readonly` | [`Musical`](Musical.md) | Tempo map, time and key signatures, and tick/bar/seconds conversion. | - |
 | <a id="name"></a> `name` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`\> | - | - |
@@ -28,7 +30,7 @@
 | <a id="recordtakes"></a> `recordTakes` | `readonly` | [`RecordTakes`](RecordTakes.md) | Takes being recorded right now, on every armed track, before they become clips: each with its growing `stop`, its audio file's waveform, or its MIDI so far (fact 149). | - |
 | <a id="sessionpackagepath"></a> `sessionPackagePath` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="sessionpackageuid"></a> `sessionPackageUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
-| <a id="solomode"></a> `soloMode` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="solomode"></a> `soloMode` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<[`SoloMode`](../type-aliases/SoloMode.md)\> | The session's solo mode, writable (fact 157). LUNA refuses any value but the two [SoloMode](../type-aliases/SoloMode.md)s. Not undoable. **Example** `await session.soloMode.set('exclusive');` | - |
 | <a id="storage"></a> `storage` | `readonly` | [`SessionStorage`](SessionStorage.md) | Data Add Ons keep with this session, by reverse-DNS context (fact 129). | - |
 | <a id="tempoestablished"></a> `tempoEstablished` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="tracks"></a> `tracks` | `readonly` | [`Collection`](Collection.md)\<[`Track`](Track.md)\> | - | - |
@@ -58,7 +60,7 @@ True while a [transaction](#transaction) is open, of either kind.
 #### Get Signature
 
 ```ts
-get channelsInOrder(): (Bus | Track)[];
+get channelsInOrder(): (Track | Bus)[];
 ```
 
 Every track and bus in LUNA's order (fact 137): one `order` runs 1..N across both, each
@@ -76,7 +78,7 @@ for (const ch of session.channelsInOrder) console.log('  '.repeat(depth(ch)) + c
 
 ##### Returns
 
-([`Bus`](Bus.md) \| [`Track`](Track.md))[]
+([`Track`](Track.md) \| [`Bus`](Bus.md))[]
 
 ***
 
@@ -345,6 +347,71 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
+### deletePlaylists()
+
+```ts
+deletePlaylists(playlists): Promise<void>;
+```
+
+Delete playlist versions in one undo step (`delete_playlists`), and resolve once they
+have left [playlists](#deleteplaylists-1) (fact 170). A version a track is using can be deleted when
+the track has another: the track switches to the version before it (after it, for the
+first). LUNA also applies it to the tracks edit-grouped with them. Deleting nothing
+deletable (a track's only version) rejects with `uasrv.invalid_value`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `playlists` | readonly (`string` \| [`Playlist`](Playlist.md))[] |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+const old = session.playlists.items.filter((p) => p.trackUid.value === track.id && p.id !== track.playlistUid.value);
+await session.deletePlaylists(old);
+```
+
+***
+
 ### deleteTracks()
 
 ```ts
@@ -367,6 +434,34 @@ Delete tracks by uid in one undo step, and resolve once they have left [tracks](
 
 ```ts
 await session.deleteTracks([scratch.id]);
+```
+
+***
+
+### deleteUnusedPlaylists()
+
+```ts
+deleteUnusedPlaylists(tracks): Promise<void>;
+```
+
+Delete every playlist version the given tracks are not using, keeping the one each plays
+(`delete_playlists` with `delete_unused`, which lists the versions to keep, fact 170).
+Resolves once they have left [playlists](#playlists).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tracks` | readonly (`string` \| [`Track`](Track.md))[] |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.deleteUnusedPlaylists([vocal, double]);
 ```
 
 ***
@@ -411,7 +506,7 @@ const { render, file } = await session.exportMain({ name: 'Rough mix' });
 ### folderContents()
 
 ```ts
-folderContents(folder): (Bus | Track)[];
+folderContents(folder): (Track | Bus)[];
 ```
 
 The tracks and buses directly inside `folder`, or at the session root for `null`, sorted
@@ -426,7 +521,7 @@ LUNA's system tracks and buses (click, count-in, master, cues).
 
 #### Returns
 
-([`Bus`](Bus.md) \| [`Track`](Track.md))[]
+([`Track`](Track.md) \| [`Bus`](Bus.md))[]
 
 #### Example
 
@@ -477,8 +572,10 @@ if (path) await session.importFile(path, track.id);
 
 ### importPath()
 
+#### Call Signature
+
 ```ts
-importPath(path, options): Promise<AudioSource>;
+importPath(path, options?): Promise<AudioSource>;
 ```
 
 Copy a file the engine can read from disk into this session's package as a new audio
@@ -491,18 +588,23 @@ never pass through the page. Take the path from `luna.gui.chooseFiles()` or
 engine on the same machine. A path the engine cannot open rejects
 with LUNA's `device.database_error`. For a browser `File`, use [uploadFile](#uploadfile).
 
-#### Parameters
+With `type: 'midi'` or `'video'` the file is copied into the package's `midi` or
+`video` folder instead, and the call resolves to an [ImportedFile](../interfaces/ImportedFile.md) as soon as LUNA
+answers (fact 163). Nothing plays it yet: LUNA's own import (`importFile`) also makes the
+track and clip.
+
+##### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `path` | `string` |
-| `options` | [`ImportPathOptions`](../interfaces/ImportPathOptions.md) |
+| `options?` | [`ImportPathOptions`](../interfaces/ImportPathOptions.md) & `object` |
 
-#### Returns
+##### Returns
 
 `Promise`\<[`AudioSource`](AudioSource.md)\>
 
-#### Example
+##### Example
 
 ```ts
 const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
@@ -510,6 +612,50 @@ if (path) {
   const source = await session.importPath(path);
   await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
 }
+const midi = await session.importPath('/Users/me/groove.mid', { type: 'midi' });   // { uid, type: 'midi', name }
+```
+
+#### Call Signature
+
+```ts
+importPath(path, options): Promise<ImportedFile>;
+```
+
+Copy a file the engine can read from disk into this session's package as a new audio
+source, and resolve to it once the workspace lists it (fact 42, `local_copy`). No clip
+is made: pass the source's `id` to [insertClip](#insertclip).
+
+This is the **path route**, an optimization: the engine reads `path` itself, so the bytes
+never pass through the page. Take the path from `luna.gui.chooseFiles()` or
+`Luna.onPathDrop()`. It needs no `/gui`, but the engine must see the file: a native
+engine on the same machine. A path the engine cannot open rejects
+with LUNA's `device.database_error`. For a browser `File`, use [uploadFile](#uploadfile).
+
+With `type: 'midi'` or `'video'` the file is copied into the package's `midi` or
+`video` folder instead, and the call resolves to an [ImportedFile](../interfaces/ImportedFile.md) as soon as LUNA
+answers (fact 163). Nothing plays it yet: LUNA's own import (`importFile`) also makes the
+track and clip.
+
+##### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+| `options` | [`ImportPathOptions`](../interfaces/ImportPathOptions.md) & `object` |
+
+##### Returns
+
+`Promise`\<[`ImportedFile`](../interfaces/ImportedFile.md)\>
+
+##### Example
+
+```ts
+const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
+if (path) {
+  const source = await session.importPath(path);
+  await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
+}
+const midi = await session.importPath('/Users/me/groove.mid', { type: 'midi' });   // { uid, type: 'midi', name }
 ```
 
 ***
@@ -583,6 +729,29 @@ Pushes keep the cells current afterwards as long as an ancestor is watched.
 
 ***
 
+### loadSources()
+
+```ts
+loadSources(): Promise<Collection<AudioSource>>;
+```
+
+The session's source files, loaded and ready: waits for `ready()` (which brings the
+package uid), loads the folder and every member's properties, and keeps following it.
+
+#### Returns
+
+`Promise`\<[`Collection`](Collection.md)\<[`AudioSource`](AudioSource.md)\>\>
+
+#### Example
+
+```ts
+const sources = await session.loadSources();
+sources.items.map((s) => s.displayName.value);
+sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+```
+
+***
+
 ### moveClips()
 
 ```ts
@@ -592,14 +761,21 @@ moveClips(toTick, options): Promise<unknown>;
 Move or copy the clips in a tick range (or the context selection when omitted) so they
 start at `toTick`.
 
+`playlists` moves them to other tracks: each entry takes the clips of `from` (a playlist
+or its uid) to `to`. It replaces `trackUids`, which LUNA then ignores (fact 174).
+`moveAutomation` carries the tracks' automation in the range along; left out, LUNA follows
+the context's own "automation follows edit" setting.
+
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `toTick` | `number` |
-| `options` | \{ `contextType?`: `string`; `copy?`: `boolean`; `startTick?`: `number`; `stopTick?`: `number`; `trackUids?`: `string`[]; \} |
+| `options` | \{ `contextType?`: `string`; `copy?`: `boolean`; `moveAutomation?`: `boolean`; `playlists?`: readonly `object`[]; `startTick?`: `number`; `stopTick?`: `number`; `trackUids?`: `string`[]; \} |
 | `options.contextType?` | `string` |
 | `options.copy?` | `boolean` |
+| `options.moveAutomation?` | `boolean` |
+| `options.playlists?` | readonly `object`[] |
 | `options.startTick?` | `number` |
 | `options.stopTick?` | `number` |
 | `options.trackUids?` | `string`[] |
@@ -607,6 +783,17 @@ start at `toTick`.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+// Move bar 1 of the vocal to the double track, at the same time.
+await session.moveClips(0, {
+  startTick: 0,
+  stopTick: Luna.WHOLE_NOTE,
+  playlists: [{ from: session.playlistFor(vocal)!, to: session.playlistFor(double)! }],
+});
+```
 
 ***
 
@@ -825,6 +1012,46 @@ track.name.value; // the preset's name
 
 ***
 
+### newTracksFromInputs()
+
+```ts
+newTracksFromInputs(options): Promise<Track[]>;
+```
+
+Make one audio track per device input, each recording from its input, in one undo step,
+as LUNA's "create tracks from inputs" does (`new_tracks_from_inputs`, fact 172), and
+resolve to the new tracks once listed and loaded. Each is named after its input (made
+unique) and takes the input's stem format unless `stemFormat` says otherwise.
+`recordEnable` arms them; `autoGain` starts Auto Gain on those that support it.
+
+Inputs LUNA does not make tracks for (talkback, monitor, loopback) are skipped. Because
+LUNA never answers a request with an unknown input or with none left, the SDK refuses
+those first: `unknown_input` for an input not in `luna.audioInputs()`, `no_inputs` when
+nothing is left.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | \{ `autoGain?`: `boolean`; `inputUids`: readonly `string`[]; `recordEnable?`: `boolean`; `stemFormat?`: `"stereo"` \| `"mono"`; \} |
+| `options.autoGain?` | `boolean` |
+| `options.inputUids` | readonly `string`[] |
+| `options.recordEnable?` | `boolean` |
+| `options.stemFormat?` | `"stereo"` \| `"mono"` |
+
+#### Returns
+
+`Promise`\<[`Track`](Track.md)[]\>
+
+#### Example
+
+```ts
+const inputs = await luna.audioInputs();
+const tracks = await session.newTracksFromInputs({ inputUids: inputs.slice(0, 2).map((i) => i.uid), recordEnable: true });
+```
+
+***
+
 ### onDispose()
 
 ```ts
@@ -852,6 +1079,28 @@ track.onDispose(() => row.remove());
 #### Inherited from
 
 [`Node`](Node.md).[`onDispose`](Node.md#ondispose)
+
+***
+
+### package()
+
+```ts
+package(): Promise<SessionPackage>;
+```
+
+The session's own package in the workspace (name, folder, favourite, comments), loaded,
+without loading every package (`workspace.packages`).
+
+#### Returns
+
+`Promise`\<[`SessionPackage`](SessionPackage.md)\>
+
+#### Example
+
+```ts
+const pkg = await session.package();
+pkg.name; pkg.directoryPath.value; await pkg.favorite.set(true);
+```
 
 ***
 
@@ -1166,6 +1415,60 @@ Make a playlist version active on a track.
 #### Returns
 
 `Promise`\<`unknown`\>
+
+***
+
+### sourcePath()
+
+```ts
+sourcePath(source): string | undefined;
+```
+
+A source file's absolute path on disk, from the session's package path (fact 239):
+`<package>/audio/<uid>.wav`, or `<package>/renders/clips/<uid>.wav` for a rendering.
+Synchronous, so a `dragstart` handler can use it. `undefined` before `ready()`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `source` | `string` \| [`AudioSource`](AudioSource.md) |
+
+#### Returns
+
+`string` \| `undefined`
+
+#### Example
+
+```ts
+const path = session.sourcePath(source);
+if (path) await luna.gui.revealPath(path);
+```
+
+***
+
+### sourceUsage()
+
+```ts
+sourceUsage(): Promise<SourceUsage>;
+```
+
+Which tracks and clips use each source file, live: it follows clips being added, deleted,
+rendered or pointed at another file, and tracks switching playlists. Loads every
+playlist's clips first. Call `dispose()` on it when done.
+
+#### Returns
+
+`Promise`\<[`SourceUsage`](SourceUsage.md)\>
+
+#### Example
+
+```ts
+const usage = await session.sourceUsage();
+usage.byId(source.id)?.trackUids.map((t) => session.tracks.byId(t)?.name.value);
+usage.isUsed(source.id);
+usage.onChange(() => render());
+```
 
 ***
 

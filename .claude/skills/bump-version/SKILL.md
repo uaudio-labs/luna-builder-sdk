@@ -1,14 +1,15 @@
 ---
 name: bump-version
-description: Bump the luna-builder-sdk version to match LUNA and tag a Dev, Beta or Final release of it. Use whenever the user asks to "bump luna-builder-sdk dev", "bump luna-builder-sdk beta", "bump luna-builder-sdk final", "bump luna-builder-sdk to <version> <stage>", "bump luna-builder-sdk version", "bump the SDK version", "cut a release", or otherwise wants a new @uaudio/luna-builder-sdk version or release tag. A Beta bump also writes the release notes; every bump verifies, commits and tags.
+description: Bump the luna-builder-sdk version to match LUNA and tag a Dev, Beta, Final or Update release of it. Use whenever the user asks to "bump luna-builder-sdk dev", "bump luna-builder-sdk beta", "bump luna-builder-sdk final", "bump luna-builder-sdk update", "bump luna-builder-sdk to <version> <stage>", "bump luna-builder-sdk version", "bump the SDK version", "cut a release", or otherwise wants a new @uaudio/luna-builder-sdk version or release tag. A Beta or Update bump also writes the release notes; every bump verifies, commits and tags.
 ---
 
 # Bump luna-builder-sdk version
 
 The SDK's version follows LUNA's: SDK `3.1.1` is the SDK released alongside LUNA `3.1.1`.
-Each version goes through numbered Dev and Beta releases and ends with a Final one, all
-marked by git tags. A bump picks the stage, writes the release notes (Beta only), verifies,
-commits and tags.
+Each version goes through numbered Dev and Beta releases and a Final one, all marked by git
+tags. SDK changes that still work with that LUNA can ship after its Final as numbered
+Updates of the same version. A bump picks the stage, writes the release notes (Beta and
+Update only), verifies, commits and tags.
 
 ## How versions work
 
@@ -20,17 +21,26 @@ prerelease tag. The stage lives only in the git tag and the commit message:
 | Dev N | `v3.1.1-dN` | `Version 3.1.1 Dev N` | untouched |
 | Beta N | `v3.1.1-bN` | `Version 3.1.1 Beta N` | written |
 | Final | `v3.1.1` | `Version 3.1.1 Final` | untouched |
+| Update N | `v3.1.1-uN` | `Version 3.1.1 Update N` | written |
 
 Dev and Beta counters are independent and count up within one `major.minor.patch`: a Dev
 after `v3.1.1-b2` is the next Dev number, not 1. Both reset only with a new version (after
-its Final, or when the user starts a new version). Read the counters from the tags, never
-from memory:
+its Final, or when the user starts a new version). The Update counter starts at 1 after the
+Final. Read the counters from the tags, never from memory:
 
 ```bash
 git tag --list 'v3.1.1-d*' --sort=-v:refname | head -1   # last Dev
 git tag --list 'v3.1.1-b*' --sort=-v:refname | head -1   # last Beta
 git tag --list 'v3.1.1'                                  # Final exists?
+git tag --list 'v3.1.1-u*' --sort=-v:refname | head -1   # last Update
 ```
+
+An Update keeps the version: `package.json`, `min_luna_version` and the LUNA it targets
+stay the same, and the installer's build number makes each Update a newer
+`3.1.1.<build>` for UA Connect. Use one when the changes still work with that LUNA; when
+they need a newer LUNA, start the next version instead. Semver reads `-uN` as a
+prerelease (below `v3.1.1`), but only the tag carries it, and the GitHub sync publishes
+it as a full release.
 
 Every shipped SDK is `major.minor.patch.<build>`: the installer build
 (`builder/installer/pkg_scripts/build-and-test.py`) stamps the Bamboo build number into a
@@ -46,28 +56,33 @@ manifests, the catalogs carry none, and Bamboo names its releases from it too (t
 
 ## 1. Choose the stage and version
 
-The user names a stage: `dev`, `beta` or `final`. If they did not ("bump luna-builder-sdk
+The user names a stage: `dev`, `beta`, `final` or `update`. If they did not ("bump luna-builder-sdk
 version"), show the next tag for each stage and ask.
 
 The version is the one in `package.json`, unless:
 - the user named one ("bump luna-builder-sdk to 3.2.0 beta") — set it (step 4) and start
   both counters at 1;
-- `package.json`'s version already has a Final tag — that version is done, so ask the user
-  which LUNA version comes next. Do not guess an increment.
+- `package.json`'s version already has a Final tag and the stage is not `update` — that
+  version is done, so ask the user which LUNA version comes next, or whether they meant
+  an Update. Do not guess an increment.
 
-Refuse, and say why, a Dev or Beta of a version that already has a Final tag, and a second
-Final. Never write a stage into `package.json` (`3.1.1-beta.1`): the installer, Bamboo and
+Refuse, and say why, a Dev or Beta of a version that already has a Final tag, a second
+Final, and an Update of a version with no Final tag. Never write a stage into `package.json` (`3.1.1-beta.1`): the installer, Bamboo and
 UA Connect compare plain numbers.
 
-## 2. Beta only: find the previous release and collect the changes
+## 2. Beta and Update only: find the previous release and collect the changes
 
 Dev and Final skip to step 4 (or step 5 when the version is unchanged).
 
 This folder lives inside the `sdk-luna` repo alongside other packages, so scope every
-`git log` to it (`-- .`). The Beta's notes cover the changes since:
+`git log` to it (`-- .`). A Beta's notes cover the changes since:
 1. the previous Beta of this version (`v3.1.1-b<N-1>`), or, for Beta 1,
 2. the previous Final: the highest plain `vX.Y.Z` tag
    (`git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1`).
+   If Updates of that Final exist, the last of them (`v3.1.1-u<N>`) instead.
+
+An Update's notes cover the changes since the previous Update of this version
+(`v3.1.1-u<N-1>`), or, for Update 1, its Final (`v3.1.1`).
 
 Dev tags are not a boundary; their changes belong to the next Beta. History before
 `v0.1.0-alpha.9` is in the old `uaudio-labs/luna-builder-sdk` GitHub repo; versions up to
@@ -83,9 +98,11 @@ would notice — not a transcript of commit subjects. Fold multiple commits on o
 into one bullet; leave out pure churn (formatting, CI, internal refactors with no visible
 effect).
 
-## 3. Beta only: write the notes
+## 3. Beta and Update only: write the notes
 
-Two notes files, two audiences, one section per Beta, and the features list. Commits leave bullets under
+Two notes files, two audiences, one section per Beta or Update, and the features list.
+The steps below say "Beta"; an Update is the same with `Update N` in the headings
+(`## 3.1.1 Update 1 — <YYYY-MM-DD>`, `## 3.1.1 Update 1`). Commits leave bullets under
 `## Unreleased` as they land; that section becomes the Beta's section — keep every bullet
 it has, add the rest from the log, and leave no `Unreleased` section behind (a later change
 adds a fresh one).
@@ -122,7 +139,8 @@ adds a fresh one).
 Show the drafted notes to the user for review before moving on — they know which changes
 matter to consumers better than the git log does.
 
-A Final adds no section: its notes are its Betas'. If `Unreleased` has bullets at a Final,
+A Final adds no section: its notes are its Betas'. An Update's section is its own; the
+Final's release on GitHub is not changed by it. If `Unreleased` has bullets at a Final,
 tell the user those changes have shipped in no Beta and ask whether to cut a Beta first.
 
 ## 4. Set the version (only when it changes)
@@ -161,7 +179,7 @@ installer builds the stamped `<version>.0`.
 
 The commit message is exactly the one in the table (`Version 3.1.1 Beta 2`), with no Jira
 prefix. That is a deliberate exception to the tree's Jira-prefix rule for commits; don't
-ask for a Jira ID. The tag is `v<version>`, `v<version>-dN` or `v<version>-bN`; the `v*`
+ask for a Jira ID. The tag is `v<version>`, `v<version>-dN`, `v<version>-bN` or `v<version>-uN`; the `v*`
 tags belong to this SDK even though `sdk-luna` holds other packages. Stage only this
 folder, since the repo may have unrelated changes. A Dev or Final that changes no file is
 still its own commit, so the tag marks a commit of its own:
@@ -175,4 +193,5 @@ git tag v3.1.1-b2
 Include the regenerated `docs/api/` files — they are tracked. Do not push (or push the
 tag) unless the user asks; show them the commit and tag so they can review first. When
 they do, push both: `git push origin HEAD v3.1.1-b2`. `builder/github-sync/sync-to-github.sh`
-carries a `v*` tag on the published commit over to GitHub.
+carries a `v*` tag on the published commit over to GitHub and drafts its release (Dev and
+Beta as pre-releases, Final and Update as full releases).

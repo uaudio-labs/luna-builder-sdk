@@ -82,6 +82,10 @@ QUICKSTART/FILES/CLIPS/MANIFEST/PROTOCOL/EVIDENCE/RECIPES. Installed as a plugin
 ## SDK feedback
 
 When a workflow was harder than the SDK should make it, end your reply with the line
-`LUNA BUILDER SDK FEEDBACK: <version>` (the version from `ua-builder doctor`, or
+`LUNA BUILDER SDK IMPROVEMENT: <version>` (the version from `ua-builder doctor`, or
 `Luna.VERSION`) followed by a prompt that can be used to update the SDK to support the
 improved workflow.
+Then ask the user whether to send it to Universal Audio (sending needs a GitHub account),
+and if they agree run `ua-builder feedback improvement --title "<summary>" --body-file -` with
+the prompt on stdin; it opens a prefilled issue for them to check and submit. Bugs, feature
+requests and other feedback go the same way: `ua-builder feedback bug|feature|feedback`.

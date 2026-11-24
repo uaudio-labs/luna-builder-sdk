@@ -28,7 +28,12 @@ import { Controls } from './controls';
 import { Node } from './node';
 import type { PluginQueryOptions, PluginRow } from './plugins';
 
-export type InsertSlot = 'console' | 'reserved_0' | `effect_${number}` | `record_fx_${number}` | 'sidechain_filter' | string;
+/**
+ * An insert slot's name, as LUNA writes it in `insert_type` and in the effect's path.
+ * `'instrument'` is an instrument track's instrument slot (`effects/instrument`), ahead of the
+ * `effect_N` inserts. {@link isRecordFxSlot} and {@link insertSlotForAlias} help with the rest.
+ */
+export type InsertSlot = 'console' | 'instrument' | 'reserved_0' | `effect_${number}` | `record_fx_${number}` | 'sidechain_filter' | (string & {});
 
 /** The engine reports a missing plugin with this error string. */
 export const PLUGIN_ERROR_MISSING = 'mixer.missing_plug-in';
@@ -242,6 +247,82 @@ export class Effect extends Node {
   }
 
   /**
+   * Power the plugin in this slot on or off (`plugin_power`) through the edit context's
+   * `set_inserts_power`, as LUNA's insert power switch does: one undo step, fanned out over the
+   * channel's mix group, and a frozen slot is left alone (fact 171). Power is not bypass (see
+   * {@link setIn}): every loaded plugin has it, instruments included. Resolves once
+   * {@link pluginPower} shows it; for a frozen slot, on LUNA's reply.
+   *
+   * @example
+   * await slot.setPower(false);
+   * slot.pluginPower.value; // false
+   */
+  async setPower(on: boolean, contextType = 'main'): Promise<void> {
+    await this.wire.post(`/sessions/${this.sessionUid}/contexts/${contextType}/commands/set_inserts_power`, {
+      session_uid: this.sessionUid,
+      channel_uid: this.channelUid,
+      inserts: [this.id],
+      value: on,
+    });
+    if (this.frozen.value === true) return;
+    await settle(() => this.pluginPower.value === on, 'set power', {
+      path: this.path,
+      disposed: () => this.disposed,
+      refresh: () => this.client.store.load(this.path, { children: false, commands: false, flatvalue: true }),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
+  /**
+   * Move the plugin in this slot to `destination`, on this channel or another of the session,
+   * with its state, parameters, automation and preset, in one undo step (`move_insert`,
+   * fact 173). An occupied `effect_N` destination makes room: LUNA shuffles its neighbours
+   * toward the nearest empty slot. Resolves once `destination` shows the plugin.
+   *
+   * The SDK refuses (code `invalid_slot`) a move between slots of different kinds, such as the
+   * `console` slot and an `effect_N` slot: LUNA does not check, and such a move corrupts the
+   * channel's chain. It refuses an empty source with `empty_slot`, since LUNA would clear the
+   * destination.
+   *
+   * @example
+   * await track.effects.byId('effect_0')!.moveTo(track.effects.byId('effect_3')!);
+   */
+  moveTo(destination: Effect, options: { timeoutMs?: number } = {}): Promise<void> {
+    return this.transfer(destination, false, options.timeoutMs);
+  }
+
+  /**
+   * Copy the plugin in this slot, with its state, parameters, automation and preset, to
+   * `destination`, leaving this slot as it is. See {@link moveTo} for the rules.
+   *
+   * @example
+   * await vocal.effects.byId('effect_0')!.copyTo(backing.effects.byId('effect_0')!);
+   */
+  copyTo(destination: Effect, options: { timeoutMs?: number } = {}): Promise<void> {
+    return this.transfer(destination, true, options.timeoutMs);
+  }
+
+  private async transfer(destination: Effect, copy: boolean, timeoutMs: number | undefined): Promise<void> {
+    this.assertLive();
+    const what = copy ? 'copyTo' : 'moveTo';
+    if (destination.sessionUid !== this.sessionUid) throw new UAError('invalid_slot', `${what}(): the destination is in another session`, { path: destination.path });
+    if (slotKind(this.id) !== slotKind(destination.id)) throw new UAError('invalid_slot', `${what}(): ${this.id} and ${destination.id} are different kinds of slot`, { path: this.path });
+    const read = { children: false, commands: false, flatvalue: true } as const;
+    await Promise.all([this.client.store.load(this.path, read), this.client.store.load(destination.path, read)]);
+    const pluginId = this.pluginId.value;
+    if (!pluginId) throw new UAError('empty_slot', `${what}(): ${this.id} has no plugin`, { path: this.path });
+    if (destination.path === this.path) return;
+    await this.wire.post('/move_insert', { session_uid: this.sessionUid, source_uid: this.uid.value, destination_uid: destination.uid.value, copy });
+    await settle(() => destination.pluginId.value === pluginId, what, {
+      path: destination.path,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      disposed: () => destination.disposed,
+      refresh: () => this.client.store.load(destination.path, read),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
+  /**
    * Open this plugin's editor window in LUNA, as clicking it in LUNA's mixer does, or bring
    * it to the front. Resolves once {@link editorOpen} shows it; LUNA's reply alone proves
    * nothing, as an empty slot or a plugin LUNA will not show opens nothing (fact 126). That
@@ -314,4 +395,14 @@ export class Effect extends Node {
   protected override release(): void {
     this.controls.dispose();
   }
+}
+
+/**
+ * The kind of insert slot an id names, as LUNA's own move guard groups them: every
+ * `effect_N` is one kind, likewise `record_fx_N`, `midi_N` and `clip_effect_N`; any other
+ * slot (`console`, `instrument`, ...) is a kind of its own.
+ */
+function slotKind(slot: string): string {
+  const m = /^(effect|record_fx|midi|clip_effect)_\d+$/.exec(slot);
+  return m ? `${m[1]}_N` : slot;
 }

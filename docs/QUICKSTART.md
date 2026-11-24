@@ -61,7 +61,7 @@ await session.transaction('Rename all', async () => { /* many writes -> one undo
 ```
 
 `luna.sessions` lists open sessions (`items`, `focused`, `focusedUid`; follow `focused.onChange`)
-and makes them: `await luna.sessions.create({ name })`, `await luna.sessions.open(packageUid)`.
+and makes them: `await luna.sessions.create({ name })`, `await luna.sessions.open(packageUid)`. A session an Add On keeps for itself: [MANIFEST.md](MANIFEST.md#an-add-on-with-a-session-of-its-own).
 
 ## 5. Transport
 
@@ -235,7 +235,7 @@ Luna.clipAudio(take, session.sources);                     // drawable straight 
 
 ```js
 const recent = await luna.workspace.recent(10);    // [{ uid, name, path, online, lastOpened, ... }]
-await luna.sessions.open(recent[0].uid);
+await luna.sessions.open(recent[0].uid);           // or copy a template: createFromTemplate({ templatePackageUid, name })
 const paths = (await luna.gui.available()) ? await luna.gui.chooseFiles() : []; // paths, not Files
 await luna.gui.setPage('mixer'); await luna.gui.openUrl(url); await luna.gui.revealPath(path);
 const task = await luna.gui.startTask('Rendering'); await task.progress(50); await task.done();
@@ -290,7 +290,8 @@ page on `?engine=mock` with no LUNA: a demo session, or `--mock fixture.js` sett
 ## 15. Inside LUNA vs a browser
 
 LUNA adds `?port=` (`Luna.isEmbeddedInLuna()`); a browser reaches LUNA on localhost, or runs on
-`?engine=mock`. Windows loads Add Ons from `file://`: use the script-tag bundle. No WebSocket auth.
+`?engine=mock`. LUNA before 3.1.2 loaded Add Ons from `file://` on Windows: to run there, use the
+script-tag bundle. No WebSocket auth.
 Files differ most ([FILES.md](FILES.md)); so does drawing at playback rate ([DRAWING.md](DRAWING.md)).
 
 ## 16. Units, in one line

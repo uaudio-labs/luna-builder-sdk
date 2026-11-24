@@ -8,15 +8,43 @@
 
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
-| <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Session`](Session.md).[`client`](Session.md#client) |
+| <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Sessions`](Sessions.md).[`client`](Sessions.md#client) |
 | <a id="created"></a> `created` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`unknown`\> | - | - |
+| <a id="displayname"></a> `displayName` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `undefined`\> | The name to show: `name`, or `undefined` when the file has none. LUNA names some sources with their own uid (fact 238); a blank name, or one that is the uid (with or without dashes or an extension), counts as none. Show your own label then, such as the clip's name. **Example** `row.textContent = source.displayName.value ?? `Untitled (${source.seconds?.toFixed(1)} s)`;` | - |
+| <a id="format"></a> `format` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `undefined`\> | LUNA's audio file format name, e.g. `wav` (fact 239). | - |
 | <a id="length"></a> `length` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | Duration in nanoseconds. | - |
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
-| <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Session`](Session.md).[`path`](Session.md#path) |
+| <a id="origin"></a> `origin` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number` \| `undefined`\> | Where the file came from, LUNA's number for it (fact 239): see [SourceOrigin](../variables/SourceOrigin.md). `undefined` on a LUNA that does not publish it. | - |
+| <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="samplerate"></a> `sampleRate` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
 | <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | `mono` or `stereo`. | - |
 
 ## Accessors
+
+### analysis
+
+#### Get Signature
+
+```ts
+get analysis(): SourceAnalysis;
+```
+
+Every analysis LUNA keeps for this file (key, tempo, instrument, transients, chord and the
+overviews), with live `count` and `md5` props (fact 205). Created on first use.
+
+##### Example
+
+```ts
+const w = source.analysis.watch();
+await w.ready;
+source.analysis.overview.count.onChange(() => redraw(source.analysis.overview.count.value));
+```
+
+##### Returns
+
+[`SourceAnalysis`](SourceAnalysis.md)
+
+***
 
 ### channelCount
 
@@ -53,6 +81,22 @@ props stop updating and its commands reject with [Disposed](Disposed.md).
 
 ***
 
+### hasName
+
+#### Get Signature
+
+```ts
+get hasName(): boolean;
+```
+
+True when LUNA named the file (see [displayName](#displayname)).
+
+##### Returns
+
+`boolean`
+
+***
+
 ### id
 
 #### Get Signature
@@ -70,6 +114,46 @@ Last path segment: the uid or name the engine addresses this node by.
 #### Inherited from
 
 [`Node`](Node.md).[`id`](Node.md#id)
+
+***
+
+### isRender
+
+#### Get Signature
+
+```ts
+get isRender(): boolean;
+```
+
+True for a clip rendering (LUNA's own pass of a clip through its clip effects, time
+stretch or sample-rate conversion), which LUNA keeps under `renders/clips/` and remakes as
+needed, rather than a recording, import or bounce (fact 239).
+
+##### Example
+
+```ts
+const files = sources.items.filter((s) => !s.isRender);
+```
+
+##### Returns
+
+`boolean`
+
+***
+
+### packageUid
+
+#### Get Signature
+
+```ts
+get packageUid(): string;
+```
+
+The session package uid this file belongs to, from its path.
+
+##### Returns
+
+`string`
 
 ***
 
@@ -117,6 +201,65 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
+### filePath()
+
+```ts
+filePath(): Promise<string | undefined>;
+```
+
+The file's absolute path on disk (fact 239): `<package>/audio/<uid>.wav`, or
+`<package>/renders/clips/<uid>.wav` for a rendering. Reads the package's folder from the
+workspace once and keeps it. `undefined` when the package is unknown.
+
+Inside a session, `session.sourcePath(source)` answers the same without a read, which a
+drag needs (see `Luna.startSourceDrag`).
+
+#### Returns
+
+`Promise`\<`string` \| `undefined`\>
+
+#### Example
+
+```ts
+const path = await source.filePath();
+```
 
 ***
 
@@ -292,6 +435,27 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 #### Inherited from
 
 [`Node`](Node.md).[`reload`](Node.md#reload)
+
+***
+
+### reveal()
+
+```ts
+reveal(): Promise<void>;
+```
+
+Show the file in Finder or Explorer (`luna.gui.revealPath`). Rejects with `unavailable`
+when the path is unknown.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+revealButton.onclick = () => void source.reveal();
+```
 
 ***
 

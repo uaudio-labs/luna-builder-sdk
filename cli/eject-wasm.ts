@@ -1,16 +1,13 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { checkPageReferences, collect, isEjectOutput, isJunk } from './pack';
-import { resolveEngineDir } from './serve';
-import { bundlePath, flagString, readManifest, type Args } from './util';
+import { ENGINE_HINT, resolveEngine, type Engine } from './engine';
+import { engineFiles, readEngineId } from './engine-build';
+import { checkPageReferences, collect, isEjectOutput } from './pack';
+import { bundlePath, errorMessage, flagString, readManifest, type Args } from './util';
 import { createZip, type ZipEntry } from './zip';
 
 /** The folder the SDK loads the engine from by default (`engineUrl` `/__engine/`). */
 const ENGINE_FOLDER = '__engine';
-
-/** What a page needs from an engine build; its test page, servers and socket shims stay behind. */
-const ENGINE_FILES = ['luna-engine.js', 'luna-engine.wasm', 'build.json'];
-const ENGINE_FOLDERS = ['plugins'];
 
 /** Read by `Luna.connect()` when the URL names no engine (src/client/detect.ts). */
 export const ENGINE_META = '<meta name="luna-engine" content="wasm">';
@@ -32,28 +29,19 @@ export function withEngineMeta(html: string): string {
   return `${ENGINE_META}\n${html}`;
 }
 
-/** The engine's files under `<top>/__engine/`, or the reason `dir` is not an engine build. */
-export function engineEntries(dir: string, top: string): { entries: ZipEntry[]; engineId: string } | { error: string } {
-  const missing = ['luna-engine.js', 'luna-engine.wasm'].filter((f) => !existsSync(join(dir, f)));
-  if (missing.length) return { error: `${dir} is not a wasm engine build (no ${missing.join(' or ')})` };
-  const entries: ZipEntry[] = [{ name: `${top}/${ENGINE_FOLDER}/`, mtime: statSync(dir).mtime, mode: 0o40755 }];
-  const add = (path: string, name: string): void => {
-    const stat = statSync(path);
-    if (stat.isDirectory()) {
-      entries.push({ name: `${name}/`, mtime: stat.mtime, mode: 0o40755 });
-      for (const child of readdirSync(path).sort()) if (!isJunk(child)) add(join(path, child), `${name}/${child}`);
-    } else if (stat.isFile()) {
-      entries.push({ name, data: readFileSync(path), mtime: stat.mtime, mode: 0o100000 | (stat.mode & 0o777) });
-    }
-  };
-  for (const f of [...ENGINE_FILES, ...ENGINE_FOLDERS]) if (existsSync(join(dir, f))) add(join(dir, f), `${top}/${ENGINE_FOLDER}/${f}`);
-  let engineId = '?';
-  try {
-    engineId = String((JSON.parse(readFileSync(join(dir, 'build.json'), 'utf8')) as { engine_id?: unknown }).engine_id ?? '?');
-  } catch {
-    /* an engine without build.json still runs; it just cannot say which build it is */
+/** The engine build in `dir` as zip entries under `<top>/__engine/`, with a folder entry for each folder. */
+function engineEntries(dir: string, top: string): ZipEntry[] {
+  const files = engineFiles(dir);
+  const folders = new Set(['']);
+  for (const f of files) {
+    const parts = f.path.split('/');
+    for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join('/'));
   }
-  return { entries, engineId };
+  const name = (path: string): string => `${top}/${ENGINE_FOLDER}${path ? `/${path}` : ''}`;
+  return [
+    ...[...folders].sort().map((path): ZipEntry => ({ name: `${name(path)}/`, mtime: statSync(join(dir, ...path.split('/'))).mtime, mode: 0o40755 })),
+    ...files.map((f): ZipEntry => ({ name: name(f.path), data: readFileSync(f.file), mtime: f.mtime, mode: 0o100000 | f.mode })),
+  ];
 }
 
 /** True when `path` is inside `dir` (or is it). */
@@ -82,18 +70,13 @@ export function ejectFolderName(packageName: unknown, dir: string): string {
  * {@link ENGINE_META}, so it connects to the wasm engine wherever it is hosted. Writes the
  * folder (default: {@link ejectFolderName} in the current directory, as `ua-builder pack` writes
  * its file) and a zip of it. The Add On's own folder is not changed, and an output inside it is
- * left out of later packs and ejects. The engine comes from `--engine`, `UA_WASM_ENGINE`, an `engine/`
- * folder in the installed SDK, or a sibling tree build (see {@link resolveEngineDir}).
+ * left out of later packs and ejects. The engine comes from `--engine`, `--luna-version`, or
+ * one found locally (see {@link resolveEngine}); the Add On is checked first, so a mistake there
+ * costs no engine download.
  */
 export async function ejectWasm(args: Args): Promise<number> {
   const dir = resolve(args.positional[0] ?? process.cwd());
   const { manifest, entries: addOns } = readManifest(dir);
-  const engineFlag = flagString(args, 'engine');
-  const engineDir = engineFlag !== undefined ? resolve(engineFlag) : resolveEngineDir(undefined);
-  if (!engineDir) {
-    console.error('Not ejected: no wasm engine found. Pass --engine <folder holding luna-engine.js> or set UA_WASM_ENGINE.');
-    return 1;
-  }
   const out = resolve(flagString(args, 'out') ?? ejectFolderName(manifest['package_name'], dir));
   // Replacing the output deletes it first, so it must not be the Add On or hold it. Inside the
   // Add On is fine: a pack or an eject leaves an eject output out (see isEjectOutput).
@@ -106,12 +89,6 @@ export async function ejectWasm(args: Args): Promise<number> {
     return 1;
   }
   const top = basename(out);
-  const engine = engineEntries(engineDir, top);
-  if ('error' in engine) {
-    console.error(`Not ejected: ${engine.error}.`);
-    return 1;
-  }
-
   const { entries } = collect(dir, top, false);
   const packed = new Set(entries.filter((e) => e.data).map((e) => e.name.slice(top.length + 1)));
   const pages = [...new Set(addOns.flatMap((a) => (a.html ? [a.html.split(/[?#]/)[0]!.split(sep).join('/')] : [])))];
@@ -125,6 +102,27 @@ export async function ejectWasm(args: Args): Promise<number> {
     console.error(`Not ejected; the Add On would not load:\n  - ${errors.join('\n  - ')}`);
     return 1;
   }
+
+  let resolved: Engine | undefined;
+  try {
+    resolved = await resolveEngine(args);
+  } catch (err) {
+    console.error(`Not ejected: ${errorMessage(err)}.`);
+    return 1;
+  }
+  if (!resolved) {
+    console.error(`Not ejected: no wasm engine found; ${ENGINE_HINT}.`);
+    return 1;
+  }
+  const engineDir = resolved.dir;
+  let engine: ZipEntry[];
+  try {
+    engine = engineEntries(engineDir, top);
+  } catch (err) {
+    console.error(`Not ejected: ${errorMessage(err)}.`);
+    return 1;
+  }
+  const engineId = readEngineId(engineDir);
 
   const sdkBundle = bundlePath();
   for (const e of entries) {
@@ -140,7 +138,7 @@ export async function ejectWasm(args: Args): Promise<number> {
   const file = (rel: string, text: string, mode = 0o644): ZipEntry => ({ name: `${top}/${rel}`, data: Buffer.from(text, 'utf8'), mtime: now, mode: 0o100000 | mode });
   const all = [
     ...entries,
-    ...engine.entries,
+    ...engine,
     file('serve.py', servePy(pages[0]!), 0o755),
     file('README.txt', readme(name, pages[0]!)),
   ];
@@ -157,8 +155,8 @@ export async function ejectWasm(args: Args): Promise<number> {
   const zip = `${out}.zip`;
   writeFileSync(zip, createZip(all));
 
-  if (engine.engineId === '?') console.warn(`warning: ${engineDir} has no build.json, so the ejected folder cannot say which engine build it carries.`);
-  console.log(`Ejected ${name}${version ? ` ${version}` : ''} with wasm engine ${engine.engineId}`);
+  if (engineId === undefined) console.warn(`warning: ${engineDir} has no engine_id in its build.json, so the ejected folder cannot say which engine build it carries.`);
+  console.log(`Ejected ${name}${version ? ` ${version}` : ''} with wasm engine ${engineId ?? '?'}${resolved.lunaVersion ? ` (LUNA ${resolved.lunaVersion})` : ''}`);
   console.log(`  ${out}`);
   console.log(`  ${zip}`);
   console.log(`Run it: python3 "${join(realpathSync(out), 'serve.py')}"`);

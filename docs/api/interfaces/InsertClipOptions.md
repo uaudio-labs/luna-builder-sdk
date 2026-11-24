@@ -5,7 +5,7 @@
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="algtype"></a> `algType?` | [`AlgType`](../type-aliases/AlgType.md) | Time-stretch algorithm for an audio clip. Default: its track's. |
-| <a id="cliptype"></a> `clipType?` | `"midi"` \| `"audio"` \| `"video"` | Default `'audio'`. |
+| <a id="cliptype"></a> `clipType?` | `"midi"` \| `"video"` \| `"audio"` | Default `'audio'`. |
 | <a id="copyof"></a> `copyOf?` | [`Clip`](../classes/Clip.md) | Copy this clip (LUNA's `clip_uid`): the new clip takes its gain, fades, warps, MIDI and settings, placed at `startTick`-`stopTick`. |
 | <a id="layer"></a> `layer?` | `number` | Layer for overlapping clips; higher plays on top. Default: above every clip it overlaps. |
 | <a id="lengthfollows"></a> `lengthFollows?` | [`LengthFollows`](../type-aliases/LengthFollows.md) | What the clip's length follows on a tempo change. Default: its track's setting. |

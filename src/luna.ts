@@ -32,7 +32,7 @@ export type { WasmPortOptions } from './wire/wasm-port';
 export { WasmEngine, bootWasmEngine } from './engine/loader';
 /** @hidden */
 export type { WasmState, BootOptions, AudioHealth, WasmModule, WasmHooks, ModuleFactory } from './engine/loader';
-export type { MockNodeSpec, CommandHandler, MockMidiRow, MockMidiSent, MockEngineOptions } from './wire/mock-port';
+export type { MockNodeSpec, CommandHandler, MockMidiRow, MockMidiSent, MockEngineOptions, MockJobPlan } from './wire/mock-port';
 export { expandMulti } from './wire/multi';
 export { encodeRequest, decodeMessage, encodePayload, float, FloatLiteral } from './wire/codec';
 
@@ -53,6 +53,8 @@ export { addOnTarget, isEmbeddedInLuna, locationOptions, hasNativeBridge, isLuna
 export type { LocationOptions } from './client/detect';
 export { onPathDrop, canDropPaths } from './client/path-drop';
 export type { PathDrop, PathDropHandlers } from './client/path-drop';
+export { startSourceDrag, fileUrl } from './client/source-drag';
+export type { SourceDragItems, DragStartLike } from './client/source-drag';
 export { Secrets, MAX_SECRET_NAME_LENGTH, MAX_SECRET_BYTES } from './client/secrets';
 export type { SecretStorage } from './client/secrets';
 

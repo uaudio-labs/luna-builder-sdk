@@ -27,6 +27,7 @@
 | <a id="selectiontracks"></a> `selectionTracks` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`[] \| `null`\> | - | - |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | - | - |
 | <a id="settings"></a> `settings` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The window's saved settings, a JSON string LUNA writes on a delayed save. | - |
+| <a id="timelineviewstarttick"></a> `timelineViewStartTick` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | The tick at the left edge of this window's timeline view, with [pixelsPerTick](#pixelspertick) the horizontal scroll (fact 159). Stored with the session, not undoable; `undefined` until something has set it. A page that draws its own timeline can share its scroll through it. **Example** `const x = (tick: number) => (tick - (ctx.timelineViewStartTick.value ?? 0)) * ctx.pixelsPerTick.value!; await ctx.timelineViewStartTick.set(Luna.WHOLE_NOTE * 8);` | - |
 | <a id="waveformzoom"></a> `waveformZoom` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | LUNA's waveform zoom for this window: the amplitude multiplier its timeline draws audio with, 1 by default, doubled or halved by Zoom In/Out Waveform and bounded 1/8..256. Pass it with the clip gain to [waveformColumns](../functions/waveformColumns.md) to draw at LUNA's height. It is read from [settings](#settings), which LUNA saves some time after a change rather than at once (fact 94). **Example** `const gain = session.context.waveformZoom.value * 10 ** ((clip.gain.value ?? 0) / 20);` | - |
 
 ## Accessors
@@ -133,6 +134,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
 ### consolidate()
 
 ```ts
@@ -203,6 +238,39 @@ Pushes keep the cells current afterwards as long as an ancestor is watched.
 #### Inherited from
 
 [`Node`](Node.md).[`load`](Node.md#load)
+
+***
+
+### midiOperation()
+
+```ts
+midiOperation(op): Promise<void>;
+```
+
+Apply one of LUNA's MIDI operations to what this context selects (fact 158): the selected
+notes with focus `notes`, the MIDI on the selected tracks in the range with `timeline`.
+One undo entry. Resolves when LUNA answers; the edits arrive as MIDI table changes and
+the selected notes follow. With nothing to act on LUNA changes nothing and answers
+success. Rejects with `out_of_range` before sending for a value outside LUNA's range.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `op` | [`MidiOperation`](../type-aliases/MidiOperation.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await ctx.selectNotes(playlist.id, rows);
+await ctx.midiOperation({ type: 'transpose', semitones: -12 });
+await ctx.midiOperation({ type: 'duration', beats: 1 });
+await ctx.midiOperation({ type: 'invert', around: 'root', scale: { root: 0, mask: 0b101010110101 } });
+```
 
 ***
 
@@ -382,8 +450,6 @@ Write a snapshot back. No undo entry; LUNA echoes each property.
 run(command, payload): Promise<unknown>;
 ```
 
-Run one of the context's edit commands (`copy`, `paste`, `duplicate`, `select_all`, ...).
-
 #### Parameters
 
 | Parameter | Type |
@@ -509,6 +575,35 @@ finally { await ctx.restore(saved); }
 
 ***
 
+### trimControlValues()
+
+```ts
+trimControlValues(controls, range): Promise<void>;
+```
+
+Add a delta per control over `[start, stop)`, or over this context's selection when the
+range is left out (`trim_control_values`, fact 227). One undo step for all of them.
+Resolves on LUNA's reply; the lanes update by push.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `controls` | readonly [`ControlValue`](../interfaces/ControlValue.md)[] |
+| `range` | [`ControlValueRange`](../interfaces/ControlValueRange.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.context.trimControlValues([{ control: vocal.gain, value: 3 }], { start: 0, stop: Luna.WHOLE_NOTE });
+```
+
+***
+
 ### watch()
 
 ```ts
@@ -538,3 +633,36 @@ session that called `ready()` are already covered; use this for nodes outside a 
 #### Inherited from
 
 [`Node`](Node.md).[`watch`](Node.md#watch)
+
+***
+
+### writeControlValues()
+
+```ts
+writeControlValues(controls, range): Promise<void>;
+```
+
+Write an absolute value per control over `[start, stop)`, or over this context's selection
+when the range is left out (`write_control_values`, fact 227). One undo step for all of
+them. Resolves on LUNA's reply, which comes after the write; the lanes update by push.
+An unknown control uid rejects with `device.database_error`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `controls` | readonly [`ControlValue`](../interfaces/ControlValue.md)[] |
+| `range` | [`ControlValueRange`](../interfaces/ControlValueRange.md) |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await session.context.writeControlValues(
+  [{ control: vocal.gain, value: -12 }, { control: guitar.gain, value: -9 }],
+  { start: 0, stop: Luna.WHOLE_NOTE * 2 },
+);
+```

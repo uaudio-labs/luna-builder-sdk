@@ -2,12 +2,15 @@
  * Engine-wide nodes outside any session: audio drivers, hardware devices, preferences,
  * renders and jobs. Thin typed views; use `property()` for anything not named here.
  */
+import { PreferenceContext } from './preference-context';
 import type { Client } from '../client/client';
 import { UAError } from '../wire/errors';
 import type { Unsubscribe } from '../wire/port';
 import { derived, type Prop } from '../store/prop';
 import { Collection } from './collection';
 import { Node } from './node';
+import { DeviceInputs, DeviceOutputs } from './devices';
+import { isTerminalJobStatus, jobOutcome, jobTracker, type JobResult, type JobSnapshot } from './jobs';
 
 export interface AudioDeviceInfo {
   id: string;
@@ -58,15 +61,40 @@ export class Device extends Node {
   readonly online: Prop<boolean>;
   readonly sampleRate: Prop<number>;
   readonly clockSource: Prop<string>;
+  /**
+   * The device's audio inputs, live (fact 185). `inputs.watch()` follows hotplug, `in_use` and
+   * analysis results.
+   *
+   * @example
+   * const w = device.inputs.watch();
+   * await w.ready;
+   * device.inputs.items.map((i) => i.name.value);
+   */
+  readonly inputs: DeviceInputs;
+  /**
+   * The device's audio outputs (fact 189).
+   *
+   * @example
+   * await device.outputs.load();
+   * device.outputs.items.map((o) => [o.name.value, o.stemFormat.value]);
+   */
+  readonly outputs: DeviceOutputs;
 
   /** @internal */
   constructor(client: Client, path: string) {
     super(client, path);
+    this.inputs = new DeviceInputs(client, path);
+    this.outputs = new DeviceOutputs(client, path);
     this.name = this.prop<string>('name');
     this.deviceType = this.prop<string>('device_type');
     this.online = this.prop<boolean>('online');
     this.sampleRate = this.prop<number>('sample_rate');
     this.clockSource = this.prop<string>('clock_source');
+  }
+
+  protected override release(): void {
+    this.inputs.dispose();
+    this.outputs.dispose();
   }
 }
 
@@ -252,6 +280,20 @@ export class Preferences extends Node {
     this.metronomeSound = this.writableProp<string>('metronome_sound');
     this.metronomeSounds = this.prop<string[]>('metronome_sounds');
   }
+
+  /**
+   * The preferences under context `name`: JSON values kept on this computer across sessions
+   * and launches (fact 232). Contexts are shared and unprotected: any Add On, and LUNA itself,
+   * can read and write any of them, so pick a name nobody else will (such as your Add On's
+   * id) and keep secrets in `luna.secrets` instead.
+   *
+   * @example
+   * const prefs = luna.preferences.context('com.example.my-add-on');
+   * await prefs.set('lastTemplate', template.uid);
+   */
+  context(name: string): PreferenceContext {
+    return new PreferenceContext(this.client, name);
+  }
 }
 
 /**
@@ -368,8 +410,15 @@ export class Renders extends Collection<Render> {
 
 /**
  * `/jobs/<uid>`: long-running engine jobs (lyric transcription, chord extraction, ...).
- * `percentComplete` is 0..100. Terminal jobs are published and then removed, so latch the last
- * snapshot if you need it. Only `cancel()` exists; there is no delete.
+ * `percentComplete` is 0..100. LUNA publishes the terminal status and removes the node in the
+ * same turn (fact 200); {@link done} latches the ending for you. Only `cancel()` exists; there
+ * is no delete. A job you launch yourself is easier to follow through the `Luna.JobRun` its
+ * command returns (`session.musical.chords.detect()`, `session.lyrics.transcribe()`).
+ *
+ * @example
+ * await luna.jobs.load();
+ * const job = luna.jobs.items.find((j) => j.jobType.value === 'lyric_transcription');
+ * if (job) console.log((await job.done()).status);
  */
 export class Job extends Node {
   readonly uid: Prop<string>;
@@ -406,9 +455,67 @@ export class Job extends Node {
     return s === 'completed' || s === 'failed' || s === 'canceled';
   }
 
+  /**
+   * Resolve with the job's last snapshot when it completes (`empty: true` when LUNA found
+   * nothing, `job.no_result`); reject with a `UAError` whose code is the job's error, or
+   * `canceled`, `removed` (dropped without an ending) or `timeout`, as every SDK wait that runs
+   * out of time rejects (`Luna.RequestTimeout` carries the same code). The ending is
+   * latched as it arrives, so this answers even after LUNA removed the node, provided the
+   * SDK was watching `/jobs` when the job ended (fact 200).
+   *
+   * @example
+   * const result = await job.done();
+   * if (result.empty) console.log('nothing found');
+   */
+  done(timeoutMs = 30 * 60_000): Promise<JobResult> {
+    const tracker = jobTracker(this.client);
+    const settledEarly = tracker.ended(this.id);
+    if (settledEarly) return outcomeOf(settledEarly);
+    const release = tracker.acquire();
+    return new Promise<JobResult>((resolve, reject) => {
+      let finished = false;
+      const finish = (job: JobSnapshot | undefined, removed: boolean, error?: UAError): void => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        off();
+        release();
+        if (error) return reject(error);
+        if (job && isTerminalJobStatus(job.status)) return void outcomeOf(job).then(resolve, reject);
+        if (removed) reject(new UAError('removed', `job ${this.id} was removed before it was seen to finish`, { path: this.path }));
+      };
+      const timer = setTimeout(() => finish(undefined, false, new UAError('timeout', `job ${this.id} did not finish within ${timeoutMs} ms`, { path: this.path })), timeoutMs);
+      const seed = {
+        sessionUid: this.sessionUid.value,
+        jobType: this.jobType.value,
+        status: this.status.value,
+        error: this.error.value,
+        percentComplete: this.percentComplete.value,
+      } as Partial<JobSnapshot>;
+      const off = tracker.waitFor(this.id, seed, (job, removed) => finish(job, removed));
+      if (isTerminalJobStatus(this.status.value)) return finish(tracker.snapshot(this.id), false);
+      // The node may already be gone: read it once now that the tap is listening.
+      this.wire.get(this.path, { children: false, commands: false, flatvalue: true }).then(
+        (reply) => {
+          const late = tracker.ended(this.id);
+          if (late) return finish(late, true);
+          const gone = !reply || (typeof reply === 'object' && Object.keys(reply as object).length === 0);
+          // Pushes about the job precede this reply on the wire; give any still queued a turn.
+          if (gone) setTimeout(() => finish(tracker.ended(this.id) ?? tracker.snapshot(this.id), true), 0);
+        },
+        () => undefined,
+      );
+    });
+  }
+
   cancel(): Promise<unknown> {
     return this.post('commands/cancel_job', {});
   }
+}
+
+function outcomeOf(job: JobSnapshot): Promise<JobResult> {
+  const o = jobOutcome(job);
+  return 'result' in o ? Promise.resolve(o.result) : Promise.reject(o.error);
 }
 
 export class Jobs extends Collection<Job> {

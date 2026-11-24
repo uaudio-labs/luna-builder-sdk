@@ -85,6 +85,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
 ### find()
 
 ```ts
@@ -351,6 +385,45 @@ sel.dispose();
 
 ***
 
+### setFavorite()
+
+```ts
+setFavorite(
+   preset, 
+   favorite, 
+options): Promise<void>;
+```
+
+Mark a preset a favorite, or not (fact 175): a write of its `favorite`, which LUNA keeps
+per owner. A plugin's preset is under its plugin: pass `pluginId` (the one you queried
+with), or a row that carries one (an instrument preset in a track query). Anything else is
+taken as a track preset. A row passed in has its `favorite` updated once LUNA accepts.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `preset` | \| `string` \| `Pick`\<[`PresetRow`](../interfaces/PresetRow.md), `"uid"`\> & `Partial`\<`Pick`\<[`PresetRow`](../interfaces/PresetRow.md), `"favorite"` \| `"pluginId"`\>\> |
+| `favorite` | `boolean` |
+| `options` | \{ `deviceTypeId?`: `string`; `pluginId?`: `string`; \} |
+| `options.deviceTypeId?` | `string` |
+| `options.pluginId?` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+const [row] = await luna.presets.query({ pluginId: 'uaudio_qi', search: 'Vocal' });
+await luna.presets.setFavorite(row, true, { pluginId: 'uaudio_qi' });
+const [track] = await luna.presets.query({ deviceTypeId: 'track', search: 'Bass Rig' });
+await luna.presets.setFavorite(track, true);
+```
+
+***
+
 ### tagGroups()
 
 ```ts
@@ -375,6 +448,36 @@ are not tagged.
 ```ts
 const groups = await luna.presets.tagGroups('uaudio_paradise_guitar_studio');
 groups.map((g) => g.name); // ['TYPE', 'GENRE', 'DESCRIPTION']
+```
+
+***
+
+### trackPresetPlugins()
+
+```ts
+trackPresetPlugins(preset): Promise<TrackPresetPlugin[] | undefined>;
+```
+
+The plugins a track preset uses, as LUNA's preset browser checks them before applying
+one (fact 176): read from the preset's package, `/workspace/sessions/<uid>`. Resolves to
+`undefined` when LUNA reports no list (not a track preset, or an older LUNA): that means
+unknown, not "no plugins".
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `preset` | `string` \| `Pick`\<[`PresetRow`](../interfaces/PresetRow.md), `"uid"`\> |
+
+#### Returns
+
+`Promise`\<[`TrackPresetPlugin`](../interfaces/TrackPresetPlugin.md)[] \| `undefined`\>
+
+#### Example
+
+```ts
+const needs = await luna.presets.trackPresetPlugins(row);
+const missing = needs?.filter((p) => !luna.plugins.byId(p.pluginId)?.installed.value) ?? [];
 ```
 
 ***

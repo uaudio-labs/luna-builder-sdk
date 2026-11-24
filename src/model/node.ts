@@ -54,6 +54,34 @@ export abstract class Node {
     return w;
   }
 
+  /**
+   * Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+   * LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+   * Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+   * for a command that publishes no enabled state (most are always enabled).
+   *
+   * @example
+   * const canPaste = session.context.commandEnabled('paste');
+   * canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+   */
+  commandEnabled(command: string): Prop<boolean> {
+    const path = this.commandPath(command);
+    if (!this.commandWatches.has(path)) {
+      const w = this.client.store.watch(path, { load: { flatvalue: true, commands: false, children: false } });
+      w.ready.catch(() => undefined);
+      this.commandWatches.set(path, w.release);
+      if (this.commandWatches.size === 1) this.onDispose(() => { for (const release of this.commandWatches.values()) release(); this.commandWatches.clear(); });
+    }
+    return this.client.store.cell<boolean>(path, 'enabled');
+  }
+
+  private readonly commandWatches = new Map<string, Unsubscribe>();
+
+  /** Where `command`'s node is: under this node. */
+  protected commandPath(command: string): string {
+    return `${this.path}/${command}`;
+  }
+
   /** Read-only property view. `value` is `undefined` until loaded or pushed. */
   protected prop<T>(name: string): Prop<T> {
     return this.client.store.cell<T>(this.path, name);
@@ -105,7 +133,7 @@ export abstract class Node {
     const check = <T>(run: () => Promise<T>): Promise<T> => (this.isDisposed ? Promise.reject(new Disposed(this.constructor.name, this.path)) : run());
     return {
       get: (path, options) => check(() => raw.get(path, options)),
-      set: (path, data) => check(() => raw.set(path, data)),
+      set: (path, data, params) => check(() => (params ? raw.set(path, data, params) : raw.set(path, data))),
       post: (path, data) => check(() => raw.post(path, data)),
     };
   }

@@ -150,10 +150,15 @@ Anything `during` does happens while the port is down, so its pushes are missed.
 ### set()
 
 ```ts
-set(path, data): Promise<void>;
+set(
+   path, 
+   data, 
+params?): Promise<void>;
 ```
 
-Write a property. Resolves when the engine acknowledges.
+Write a property. Resolves when the engine acknowledges. `params` are request parameters
+sent beside the write as query parameters, for a write the engine qualifies by them
+(`name_modified=true` on a track rename, fact 165); most writes have none.
 
 #### Parameters
 
@@ -161,6 +166,7 @@ Write a property. Resolves when the engine acknowledges.
 | ------ | ------ |
 | `path` | `string` |
 | `data` | `unknown` |
+| `params?` | `Record`\<`string`, `string`\> |
 
 #### Returns
 

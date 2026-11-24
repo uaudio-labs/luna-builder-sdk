@@ -89,8 +89,12 @@ interface Port {
     readonly connected: boolean;
     /** Read a node or property. Resolves to the reply `data`. */
     get(path: string, options?: GetOptions): Promise<unknown>;
-    /** Write a property. Resolves when the engine acknowledges. */
-    set(path: string, data: unknown): Promise<void>;
+    /**
+     * Write a property. Resolves when the engine acknowledges. `params` are request parameters
+     * sent beside the write as query parameters, for a write the engine qualifies by them
+     * (`name_modified=true` on a track rename, fact 165); most writes have none.
+     */
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     /** Invoke a command. Resolves to the reply `data` (often `null`). */
     post(path: string, data?: unknown): Promise<unknown>;
     /**
@@ -344,7 +348,7 @@ declare class WebSocketPort implements Port {
      */
     open(): Promise<void>;
     get(path: string, options?: GetOptions): Promise<unknown>;
-    set(path: string, data: unknown): Promise<void>;
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     post(path: string, data?: unknown): Promise<unknown>;
     subscribe(path: string, handler: EventHandler, options?: SubscribeOptions): Unsubscribe;
     onStatus(listener: StatusListener): Unsubscribe;
@@ -366,6 +370,14 @@ interface MockNodeSpec {
     properties?: Record<string, unknown>;
     readOnly?: string[];
     commands?: Record<string, CommandHandler>;
+}
+/** How {@link MockEngine.startJob} ends the next job; see {@link MockEngine.planNextJob}. */
+interface MockJobPlan {
+    outcome?: 'completed' | 'empty' | 'failed' | 'instant' | undefined;
+    /** The `job.*` error a `failed` job reports. Default `job.internal`. */
+    error?: string;
+    /** Keep the job running until `engine.finishJob(uid)` or a cancel. */
+    hold?: boolean;
 }
 /** A row for {@link MockEngine.midiEdit}. */
 interface MockMidiRow {
@@ -405,6 +417,11 @@ interface MockEngineOptions {
      * clips. Default `true`; `false` models a LUNA from before they were added (fact 116).
      */
     compiledClipFades?: boolean;
+    /**
+     * Publish LUNA's Auto Gain service at `/auto_gain`. Default `true`; `false` models a LUNA
+     * whose Auto Gain feature is off, where the node does not exist (fact 191).
+     */
+    autoGain?: boolean;
 }
 declare class MockEngine {
     private readonly nodes;
@@ -563,6 +580,7 @@ declare class MockEngine {
         formats?: [string, string][];
         favorite?: boolean;
         version?: string;
+        sdkType?: string;
     }): void;
     /** `/plugins/query` (fact 127), with LUNA's slot rules. Categories pass through untranslated. */
     queryPlugins(data: unknown): {
@@ -578,6 +596,7 @@ declare class MockEngine {
         favorite?: boolean;
         version?: number;
         tags?: string[];
+        description?: string;
     }): string;
     /**
      * `/presets/query` (facts 98, 120, 132). A plugin's presets, or a device type's; with
@@ -602,11 +621,20 @@ declare class MockEngine {
         factory?: boolean;
         favorite?: boolean;
         tags?: string[];
+        description?: string;
+        plugins?: {
+            plugin_id: string;
+            name: string;
+        }[];
     }): string;
     /** Add a group of track preset tags, as {@link addPresetTagGroup} does for a plugin. */
     addTrackPresetTagGroup(name: string, tags: string[], options?: {
         category?: string;
     }): string;
+    private static readonly SLOT_STATE;
+    private slotState;
+    private applySlotState;
+    private clearSlot;
     /**
      * `post /presets/devices/track/load` (fact 132): a track preset or an instrument plugin's
      * preset onto a track. The track records the preset and takes its name unless its
@@ -638,12 +666,139 @@ declare class MockEngine {
      * whose `uid` is given (fact 122).
      */
     private ensurePresetPlugin;
-    /** Register a session package in the workspace. */
+    /**
+     * Add an analysis result to a source (fact 205): `<source>/analysis/<kind>` with `count`,
+     * `md5` and versions, and its stored result as `payload`, which a `file/data` read answers.
+     * `transients` pages by `index`/`count` like LUNA; the others answer whole. Pass the payload
+     * in LUNA's shape (fact 207), e.g. `{ data: { keyData: [{ key: 'C major', confidence: 0.9 }] } }`.
+     * Adding it again updates the node, as a re-analysis does (fact 206).
+     *
+     * @example
+     * engine.addAnalysis('pkg1', 'src1', 'instrument', { instrument: 'vocals', confidence: 0.8 });
+     */
+    addAnalysis(packageUid: string, sourceUid: string, kind: string, payload: Record<string, unknown>, options?: {
+        count?: number;
+        md5?: string | null;
+        sourcePath?: string;
+    }): void;
+    /** A `file/data` read of a non-overview analysis: LUNA answers nothing without a count (fact 205). */
+    private analysisPage;
+    /**
+     * How the next job the mock starts ends (facts 200-202): `completed` (default), `empty`
+     * (LUNA's `failed` with `job.no_result`), `failed` with `error`, or `instant`, where the job
+     * is added, finished and removed in one turn, as LUNA's cached-analysis path can (fact 202).
+     * `hold` keeps it running until {@link finishJob} or a cancel.
+     *
+     * @example
+     * engine.planNextJob({ outcome: 'failed', error: 'job.provider_unavailable' });
+     */
+    planNextJob(plan: MockJobPlan): void;
+    /**
+     * Start a job under `/jobs/<uid>` as deviced's Job_Service does (fact 200): the node appears
+     * (status `queued`) a turn after the command answers, runs and reports progress a turn at a
+     * time, then publishes its error and terminal status and is removed in the same turn.
+     * `work` runs just before it ends and answers whether anything was found. Returns the uid.
+     *
+     * @example
+     * const uid = engine.startJob({ sessionUid: 'abc', jobType: 'chord_extraction' });
+     */
+    startJob(spec: {
+        sessionUid: string;
+        jobType: string;
+        targetUid?: string;
+        work?: () => boolean;
+    }): string;
+    /** End a job started under a `hold` plan (see {@link planNextJob}). */
+    finishJob(uid: string): void;
+    private readonly jobPlans;
+    private readonly jobFinishers;
+    /**
+     * `extract_chords` and `extract_lyrics` on the session's main context (facts 203, 204): a
+     * clip, or the context's selected playlists; the job targets the clip's track. What they
+     * find is the mock's stand-in, not a detector's: chords `C G Am F` a bar apart over the clip,
+     * and one transcribed line per second of source.
+     */
+    private installExtractionCommands;
+    /**
+     * Add a lyric line to a session (fact 152): a ruler line at a tick, or with `sourceUid` a line
+     * transcribed from that source, at nanoseconds into it. `words` is stored as LUNA sends it, a
+     * JSON string. Answers the line's rowid.
+     */
+    addLyric(session: string, line: {
+        location: number;
+        text: string;
+        length?: number;
+        sourceUid?: string;
+        words?: {
+            word: string;
+            offset: number;
+            length: number;
+        }[];
+        rowid?: number;
+    }): number;
+    /**
+     * Register a session package in the workspace. `template` makes it a session template
+     * (`.lunatemplate`) that `new_session_from_template` copies, with `tracks` as the new
+     * session's tracks; `online: false` is one whose file is missing. `sessionType` is the
+     * row's `session_type` (`'default'`, `'standalone'`, ...), `directoryPath` its folder.
+     */
     addPackage(uid: string, options?: {
         name?: string;
         lastOpened?: number;
         favorite?: boolean;
+        factory?: boolean;
+        template?: boolean;
+        tracks?: string[];
+        online?: boolean;
+        directoryPath?: string;
+        sessionType?: string;
     }): void;
+    /**
+     * Make `delete_unused_media` keep a file of a package for `reason` (`'undo'`, `'version'`,
+     * `'backup'`, ...), as LUNA keeps one undo history or a saved version still uses (fact 240).
+     *
+     * @example engine.keepMedia('pkg_abc', 'src3', 'undo');
+     */
+    keepMedia(packageUid: string, uid: string, reason: string): void;
+    /**
+     * Publish whether `command` on `nodePath` is enabled, as LUNA does at
+     * `<nodePath>/<command>/enabled` (fact 234), and push changes. Posting the command is not
+     * affected: LUNA's own handlers decide what a disabled command does.
+     */
+    setCommandEnabled(nodePath: string, command: string, enabled: boolean): void;
+    /**
+     * Raise an error notice in `/errors` (fact 235), as LUNA's error service does: `group` is
+     * stored as LUNA stores it, JSON text. Answers its uid.
+     */
+    addErrorNotice(notice: {
+        level?: string;
+        code: string;
+        title?: string;
+        payload?: string;
+        groups?: string[];
+        uid?: string;
+        timestamp?: number;
+    }): string;
+    /** Per template package, the tracks a session made from it starts with. */
+    readonly templateTracks: Map<string, string[]>;
+    /**
+     * Preference contexts as LUNA keeps them on disk, one record per context (fact 232): a
+     * context is loaded into `/preferences/<context>` only when `init_preference` names it.
+     * Seed one to model values left by an earlier run.
+     */
+    readonly preferenceFiles: Map<string, Record<string, unknown>>;
+    /** Packages whose file is missing: the query answers `file_online: false` for them. */
+    readonly offlinePackages: Set<string>;
+    /** Tags per session package, added with `/workspace/add_tag` or set here (fact 161). */
+    readonly packageTags: Map<string, string[]>;
+    /** MIDI and video files `import_file` copied into packages (fact 163). */
+    readonly importedFiles: {
+        pkg: string;
+        uid: string;
+        type: 'midi' | 'video';
+        name: string;
+        path: string;
+    }[];
     /** A new client connection. */
     port(): MockPort;
     /** Create a node (and any missing ancestors). Pushes `added` to subscribers. */
@@ -726,10 +881,12 @@ declare class MockEngine {
     private readonly recommenders;
     /**
      * Replace the handler of the command at `path` (for example
-     * `/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71).
+     * `/sessions/abc/set_marker`), to reproduce a verb that answers without acting (fact 71),
+     * or add a command the mock does not model to a node it has.
      *
      * @example
      * engine.overrideCommand('/sessions/abc/delete_clip', () => null);
+     * engine.overrideCommand('/workspace/some_new_command', (data) => ({ ok: true }));
      */
     overrideCommand(path: string, handler: CommandHandler): void;
     /** Make the next `times` requests on `path` fail with `code`. */
@@ -750,6 +907,10 @@ declare class MockEngine {
         trackType?: string;
         stemFormat?: string;
     }): void;
+    /** The `/gui` progress suppression handles held, uid (no dashes) to owner (fact 223). */
+    get progressSuppressions(): ReadonlyMap<string, string>;
+    /** An embedded LUNA page (`dashboard`, `luna_play`, ...) reloading: drops its and every legacy suppression (fact 224). */
+    resetWebClient(owner: string): void;
     /**
      * Add a source audio file to a session package's workspace folder. With `analysis`, it also
      * carries a fine and a coarse overview, sized from its length the way LUNA's is: one fine
@@ -757,23 +918,86 @@ declare class MockEngine {
      */
     addSource(packageUid: string, uid: string, options?: {
         name?: string;
+        unnamed?: boolean;
         stemFormat?: string;
         lengthNs?: number;
         sampleRate?: number;
         analysis?: boolean;
+        origin?: number;
+        format?: string;
     }): void;
     /**
-     * Add a hardware device with `inputs` named inputs, the shape `luna.audioInputs()` reads
-     * (fact 76).
+     * Add a hardware device with `inputs` named inputs (uids `in_1`, `in_2`, ...) and `outputs`
+     * named outputs (`out_1`, ...), with the properties LUNA's input and output nodes publish
+     * (facts 76, 185, 189). Each input carries the four live analyses, off (fact 186). With
+     * `autoGain`, tracks routed to its inputs report `supports_auto_gain` (fact 194).
      *
      * @example
-     * engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'] });
+     * engine.addDevice('Apollo', { inputs: ['In 1', 'In 2'], outputs: ['Monitor'], autoGain: true });
      */
     addDevice(id: string, options?: {
         inputs?: string[];
+        outputs?: string[];
         stemFormat?: string;
         online?: boolean;
+        autoGain?: boolean;
+        ioType?: string;
     }): void;
+    /**
+     * Plug an input into a device that exists (hotplug): LUNA pushes it as `added` (fact 185).
+     * Unplug one with `removeNode`.
+     *
+     * @example
+     * engine.addDeviceInput('Apollo', 'Hi-Z', { uid: 'hiz' });
+     */
+    addDeviceInput(deviceId: string, name: string, options?: {
+        uid?: string;
+        stemFormat?: string;
+        channel?: number;
+        ioType?: string;
+    }): string;
+    /**
+     * Publish analysis results on a device input, as LUNA does when a result is due (fact 187).
+     * A result for an analysis that is off is dropped, as LUNA has nothing running to produce it;
+     * returns whether anything was published. A signal-level peak also reaches any Auto Gain
+     * channel listening to a track on that input (fact 191).
+     *
+     * @example
+     * engine.setInputAnalysis('Apollo', 'in_1', { signalLevelPeak: 0.5, tempo: 120 });
+     */
+    setInputAnalysis(deviceId: string, inputUid: string, results: {
+        signalLevelPeak?: number;
+        tempo?: number;
+        instrument?: string | null;
+        stereoDetect?: boolean;
+    }): boolean;
+    /**
+     * Change the root's `active_audio_engine` (fact 190), as LUNA does when the driver or the
+     * audio setting changes.
+     *
+     * @example
+     * engine.setActiveAudioEngine({ enabled: false, audio_engine_type: '', devices: [] });
+     */
+    setActiveAudioEngine(info: {
+        enabled: boolean;
+        audio_engine_type: string;
+        devices: unknown[];
+        outputs?: unknown[];
+    }): void;
+    /** Devices whose inputs support Auto Gain (`addDevice({ autoGain })`). */
+    private readonly autoGainDevices;
+    /** True when a track in any session is routed to the input `uid` (fact 185). */
+    private inputUsed;
+    /** The device input path a track is routed to, if it names one. */
+    private inputOfChannel;
+    /** After a routing change: every input's `in_use`, and the track's `supports_auto_gain` (facts 185, 194). */
+    private routingChanged;
+    /** An analysis switch moved: LUNA republishes the result at its no-result value (facts 186-187). */
+    private analysisSwitched;
+    /** LUNA itself moving an input's signal-level switch (Auto Gain, fact 188): pushed to every client. */
+    private switchSignalLevel;
+    /** `/auto_gain`, its `channels` and its commands (facts 191-193). */
+    private addAutoGainService;
     /**
      * Add a MIDI device under LUNA's device (`/devices/<LUNA_DEVICE_UID>/midi`, fact 123). The
      * first call also adds LUNA's device, the `midi` folder, and the `All` and `None` entries
@@ -956,7 +1180,7 @@ declare class MockPort implements Port {
     private readonly statusListeners;
     get connected(): boolean;
     get(path: string, options?: GetOptions): Promise<unknown>;
-    set(path: string, data: unknown): Promise<void>;
+    set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
     post(path: string, data?: unknown): Promise<unknown>;
     subscribe(path: string, handler: EventHandler, _options?: SubscribeOptions): Unsubscribe;
     onStatus(listener: StatusListener): Unsubscribe;
@@ -970,4 +1194,4 @@ declare class MockPort implements Port {
     private setStatus;
 }
 
-export { type CommandHandler, ConnectionLost, DEFAULT_LUNA_PORT, Disposed, type Event, type EventHandler, FloatLiteral, type GetOptions, type LogFn, type LogLevel, MockEngine, type MockEngineOptions, type MockMidiRow, type MockMidiSent, type MockNodeSpec, MockPort, NoSessionOpen, NotRunning, type Operation, type Port, type PortStatus, RequestTimeout, type SocketConstructor, type SocketLike, type StatusListener, type SubscribeOptions, UAError, type Unsubscribe, Unsupported, type Verb, WebSocketPort, type WebSocketPortOptions, type WireMessage, appendParams, consoleLog, correlationId, decodeMessage, encodePayload, encodeRequest, eventMatches, expandMulti, float, getOptionsToParams, joinPath, propertyValue, splitPath, stripValueSuffix, toEvent };
+export { type CommandHandler, ConnectionLost, DEFAULT_LUNA_PORT, Disposed, type Event, type EventHandler, FloatLiteral, type GetOptions, type LogFn, type LogLevel, MockEngine, type MockEngineOptions, type MockJobPlan, type MockMidiRow, type MockMidiSent, type MockNodeSpec, MockPort, NoSessionOpen, NotRunning, type Operation, type Port, type PortStatus, RequestTimeout, type SocketConstructor, type SocketLike, type StatusListener, type SubscribeOptions, UAError, type Unsubscribe, Unsupported, type Verb, WebSocketPort, type WebSocketPortOptions, type WireMessage, appendParams, consoleLog, correlationId, decodeMessage, encodePayload, encodeRequest, eventMatches, expandMulti, float, getOptionsToParams, joinPath, propertyValue, splitPath, stripValueSuffix, toEvent };

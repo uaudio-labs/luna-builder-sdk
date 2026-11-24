@@ -82,7 +82,14 @@ await Luna.settle(() => thing.value.value === expected, 'some edit', { refresh: 
 
 If part of this workflow was harder than the SDK should make it — a missing API, an
 awkward idiom, boilerplate the SDK could absorb — end your reply with the line
-`LUNA BUILDER SDK FEEDBACK: <version>`, where `<version>` is the `ua-builder` row of
-`ua-builder doctor` (for example `LUNA BUILDER SDK FEEDBACK: 0.1.0.1234`), followed by a
+`LUNA BUILDER SDK IMPROVEMENT: <version>`, where `<version>` is the `ua-builder` row of
+`ua-builder doctor` (for example `LUNA BUILDER SDK IMPROVEMENT: 0.1.0.1234`), followed by a
 prompt that can be used to update the SDK to support the improved workflow: what you were
 doing, what was awkward, and the API you wished for.
+
+Then ask the user whether to send the improvement to Universal Audio, and say that sending
+it needs a GitHub account. If they agree, run
+`ua-builder feedback improvement --title "<one-line summary>" --body-file -` with the prompt on
+stdin (add `--luna-version <x.y.z>` when you know it). It opens a prefilled issue in their
+browser for them to check and submit. A bug or feature request the user wants to report goes
+the same way, as `ua-builder feedback bug` or `ua-builder feedback feature`.

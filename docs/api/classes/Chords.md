@@ -111,6 +111,40 @@ byId(id): Chord | undefined;
 
 ***
 
+### detect()
+
+```ts
+detect(options): JobRun;
+```
+
+Detect the chords in a clip, or in the edit context's selection (one track), and write
+them onto this ruler, as LUNA's Detect Chords does: `extract_chords`, which runs as a
+`chord_extraction` job (facts 200, 203). The chords land here as they are written; the
+returned [JobRun](JobRun.md) reports progress and resolves when the job completes, with
+`empty: true` when nothing was found. LUNA also keeps what it found per source in
+`source.analysis.chord`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`ExtractionOptions`](../interfaces/ExtractionOptions.md) |
+
+#### Returns
+
+[`JobRun`](JobRun.md)
+
+#### Example
+
+```ts
+const run = session.musical.chords.detect({ clip });
+run.progress.onChange(() => (bar.value = run.progress.value ?? 0));
+await run;
+session.musical.chords.sorted.map((c) => c.name.value);
+```
+
+***
+
 ### load()
 
 ```ts
@@ -154,6 +188,44 @@ lane.clips.items.at(-1).start.value;   // loaded, not undefined
 #### Inherited from
 
 [`Collection`](Collection.md).[`membersReady`](Collection.md#membersready)
+
+***
+
+### onAnyChange()
+
+```ts
+onAnyChange(listener, options): Unsubscribe;
+```
+
+Called when members are added or removed, or when any of the named props of any member
+changes: one listener for "redraw the list". The per-member subscriptions follow the
+list, so a member added later is covered and a removed one is let go. Several changes in
+the same turn call the listener once.
+
+`props` are the member's prop fields by name (`'name'`, `'length'`), not wire names.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `listener` | () => `void` |
+| `options` | \{ `props?`: readonly [`PropKey`](../type-aliases/PropKey.md)\<[`Chord`](Chord.md)\>[]; \} |
+| `options.props?` | readonly [`PropKey`](../type-aliases/PropKey.md)\<[`Chord`](Chord.md)\>[] |
+
+#### Returns
+
+[`Unsubscribe`](../type-aliases/Unsubscribe.md)
+
+#### Example
+
+```ts
+const sources = await session.loadSources();
+const stop = sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+```
+
+#### Inherited from
+
+[`Collection`](Collection.md).[`onAnyChange`](Collection.md#onanychange)
 
 ***
 

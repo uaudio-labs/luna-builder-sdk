@@ -7,6 +7,7 @@
  * @example
  * const beats = location.tick / Luna.TICKS_PER_BEAT;
  * const displayTick = Math.floor((location.tick % Luna.TICKS_PER_BEAT) / Luna.TICKS_PER_DISPLAY_TICK);
+ * const grid = Luna.triplet(Luna.THIRTY_SECOND_NOTE);   // note lengths, in engine ticks
  */
 export const DISPLAY_TICKS_PER_BEAT = 960;
 export const TICKS_PER_DISPLAY_TICK = 100_000_000;
@@ -17,6 +18,33 @@ export const HALF_NOTE = TICKS_PER_BEAT * 2;
 export const QUARTER_NOTE = TICKS_PER_BEAT;
 export const EIGHTH_NOTE = TICKS_PER_BEAT / 2;
 export const SIXTEENTH_NOTE = TICKS_PER_BEAT / 4;
+export const THIRTY_SECOND_NOTE = TICKS_PER_BEAT / 8;
+export const SIXTY_FOURTH_NOTE = TICKS_PER_BEAT / 16;
+export const ONE_TWENTY_EIGHTH_NOTE = TICKS_PER_BEAT / 32;
+
+/**
+ * The dotted length of a note: one and a half times it. Takes and gives engine ticks, so it
+ * composes with the note constants for a grid or a quantize value.
+ *
+ * @example
+ * Luna.dotted(Luna.QUARTER_NOTE);              // 144e9, a dotted quarter
+ * Luna.dotted(Luna.dotted(Luna.EIGHTH_NOTE));  // not double-dotted: 1.5 * 1.5 * an eighth
+ */
+export function dotted(note: number): number {
+  return note + note / 2;
+}
+
+/**
+ * The triplet length of a note: two thirds of it, so three fill the time of two. Takes and
+ * gives engine ticks (whole numbers for every note constant here, 128th included).
+ *
+ * @example
+ * Luna.triplet(Luna.EIGHTH_NOTE);    // 32e9, three of them per beat
+ * const grid = Luna.triplet(Luna.SIXTEENTH_NOTE);
+ */
+export function triplet(note: number): number {
+  return (note * 2) / 3;
+}
 
 /**
  * A bar|beat position as the engine reports it in `location.bar_beat`, and as

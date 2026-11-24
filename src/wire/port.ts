@@ -98,8 +98,12 @@ export interface Port {
   readonly connected: boolean;
   /** Read a node or property. Resolves to the reply `data`. */
   get(path: string, options?: GetOptions): Promise<unknown>;
-  /** Write a property. Resolves when the engine acknowledges. */
-  set(path: string, data: unknown): Promise<void>;
+  /**
+   * Write a property. Resolves when the engine acknowledges. `params` are request parameters
+   * sent beside the write as query parameters, for a write the engine qualifies by them
+   * (`name_modified=true` on a track rename, fact 165); most writes have none.
+   */
+  set(path: string, data: unknown, params?: Record<string, string>): Promise<void>;
   /** Invoke a command. Resolves to the reply `data` (often `null`). */
   post(path: string, data?: unknown): Promise<unknown>;
   /**

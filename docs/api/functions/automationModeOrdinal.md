@@ -10,7 +10,7 @@ Commands take the mode as an integer ordinal; the track property reports it as a
 
 | Parameter | Type |
 | ------ | ------ |
-| `mode` | `"latch"` \| `"read"` \| `"off"` \| `"write"` \| `"touch"` |
+| `mode` | `"read"` \| `"off"` \| `"write"` \| `"touch"` \| `"latch"` |
 
 ## Returns
 

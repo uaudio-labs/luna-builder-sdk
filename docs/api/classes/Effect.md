@@ -16,7 +16,7 @@
 | <a id="enabled"></a> `enabled` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | Reported by the engine; not the bypass state. See [in](#in). | - |
 | <a id="frozen"></a> `frozen` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="in"></a> `in` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean` \| `undefined`\> | IN (true) or bypassed (false); `undefined` until known or when the plugin has no bypass control. | - |
-| <a id="inserttype"></a> `insertType` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="inserttype"></a> `insertType` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`InsertSlot`](../type-aliases/InsertSlot.md)\> | - | - |
 | <a id="instanceid"></a> `instanceId` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number` \| `null`\> | The plugin instance id, set once the plugin has loaded (fact 86). `plugin_name` is not a load signal: it can stay null for a loaded plugin; the catalog has the name. | - |
 | <a id="loaded"></a> `loaded` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | True once a plugin is loaded in this slot without an error. | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
@@ -220,6 +220,69 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
+### copyTo()
+
+```ts
+copyTo(destination, options): Promise<void>;
+```
+
+Copy the plugin in this slot, with its state, parameters, automation and preset, to
+`destination`, leaving this slot as it is. See [moveTo](#moveto) for the rules.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `destination` | `Effect` |
+| `options` | \{ `timeoutMs?`: `number`; \} |
+| `options.timeoutMs?` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await vocal.effects.byId('effect_0')!.copyTo(backing.effects.byId('effect_0')!);
+```
+
+***
+
 ### load()
 
 ```ts
@@ -272,6 +335,42 @@ Rejects with code `unavailable` when the slot is empty.
 const [row] = await luna.presets.query({ pluginId: slot.pluginId.value!, search: 'Clean' });
 await slot.loadPreset(row.uid);
 slot.presetName.value; // row.name
+```
+
+***
+
+### moveTo()
+
+```ts
+moveTo(destination, options): Promise<void>;
+```
+
+Move the plugin in this slot to `destination`, on this channel or another of the session,
+with its state, parameters, automation and preset, in one undo step (`move_insert`,
+fact 173). An occupied `effect_N` destination makes room: LUNA shuffles its neighbours
+toward the nearest empty slot. Resolves once `destination` shows the plugin.
+
+The SDK refuses (code `invalid_slot`) a move between slots of different kinds, such as the
+`console` slot and an `effect_N` slot: LUNA does not check, and such a move corrupts the
+channel's chain. It refuses an empty source with `empty_slot`, since LUNA would clear the
+destination.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `destination` | `Effect` |
+| `options` | \{ `timeoutMs?`: `number`; \} |
+| `options.timeoutMs?` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await track.effects.byId('effect_0')!.moveTo(track.effects.byId('effect_3')!);
 ```
 
 ***
@@ -488,6 +587,38 @@ await slot.setPlugin('com.uaudio.uadx.1176');
 slot.loaded.value; // true
 const preset = await luna.presets.find('uaudio_qi', '4-Band EQ');
 await slot.setPlugin('uaudio_qi', { presetName: preset?.name, presetUid: preset?.uid });
+```
+
+***
+
+### setPower()
+
+```ts
+setPower(on, contextType): Promise<void>;
+```
+
+Power the plugin in this slot on or off (`plugin_power`) through the edit context's
+`set_inserts_power`, as LUNA's insert power switch does: one undo step, fanned out over the
+channel's mix group, and a frozen slot is left alone (fact 171). Power is not bypass (see
+[setIn](#setin)): every loaded plugin has it, instruments included. Resolves once
+[pluginPower](#pluginpower) shows it; for a frozen slot, on LUNA's reply.
+
+#### Parameters
+
+| Parameter | Type | Default value |
+| ------ | ------ | ------ |
+| `on` | `boolean` | `undefined` |
+| `contextType` | `string` | `'main'` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await slot.setPower(false);
+slot.pluginPower.value; // false
 ```
 
 ***

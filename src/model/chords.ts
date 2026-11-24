@@ -16,6 +16,7 @@ import { UAError } from '../wire/errors';
 import { Collection } from './collection';
 import { Node } from './node';
 import { requireTick, settle } from './settle';
+import { runExtraction, type ExtractionOptions, type JobRun } from './jobs';
 
 /** A chord name split the way LUNA spells chords: root, type suffix, slash bass. */
 export interface ParsedChord {
@@ -151,8 +152,30 @@ export class Chord extends Node {
 
 export class Chords extends Collection<Chord> {
   /** @internal */
-  constructor(client: Client, sessionPath: string, sessionUid: string) {
+  constructor(
+    client: Client,
+    sessionPath: string,
+    private readonly sessionUid: string,
+  ) {
     super(client, `${sessionPath}/chords`, (p) => new Chord(client, p, sessionUid), { levels: 2, commands: false, flatvalue: true });
+  }
+
+  /**
+   * Detect the chords in a clip, or in the edit context's selection (one track), and write
+   * them onto this ruler, as LUNA's Detect Chords does: `extract_chords`, which runs as a
+   * `chord_extraction` job (facts 200, 203). The chords land here as they are written; the
+   * returned {@link JobRun} reports progress and resolves when the job completes, with
+   * `empty: true` when nothing was found. LUNA also keeps what it found per source in
+   * `source.analysis.chord`.
+   *
+   * @example
+   * const run = session.musical.chords.detect({ clip });
+   * run.progress.onChange(() => (bar.value = run.progress.value ?? 0));
+   * await run;
+   * session.musical.chords.sorted.map((c) => c.name.value);
+   */
+  detect(options: ExtractionOptions = {}): JobRun {
+    return runExtraction(this.client, this.sessionUid, 'extract_chords', 'chord_extraction', options);
   }
 
   /** Chords in timeline order. */

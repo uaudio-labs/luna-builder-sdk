@@ -447,6 +447,130 @@ describe('Luna.Workspace and system nodes', () => {
     expect(luna.workspace.packages.byId('fav')?.name).toBe('Fav Song');
   });
 
+  it('lists only the session templates whose files are there (fact 151)', async () => {
+    const { engine, luna } = await connected();
+    engine.addPackage('song', { name: 'Song' });
+    engine.addPackage('tpl', { name: 'Maris Brochure', template: true, factory: true });
+    engine.addPackage('gone', { name: 'Deleted Template', template: true, online: false });
+    const templates = await luna.workspace.templates();
+    expect(templates.map((t) => t.uid)).toEqual(['tpl']);
+    expect(templates[0]).toMatchObject({ name: 'Maris Brochure', sessionType: 3, factory: true, online: true });
+  });
+
+  it('creates a loaded session from a template, as a new package, under the uid it sends (fact 151)', async () => {
+    const { engine } = await connected();
+    engine.addPackage('4b9090e269604898922de73746070db0', { name: 'Maris Brochure', template: true, tracks: ['Maris Lead', 'Backing Track'] });
+    const sent: unknown[] = [];
+    const port = engine.port();
+    const post = port.post.bind(port);
+    port.post = (path, data) => { if (path === '/sessions/new_session_from_template') sent.push(data); return post(path, data); };
+    const client = await Luna.connect({ port_: port });
+
+    const session = await client.sessions.createFromTemplate({ templatePackageUid: '4b9090e2-6960-4898-922d-e73746070db0', name: 'Maris Brochure Copy' });
+    expect(sent).toEqual([{ name: 'Maris Brochure Copy', session_uid: session.id, session_package_uid: '4b9090e269604898922de73746070db0', read_only: false }]);
+    expect(session.id).toMatch(/^[0-9a-f]{32}$/);
+    expect(session.loaded.value).toBe(true);
+    expect(session.name.value).toBe('Maris Brochure Copy');
+    expect(session.sessionPackageUid.value).not.toBe('4b9090e269604898922de73746070db0');
+    await session.tracks.load();
+    expect(session.tracks.items.map((t) => t.name.value)).toEqual(['Maris Lead', 'Backing Track']);
+    expect(engine.has('/workspace/sessions/4b9090e269604898922de73746070db0')).toBe(true);
+  });
+
+  it('sends a destination folder as path, and refuses a missing template', async () => {
+    const { engine, luna } = await connected();
+    engine.addPackage('tpl', { template: true });
+    engine.addPackage('song', { name: 'Song' });
+    const sent: Record<string, unknown>[] = [];
+    const port = engine.port();
+    const post = port.post.bind(port);
+    port.post = (path, data) => { if (path === '/sessions/new_session_from_template') sent.push(data as Record<string, unknown>); return post(path, data); };
+    const client = await Luna.connect({ port_: port });
+
+    await client.sessions.createFromTemplate({ templatePackageUid: 'tpl', name: 'Copy', directoryPath: '/Users/me/Sessions' });
+    expect(sent[0]).toMatchObject({ path: '/Users/me/Sessions' });
+    expect(sent[0]).not.toHaveProperty('directory_path');
+    await expect(luna.sessions.createFromTemplate({ templatePackageUid: 'song', name: 'X' })).rejects.toMatchObject({ code: 'device.database_error' });
+    await expect(luna.sessions.createFromTemplate({ templatePackageUid: 'nope', name: 'X' })).rejects.toMatchObject({ code: 'device.filesystem_error' });
+    await expect(luna.sessions.createFromTemplate({ templatePackageUid: '', name: 'X' })).rejects.toThrow('needs a templatePackageUid');
+  });
+
+  it('creates a session under a fixed package uid, type and standalone folder (fact 237)', async () => {
+    const { engine } = await connected();
+    const sent: Record<string, unknown>[] = [];
+    const port = engine.port();
+    const post = port.post.bind(port);
+    port.post = (path, data) => { if (path === '/sessions/new_session') sent.push(data as Record<string, unknown>); return post(path, data); };
+    const client = await Luna.connect({ port_: port });
+
+    const session = await client.sessions.create({ name: 'Practice', sessionPackageUid: '7d3c0f9e-2b8a-4c61-a5e4-f0b9c2d1e3a7', sessionType: 'standalone', standaloneId: 'com.example.practice' });
+    expect(sent).toEqual([{ name: 'Practice', session_package_uid: '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7', session_type: 'standalone', standalone_id: 'com.example.practice' }]);
+    expect(session.sessionPackageUid.value).toBe('7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7');
+    const row = (await client.workspace.query()).find((r) => r.uid === '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7');
+    expect(row).toMatchObject({ uid: '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7', name: 'Practice', online: true, sessionType: 0 });
+    expect(engine.value('/workspace/sessions/7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7', 'directory_path')).toBe('/tmp/standalone/com.example.practice/Practice');
+
+    await client.sessions.create({ name: 'Plain' });
+    expect(sent[1]).toEqual({ name: 'Plain' });
+  });
+
+  it('reopens an Add On\'s own session by its package uid, named from the workspace row', async () => {
+    const { engine } = await connected();
+    engine.addPackage('other', { name: 'Someone Else' });
+    const posted: string[] = [];
+    const port = engine.port();
+    const post = port.post.bind(port);
+    port.post = (path, data) => { posted.push(path); return post(path, data); };
+    const luna = await Luna.connect({ port_: port });
+    const sessionPackageUid = '7d3c0f9e2b8a4c61a5e4f0b9c2d1e3a7';
+    const ownSession = async () => {
+      const row = (await luna.workspace.query()).find((r) => r.uid === sessionPackageUid);
+      return row?.online ? luna.sessions.open(sessionPackageUid) : luna.sessions.create({ name: 'My Add On', sessionPackageUid });
+    };
+    const first = await ownSession();
+    await luna.sessions.close(first.id);
+    const again = await ownSession();
+    expect(posted.filter((p) => p.endsWith('_session') && !p.endsWith('load_session'))).toEqual(['/sessions/new_session', '/sessions/close_session', '/sessions/open_session']);
+    expect(again.sessionPackageUid.value).toBe(sessionPackageUid);
+    expect(again.name.value).toBe('My Add On');
+  });
+
+  it('reads a session’s lyrics, ruler and transcribed, with their words (fact 152)', async () => {
+    const { engine, session } = await connected();
+    const source = 'c42b76fba5944509b178af83706c52ec';
+    engine.addLyric('abc', { location: 5_190_000_000, length: 13_930_000_000, text: 'Uh, is this thing on?', sourceUid: source, words: [{ word: 'Uh,', offset: 0, length: 59_999_999 }, { word: 'is', offset: 1_670_000_000, length: 139_999_999 }] });
+    engine.addLyric('abc', { location: 2_540_000_000, text: 'Na-na-na', sourceUid: source });
+    engine.addLyric('abc', { location: Luna.WHOLE_NOTE * 4, text: 'typed on the ruler' });
+    await engine.settled();
+
+    await session.lyrics.load();
+    const [first, second, ruler] = [...session.lyrics.sorted.filter((l) => l.transcribed), ...session.lyrics.sorted.filter((l) => !l.transcribed)];
+    expect(first?.text.value).toBe('Na-na-na');
+    expect(second?.text.value).toBe('Uh, is this thing on?');
+    expect(second?.sourceUid.value).toBe(source);
+    expect(second?.length.value).toBe(13_930_000_000);
+    expect(second?.words.value).toEqual([{ word: 'Uh,', offset: 0, length: 59_999_999 }, { word: 'is', offset: 1_670_000_000, length: 139_999_999 }]);
+    expect(ruler?.transcribed).toBe(false);
+    expect(ruler?.location.value).toBe(Luna.WHOLE_NOTE * 4);
+    expect(ruler?.words.value).toEqual([]);
+  });
+
+  it('follows lines LUNA adds and removes after loading (fact 152)', async () => {
+    const { engine, session } = await connected();
+    await session.lyrics.load();
+    let changes = 0;
+    session.lyrics.onChange(() => changes++);
+    const rowid = engine.addLyric('abc', { location: 0, text: 'first line' });
+    await engine.settled();
+    // An added line arrives without its properties on native LUNA (fact 7); they follow.
+    await session.lyrics.membersReady();
+    expect(session.lyrics.items.map((l) => l.text.value)).toEqual(['first line']);
+    engine.removeNode(`/sessions/abc/lyrics/${rowid}`);
+    await engine.settled();
+    expect(session.lyrics.items).toHaveLength(0);
+    expect(changes).toBeGreaterThan(0);
+  });
+
   it('reads drivers and preferences and writes a preference', async () => {
     const { engine, luna } = await connected();
     await Promise.all([luna.drivers.load(), luna.preferences.load()]);

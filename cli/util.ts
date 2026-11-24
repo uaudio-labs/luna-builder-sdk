@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ADD_ON_CATEGORIES, isAddOnCategory, suggestAddOnCategories } from '../src/model/add-on-categories';
 
@@ -52,6 +52,17 @@ export function parseArgs(argv: string[]): Args {
     }
   }
   return { positional, flags };
+}
+
+/** An error's message, or the thrown value as text when it isn't an `Error`. */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** `pathname` joined under `base`, or `undefined` when it would land outside `base`. */
+export function safeJoin(base: string, pathname: string): string | undefined {
+  const full = normalize(join(base, pathname));
+  return full === normalize(base) || full.startsWith(normalize(base + sep)) ? full : undefined;
 }
 
 export function flagString(args: Args, key: string): string | undefined {
@@ -681,6 +692,8 @@ export function usage(): string {
   ua-builder pack [dir] [--out Name.lunaaddon] [--source-maps]
   ua-builder doctor
   ua-builder tree [path] [--levels 1] [--out tree.json]   the shape of LUNA's tree (read-only)
+  ua-builder feedback <improvement|bug|feature|feedback> --title "Summary" [--body "Text" | --body-file <file|->] [--print]
+                        open a prefilled issue for UA (needs a GitHub account to send)
 
 Docs: docs/QUICKSTART.md, docs/MANIFEST.md in the @uaudio/luna-builder-sdk package.`;
 }

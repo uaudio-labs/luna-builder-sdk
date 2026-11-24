@@ -15,6 +15,7 @@
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="pluginwindows"></a> `pluginWindows` | `readonly` | [`Prop`](../interfaces/Prop.md)\<readonly [`PluginWindow`](../interfaces/PluginWindow.md)[] \| `undefined`\> | The plugin editor windows open in LUNA, opened from the page or by the user (fact 126). `undefined` until known, and on a LUNA that does not publish them. Follows LUNA once [watchPluginWindows](#watchpluginwindows) has run, which `session.ready()` does. Read one slot's state from `effect.editorOpen`. | - |
 | <a id="priorlaunchcount"></a> `priorLaunchCount` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
+| <a id="sessionstoragepath"></a> `sessionStoragePath` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | The folder LUNA creates new sessions in, as set in its Settings (fact 160). Read-only; it follows the setting once `/gui` is watched. `undefined` on an engine without `/gui`. **Example** `await luna.gui.watch().ready; luna.gui.sessionStoragePath.value; // e.g. "/Users/me/Music/LUNA"` | - |
 | <a id="windows"></a> `windows` | `readonly` | [`Collection`](Collection.md)\<[`GuiWindow`](GuiWindow.md)\> | Windows by context type; `main` is the arrangement window. | - |
 
 ## Accessors
@@ -285,6 +286,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
 ### execute()
 
 ```ts
@@ -323,7 +358,8 @@ Close the editor window of the plugin in `slot`, if it is open. See [showPlugin]
 | ------ | ------ |
 | `channelUid` | `string` |
 | `slot` | `string` |
-| `options` | \{ `sessionUid?`: `string`; \} |
+| `options` | \{ `contextType?`: `string`; `sessionUid?`: `string`; \} |
+| `options.contextType?` | `string` |
 | `options.sessionUid?` | `string` |
 
 #### Returns
@@ -334,6 +370,7 @@ Close the editor window of the plugin in `slot`, if it is open. See [showPlugin]
 
 ```ts
 await luna.gui.hidePlugin(track.id, 'effect_0');
+await luna.gui.hidePlugin(track.id, 'effect_0', { contextType: 'alt_1' });
 ```
 
 ***
@@ -798,21 +835,30 @@ if (path) video.src = await luna.gui.serveMediaFile('com.example.my-add-on', pat
 ### setPage()
 
 ```ts
-setPage(page, contextType): Promise<unknown>;
+setPage(page, contextType): Promise<void>;
 ```
 
-Switch the main window (or another context's window) to a page.
+Switch the main window (or another context's window) to a page, and resolve once the
+window's `page` shows it (fact 236). LUNA refuses a page it cannot switch to, `lunaplay`
+among them, with `uasrv.invalid_value`.
 
 #### Parameters
 
 | Parameter | Type | Default value |
 | ------ | ------ | ------ |
-| `page` | `string` | `undefined` |
+| `page` | [`SettablePage`](../type-aliases/SettablePage.md) | `undefined` |
 | `contextType` | `string` | `'main'` |
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await luna.gui.setPage('mixer');
+luna.gui.main.page.value; // 'mixer'
+```
 
 ***
 
@@ -858,8 +904,11 @@ options): Promise<unknown>;
 Open the editor window of the plugin in `slot` on a track or bus, as clicking it in
 LUNA's mixer does (or bring it to the front). LUNA answers before the window opens, and
 an empty slot opens nothing: `effect.openEditor()` waits for the window and says so.
-`sessionUid` defaults to the session in LUNA's window. A LUNA without the command
-rejects with `Luna.Unsupported`.
+`sessionUid` defaults to the session in LUNA's window. `contextType` names the LUNA window
+to open it from (`main` by default; an Add On in an alternate window passes its own, such
+as `alt_1`); a window that is not open rejects with `uasrv.invalid_object`, and a name LUNA
+does not know means `main` (fact 178). A LUNA without the command rejects with
+`Luna.Unsupported`.
 
 #### Parameters
 
@@ -867,7 +916,8 @@ rejects with `Luna.Unsupported`.
 | ------ | ------ |
 | `channelUid` | `string` |
 | `slot` | `string` |
-| `options` | \{ `sessionUid?`: `string`; \} |
+| `options` | \{ `contextType?`: `string`; `sessionUid?`: `string`; \} |
+| `options.contextType?` | `string` |
 | `options.sessionUid?` | `string` |
 
 #### Returns
@@ -878,6 +928,7 @@ rejects with `Luna.Unsupported`.
 
 ```ts
 await luna.gui.showPlugin(track.id, 'effect_0');
+await luna.gui.showPlugin(track.id, 'effect_0', { contextType: 'alt_1' });
 ```
 
 ***
@@ -919,6 +970,41 @@ Show a progress task in LUNA. Call `progress()` with 0..100, then `done()`.
 #### Returns
 
 `Promise`\<[`ProgressTask`](../interfaces/ProgressTask.md)\>
+
+***
+
+### suppressProgress()
+
+```ts
+suppressProgress(options): Promise<ProgressSuppression>;
+```
+
+Hold back LUNA's modal progress dialog while this page shows its own progress UI, and
+close one already open (fact 223). The hold is app-wide: it withholds the dialog of every
+task but one started with `nativeProgressBar`. Release it from a `finally`; a watchdog
+releases it after `maxMs` (default two minutes), and so does the page going away when it
+still can. LUNA does not drop an Add On's hold when the Add On closes (fact 224).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`SuppressProgressOptions`](../interfaces/SuppressProgressOptions.md) |
+
+#### Returns
+
+`Promise`\<[`ProgressSuppression`](../interfaces/ProgressSuppression.md)\>
+
+#### Example
+
+```ts
+const hold = await luna.gui.suppressProgress();
+try {
+  await work();
+} finally {
+  await hold.release();
+}
+```
 
 ***
 

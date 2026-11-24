@@ -157,6 +157,44 @@ lane.clips.items.at(-1).start.value;   // loaded, not undefined
 
 ***
 
+### onAnyChange()
+
+```ts
+onAnyChange(listener, options): Unsubscribe;
+```
+
+Called when members are added or removed, or when any of the named props of any member
+changes: one listener for "redraw the list". The per-member subscriptions follow the
+list, so a member added later is covered and a removed one is let go. Several changes in
+the same turn call the listener once.
+
+`props` are the member's prop fields by name (`'name'`, `'length'`), not wire names.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `listener` | () => `void` |
+| `options` | \{ `props?`: readonly [`PropKey`](../type-aliases/PropKey.md)\<[`Marker`](Marker.md)\>[]; \} |
+| `options.props?` | readonly [`PropKey`](../type-aliases/PropKey.md)\<[`Marker`](Marker.md)\>[] |
+
+#### Returns
+
+[`Unsubscribe`](../type-aliases/Unsubscribe.md)
+
+#### Example
+
+```ts
+const sources = await session.loadSources();
+const stop = sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+```
+
+#### Inherited from
+
+[`Collection`](Collection.md).[`onAnyChange`](Collection.md#onanychange)
+
+***
+
 ### onChange()
 
 ```ts

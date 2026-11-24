@@ -1,8 +1,18 @@
 # Class: Job
 
 `/jobs/<uid>`: long-running engine jobs (lyric transcription, chord extraction, ...).
-`percentComplete` is 0..100. Terminal jobs are published and then removed, so latch the last
-snapshot if you need it. Only `cancel()` exists; there is no delete.
+`percentComplete` is 0..100. LUNA publishes the terminal status and removes the node in the
+same turn (fact 200); [done](#done) latches the ending for you. Only `cancel()` exists; there
+is no delete. A job you launch yourself is easier to follow through the `Luna.JobRun` its
+command returns (`session.musical.chords.detect()`, `session.lyrics.transcribe()`).
+
+## Example
+
+```ts
+await luna.jobs.load();
+const job = luna.jobs.items.find((j) => j.jobType.value === 'lyric_transcription');
+if (job) console.log((await job.done()).status);
+```
 
 ## Extends
 
@@ -122,6 +132,72 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
+### done()
+
+```ts
+done(timeoutMs): Promise<JobResult>;
+```
+
+Resolve with the job's last snapshot when it completes (`empty: true` when LUNA found
+nothing, `job.no_result`); reject with a `UAError` whose code is the job's error, or
+`canceled`, `removed` (dropped without an ending) or `timeout`, as every SDK wait that runs
+out of time rejects (`Luna.RequestTimeout` carries the same code). The ending is
+latched as it arrives, so this answers even after LUNA removed the node, provided the
+SDK was watching `/jobs` when the job ended (fact 200).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `timeoutMs` | `number` |
+
+#### Returns
+
+`Promise`\<[`JobResult`](../interfaces/JobResult.md)\>
+
+#### Example
+
+```ts
+const result = await job.done();
+if (result.empty) console.log('nothing found');
+```
 
 ***
 

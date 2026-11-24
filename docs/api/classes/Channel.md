@@ -28,7 +28,7 @@
 | <a id="outputs"></a> `outputs` | `readonly` | [`Collection`](Collection.md)\<[`Output`](Output.md)\> | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | Uid of the owning session, for session-level commands that name this channel. | - |
-| <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`StemFormat`](../type-aliases/StemFormat.md)\> | - | - |
 | <a id="uid"></a> `uid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 
 ## Accessors
@@ -201,6 +201,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
+
+***
+
 ### insert()
 
 ```ts
@@ -350,6 +384,35 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 #### Inherited from
 
 [`Node`](Node.md).[`reload`](Node.md#reload)
+
+***
+
+### setAutomationMode()
+
+```ts
+setAutomationMode(mode): Promise<unknown>;
+```
+
+Set this track's or bus's automation mode (`off | read | write | touch | latch`) in one
+undo step. `set_automode_on_tracks` takes track and bus uids alike (fact 167);
+[automationMode](#automationmode) follows on LUNA's push.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `mode` | `"read"` \| `"off"` \| `"write"` \| `"touch"` \| `"latch"` |
+
+#### Returns
+
+`Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+await track.setAutomationMode('touch');
+await session.master!.setAutomationMode('read');
+```
 
 ***
 

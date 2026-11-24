@@ -15,6 +15,7 @@ import type { Prop } from '../store/prop';
 import { UAError, Unsupported } from '../wire/errors';
 import { Collection } from './collection';
 import type { InsertSlot } from './effect';
+import type { PluginFormat } from './insert-slots';
 import { Node } from './node';
 
 export interface PluginManifest {
@@ -95,6 +96,12 @@ export interface PluginRow {
   favorite: boolean;
 }
 
+/**
+ * A plugin's format as LUNA reports it (`sdk_type`, fact 177): a {@link PluginFormat}, or `''`
+ * when LUNA cannot tell (a `cloud:` plugin while cloud clip effects are off).
+ */
+export type PluginSdkType = PluginFormat | '';
+
 export class Plugin extends Node {
   readonly pluginId: Prop<string>;
   readonly name: Prop<string>;
@@ -106,6 +113,15 @@ export class Plugin extends Node {
   readonly authorized: Prop<boolean | null>;
   readonly manifest: Prop<PluginManifest>;
   readonly defaultPresetUid: Prop<string | null>;
+  /**
+   * The plugin's format as LUNA decides it (`sdk_type`, fact 177). Prefer it to reading the
+   * id: a UA-made VST3 or AU wrapper is `'uadx'` although its id says `.vst3.` or `.au.`.
+   * `undefined` until loaded, and on a LUNA that does not report it.
+   *
+   * @example
+   * const thirdParty = luna.plugins.items.filter((p) => ['vst', 'vst3', 'au'].includes(p.sdkType.value ?? ''));
+   */
+  readonly sdkType: Prop<PluginSdkType>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -119,6 +135,7 @@ export class Plugin extends Node {
     this.authorized = this.prop<boolean | null>('authorized');
     this.manifest = this.prop<PluginManifest>('manifest');
     this.defaultPresetUid = this.prop<string | null>('default_preset_uid');
+    this.sdkType = this.prop<PluginSdkType>('sdk_type');
   }
 
   get manufacturer(): string | undefined {

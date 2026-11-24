@@ -2,7 +2,7 @@
  * A source audio file in the session's workspace package:
  * `/workspace/sessions/<package uid>/audio/<file uid>`. Clips reference these by `sourceUid`.
  *
- * The overview is the only analysis LUNA publishes, and it is not PCM: each pair is the
+ * The overview is not PCM: each pair is the
  * minimum and maximum of a fixed slice of time. Pairs are **time-based**, 125 samples at the
  * engine's 48 kHz whatever the file's own rate (fact 72), so a two-second file has 768 fine
  * pairs at 44.1, 48 or 96 kHz. `overview_coarse` is twelve fine pairs, 31.25 ms.
@@ -13,9 +13,10 @@
  * const total = await src!.overviewInfo();                       // { count, md5 }
  */
 import type { Client } from '../client/client';
-import type { Prop } from '../store/prop';
+import { derived, type Prop } from '../store/prop';
 import { UAError } from '../wire/errors';
 import { Node } from './node';
+import { SourceAnalysis } from './analysis';
 
 /** `fine` is `analysis/overview` (2.604 ms per pair), `coarse` is `analysis/overview_coarse` (12 fine pairs, 31.25 ms). Fact 72. */
 export type OverviewKind = 'fine' | 'coarse';
@@ -62,6 +63,22 @@ export class AudioSource extends Node {
   readonly length: Prop<number>;
   readonly sampleRate: Prop<number>;
   readonly created: Prop<unknown>;
+  /**
+   * The name to show: `name`, or `undefined` when the file has none. LUNA names some sources
+   * with their own uid (fact 238); a blank name, or one that is the uid (with or without dashes
+   * or an extension), counts as none. Show your own label then, such as the clip's name.
+   *
+   * @example
+   * row.textContent = source.displayName.value ?? `Untitled (${source.seconds?.toFixed(1)} s)`;
+   */
+  readonly displayName: Prop<string | undefined>;
+  /**
+   * Where the file came from, LUNA's number for it (fact 239): see {@link SourceOrigin}.
+   * `undefined` on a LUNA that does not publish it.
+   */
+  readonly origin: Prop<number | undefined>;
+  /** LUNA's audio file format name, e.g. `wav` (fact 239). */
+  readonly format: Prop<string | undefined>;
 
   /** @internal */
   constructor(client: Client, path: string) {
@@ -71,7 +88,77 @@ export class AudioSource extends Node {
     this.length = this.prop<number>('length');
     this.sampleRate = this.prop<number>('sample_rate');
     this.created = this.prop<unknown>('created');
+    this.displayName = derived([this.name], () => sourceDisplayName(this.name.value, this.id), { distinct: true });
+    this.origin = this.prop<number | undefined>('origin');
+    this.format = this.prop<string | undefined>('format');
   }
+
+  /** True when LUNA named the file (see {@link displayName}). */
+  get hasName(): boolean {
+    return this.displayName.value !== undefined;
+  }
+
+  /**
+   * True for a clip rendering (LUNA's own pass of a clip through its clip effects, time
+   * stretch or sample-rate conversion), which LUNA keeps under `renders/clips/` and remakes as
+   * needed, rather than a recording, import or bounce (fact 239).
+   *
+   * @example const files = sources.items.filter((s) => !s.isRender);
+   */
+  get isRender(): boolean {
+    const o = this.origin.value;
+    return o === SourceOrigin.ClipRendering || o === SourceOrigin.ClipRenderingIntermediate;
+  }
+
+  /** The session package uid this file belongs to, from its path. */
+  get packageUid(): string {
+    return this.path.split('/')[3] ?? '';
+  }
+
+  /**
+   * The file's absolute path on disk (fact 239): `<package>/audio/<uid>.wav`, or
+   * `<package>/renders/clips/<uid>.wav` for a rendering. Reads the package's folder from the
+   * workspace once and keeps it. `undefined` when the package is unknown.
+   *
+   * Inside a session, `session.sourcePath(source)` answers the same without a read, which a
+   * drag needs (see `Luna.startSourceDrag`).
+   *
+   * @example
+   * const path = await source.filePath();
+   */
+  async filePath(): Promise<string | undefined> {
+    if (this.origin.value === undefined) await this.load({ children: false, commands: false, flatvalue: true }).catch(() => undefined);
+    const pkg = await packagePath(this.client, this.packageUid);
+    return pkg === undefined ? undefined : sourceFilePath(pkg, this.id, this.isRender);
+  }
+
+  /**
+   * Show the file in Finder or Explorer (`luna.gui.revealPath`). Rejects with `unavailable`
+   * when the path is unknown.
+   *
+   * @example revealButton.onclick = () => void source.reveal();
+   */
+  async reveal(): Promise<void> {
+    const path = await this.filePath();
+    if (!path) throw new UAError('unavailable', 'reveal(): the file path of this source is not known', { path: this.path });
+    await this.client.gui.revealPath(path);
+  }
+
+  /**
+   * Every analysis LUNA keeps for this file (key, tempo, instrument, transients, chord and the
+   * overviews), with live `count` and `md5` props (fact 205). Created on first use.
+   *
+   * @example
+   * const w = source.analysis.watch();
+   * await w.ready;
+   * source.analysis.overview.count.onChange(() => redraw(source.analysis.overview.count.value));
+   */
+  get analysis(): SourceAnalysis {
+    this.analyses ??= new SourceAnalysis(this.client, this.path);
+    return this.analyses;
+  }
+
+  private analyses: SourceAnalysis | undefined;
 
   get channelCount(): number {
     return this.stemFormat.value === 'stereo' ? 2 : 1;
@@ -129,6 +216,72 @@ export class AudioSource extends Node {
     }
     return { index, count: returned, kind, binsPerSecond: 1e9 / pairNs(kind), channels };
   }
+}
+
+/**
+ * Where a source file came from: LUNA's `origin` numbers (fact 239). Only the renderings are
+ * kept outside the package's `audio/` folder.
+ */
+export const SourceOrigin = {
+  Unknown: 0,
+  Recording: 1,
+  Import: 2,
+  Consolidate: 3,
+  TrackFreeze: 4,
+  Bounce: 5,
+  Sync: 6,
+  Staging: 7,
+  ClipRendering: 8,
+  ClipRenderingIntermediate: 9,
+} as const;
+
+/**
+ * `name` unless it is blank or the file's own uid (fact 238), else `undefined`.
+ *
+ * @example Luna.sourceDisplayName('Vocal.wav', 'f87c…') // 'Vocal.wav'
+ */
+export function sourceDisplayName(name: string | undefined | null, uid: string): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  const trimmed = name.trim();
+  if (trimmed === '') return undefined;
+  const bare = (s: string) => s.replace(/\.[a-z0-9]{1,5}$/i, '').replaceAll('-', '').toLowerCase();
+  return bare(trimmed) === bare(uid) ? undefined : name;
+}
+
+/**
+ * The path of a source file inside its session package (fact 239).
+ *
+ * @example Luna.sourceFilePath('/Music/Song/Song.luna', uid, false) // '/Music/Song/Song.luna/audio/<uid>.wav'
+ */
+export function sourceFilePath(packagePath: string, uid: string, isRender: boolean): string {
+  const sep = packagePath.includes('\\') && !packagePath.includes('/') ? '\\' : '/';
+  const root = packagePath.replace(/[\\/]+$/, '');
+  const file = `${uid.replaceAll('-', '').toLowerCase()}.wav`;
+  return isRender ? [root, 'renders', 'clips', file].join(sep) : [root, 'audio', file].join(sep);
+}
+
+const packagePaths = new WeakMap<Client, Map<string, Promise<string | undefined>>>();
+
+/** A package's folder (`directory_path` + `file_name`), read once per client. */
+function packagePath(client: Client, packageUid: string): Promise<string | undefined> {
+  let byUid = packagePaths.get(client);
+  if (!byUid) packagePaths.set(client, (byUid = new Map()));
+  let found = byUid.get(packageUid);
+  if (!found) {
+    found = client.raw
+      .get(`/workspace/sessions/${packageUid}`, { children: false, commands: false, flatvalue: true, propfilter: ['directory_path', 'file_name'] })
+      .then((reply) => {
+        const dir = readProperty(reply, 'directory_path');
+        const file = readProperty(reply, 'file_name');
+        if (typeof dir !== 'string' || typeof file !== 'string' || !dir || !file) return undefined;
+        const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/';
+        return `${dir.replace(/[\\/]+$/, '')}${sep}${file}`;
+      })
+      .catch(() => undefined);
+    found.then((p) => { if (p === undefined) byUid!.delete(packageUid); });
+    byUid.set(packageUid, found);
+  }
+  return found;
 }
 
 /** Nanoseconds per fine overview pair: 125 samples at 48 kHz (fact 72). */

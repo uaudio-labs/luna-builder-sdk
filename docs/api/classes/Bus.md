@@ -24,8 +24,10 @@
 | <a id="order"></a> `order` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | [`Channel`](Channel.md).[`order`](Channel.md#order) |
 | <a id="outputs"></a> `outputs` | `readonly` | [`Collection`](Collection.md)\<[`Output`](Output.md)\> | - | [`Channel`](Channel.md).[`outputs`](Channel.md#outputs) |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Channel`](Channel.md).[`path`](Channel.md#path) |
+| <a id="presetname"></a> `presetName` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | That preset's name, or null. | - |
+| <a id="presetuid"></a> `presetUid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string` \| `null`\> | The uid of the track preset last applied to this bus, or null (fact 169). | - |
 | <a id="sessionuid"></a> `sessionUid` | `readonly` | `string` | Uid of the owning session, for session-level commands that name this channel. | [`Channel`](Channel.md).[`sessionUid`](Channel.md#sessionuid) |
-| <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | [`Channel`](Channel.md).[`stemFormat`](Channel.md#stemformat) |
+| <a id="stemformat"></a> `stemFormat` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`StemFormat`](../type-aliases/StemFormat.md)\> | - | [`Channel`](Channel.md).[`stemFormat`](Channel.md#stemformat) |
 | <a id="uid"></a> `uid` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | [`Channel`](Channel.md).[`uid`](Channel.md#uid) |
 
 ## Accessors
@@ -252,6 +254,97 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 
 ***
 
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Channel`](Channel.md).[`commandEnabled`](Channel.md#commandenabled)
+
+***
+
+### delete()
+
+```ts
+delete(): Promise<void>;
+```
+
+Delete this bus in one undo step (`delete_bus`), and resolve once it has left
+`session.buses` (fact 168). A folder's contents stay where they were, now outside it; use
+[deleteWithContents](#deletewithcontents) to take them too. Sends and outputs that fed the bus are kept,
+marked `device.missing_bus` (fact 83).
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Throws
+
+`device.database_error` for the master bus, `uasrv.invalid_type` for a
+cue bus or one LUNA does not know.
+
+#### Example
+
+```ts
+const fx = await session.newBus({ name: 'Scratch FX' });
+await fx.delete();
+```
+
+***
+
+### deleteWithContents()
+
+```ts
+deleteWithContents(): Promise<void>;
+```
+
+Delete this folder and everything inside it, nested folders included, in one undo step
+(`buses/delete_folder_with_contents`), and resolve once all of it has left the session
+(fact 168).
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Throws
+
+`uasrv.invalid_value` when this bus is not a folder (or LUNA does not
+know it).
+
+#### Example
+
+```ts
+const drums = session.folders.find((f) => f.name.value === 'Drums');
+await drums?.deleteWithContents();
+```
+
+***
+
 ### insert()
 
 ```ts
@@ -299,6 +392,36 @@ Pushes keep the cells current afterwards as long as an ancestor is watched.
 #### Inherited from
 
 [`Channel`](Channel.md).[`load`](Channel.md#load)
+
+***
+
+### loadPreset()
+
+```ts
+loadPreset(preset): Promise<void>;
+```
+
+Apply a track preset to this bus in one undo step, as LUNA's bus header PRESETS > Assign
+does: `/presets/devices/track/load` with `is_bus` (fact 169). The preset's plugins, sends
+and mixer settings replace the bus's; [presetUid](#presetuid) follows. A plugin's preset is
+refused on a bus (`uasrv.invalid_type`).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `preset` | `string` \| `Pick`\<[`PresetRow`](../interfaces/PresetRow.md), `"uid"`\> |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+const [row] = await luna.presets.query({ deviceTypeId: 'track', tags: ['Bus'] });
+await bus.loadPreset(row);
+```
 
 ***
 
@@ -409,6 +532,39 @@ Fetch again, ignoring the once-only cache of [load](Node.md#load).
 #### Inherited from
 
 [`Channel`](Channel.md).[`reload`](Channel.md#reload)
+
+***
+
+### setAutomationMode()
+
+```ts
+setAutomationMode(mode): Promise<unknown>;
+```
+
+Set this track's or bus's automation mode (`off | read | write | touch | latch`) in one
+undo step. `set_automode_on_tracks` takes track and bus uids alike (fact 167);
+[automationMode](Channel.md#automationmode) follows on LUNA's push.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `mode` | `"read"` \| `"off"` \| `"write"` \| `"touch"` \| `"latch"` |
+
+#### Returns
+
+`Promise`\<`unknown`\>
+
+#### Example
+
+```ts
+await track.setAutomationMode('touch');
+await session.master!.setAutomationMode('read');
+```
+
+#### Inherited from
+
+[`Channel`](Channel.md).[`setAutomationMode`](Channel.md#setautomationmode)
 
 ***
 

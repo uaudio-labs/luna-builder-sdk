@@ -147,6 +147,61 @@ export class Collection<T extends Node> implements List<T> {
     };
   }
 
+  /**
+   * Called when members are added or removed, or when any of the named props of any member
+   * changes: one listener for "redraw the list". The per-member subscriptions follow the
+   * list, so a member added later is covered and a removed one is let go. Several changes in
+   * the same turn call the listener once.
+   *
+   * `props` are the member's prop fields by name (`'name'`, `'length'`), not wire names.
+   *
+   * @example
+   * const sources = await session.loadSources();
+   * const stop = sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+   */
+  onAnyChange(listener: () => void, options: { props?: ReadonlyArray<PropKey<T>> } = {}): Unsubscribe {
+    const props = options.props ?? [];
+    const perMember = new Map<T, Unsubscribe[]>();
+    let queued = false;
+    let stopped = false;
+    const fire = (): void => {
+      if (queued || stopped) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (!stopped) listener();
+      });
+    };
+    const follow = (): void => {
+      const now = new Set(this.items);
+      for (const [member, unsubs] of perMember) {
+        if (now.has(member)) continue;
+        for (const u of unsubs) u();
+        perMember.delete(member);
+      }
+      for (const member of now) {
+        if (perMember.has(member)) continue;
+        const unsubs: Unsubscribe[] = [];
+        for (const key of props) {
+          const prop = (member as unknown as Record<string, unknown>)[key as string];
+          if (isProp(prop)) unsubs.push(prop.onChange(fire));
+        }
+        perMember.set(member, unsubs);
+      }
+    };
+    follow();
+    const stopList = this.onChange(() => {
+      follow();
+      fire();
+    });
+    return () => {
+      stopped = true;
+      stopList();
+      for (const unsubs of perMember.values()) for (const u of unsubs) u();
+      perMember.clear();
+    };
+  }
+
   /** @internal */
   dispose(): void {
     this.disposed = true;
@@ -230,6 +285,13 @@ export class Collection<T extends Node> implements List<T> {
     this.sync();
     return this.ordered;
   }
+}
+
+/** The names of a member's fields that are props, for {@link Collection.onAnyChange}. */
+export type PropKey<T> = { [K in keyof T]: T[K] extends { onChange(listener: () => void): Unsubscribe; readonly value: unknown } ? K : never }[keyof T] & string;
+
+function isProp(value: unknown): value is { onChange(listener: () => void): Unsubscribe } {
+  return typeof value === 'object' && value !== null && typeof (value as { onChange?: unknown }).onChange === 'function' && 'value' in value;
 }
 
 function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {

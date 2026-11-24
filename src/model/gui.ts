@@ -21,8 +21,17 @@ import { derived, type Prop, type WritableProp } from '../store/prop';
 import { RequestTimeout, UAError, Unsupported } from '../wire/errors';
 import { Collection } from './collection';
 import { Node } from './node';
+import { settle } from './settle';
+import { childNames } from './presence';
+import { suppressProgress, type ProgressSuppression, type SuppressProgressOptions } from './progress';
 
-export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | string;
+/**
+ * A page a LUNA window shows. `lunaplay` is reported while LUNA Play shows but cannot be set:
+ * {@link Gui.setPage} takes a {@link SettablePage} (fact 236).
+ */
+export type GuiPage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard' | 'lunaplay' | (string & {});
+/** The pages {@link Gui.setPage} can switch a window to (fact 236). */
+export type SettablePage = 'mixer' | 'timeline' | 'home' | 'addon' | 'dashboard';
 export type AddOnTarget = 'window' | 'app' | 'browser' | 'editor';
 /** Where an installed Add On lives: see {@link AddOn.installedFrom}. */
 export type AddOnInstalledFrom = 'folder' | 'link' | 'built_in';
@@ -294,6 +303,15 @@ export class Gui extends Node {
   readonly armMode: WritableProp<boolean>;
   readonly priorLaunchCount: Prop<number>;
   /**
+   * The folder LUNA creates new sessions in, as set in its Settings (fact 160). Read-only;
+   * it follows the setting once `/gui` is watched. `undefined` on an engine without `/gui`.
+   *
+   * @example
+   * await luna.gui.watch().ready;
+   * luna.gui.sessionStoragePath.value;   // e.g. "/Users/me/Music/LUNA"
+   */
+  readonly sessionStoragePath: Prop<string>;
+  /**
    * The plugin editor windows open in LUNA, opened from the page or by the user (fact 126).
    * `undefined` until known, and on a LUNA that does not publish them. Follows LUNA once
    * {@link watchPluginWindows} has run, which `session.ready()` does. Read one slot's state
@@ -327,6 +345,7 @@ export class Gui extends Node {
       set: (v) => client.store.set('/gui/transport', 'arm_mode', v),
     };
     this.priorLaunchCount = this.prop<number>('prior_launch_count');
+    this.sessionStoragePath = this.prop<string>('session_storage_path');
     const open = client.store.cell<{ session_uid?: string; channel_uid?: string; insert_type?: string }[]>('/gui/plugin_windows', 'open');
     this.pluginWindows = derived([open], () => {
       const list = open.value;
@@ -414,7 +433,7 @@ export class Gui extends Node {
   available(): Promise<boolean> {
     this.presence ??= this.client.raw
       .get('/', { children: true, properties: false, commands: false })
-      .then((reply) => rootChildNames(reply).includes('gui'))
+      .then((reply) => childNames(reply).includes('gui'))
       .catch((err: unknown) => {
         this.presence = undefined; // a dropped connection is not an answer
         throw err;
@@ -433,9 +452,24 @@ export class Gui extends Node {
     return this.windows.byId('main') ?? new GuiWindow(this.client, '/gui/windows/main');
   }
 
-  /** Switch the main window (or another context's window) to a page. */
-  setPage(page: GuiPage, contextType = 'main'): Promise<unknown> {
-    return this.post('set_page', { page, context_type: contextType });
+  /**
+   * Switch the main window (or another context's window) to a page, and resolve once the
+   * window's `page` shows it (fact 236). LUNA refuses a page it cannot switch to, `lunaplay`
+   * among them, with `uasrv.invalid_value`.
+   *
+   * @example
+   * await luna.gui.setPage('mixer');
+   * luna.gui.main.page.value; // 'mixer'
+   */
+  async setPage(page: SettablePage, contextType = 'main'): Promise<void> {
+    await this.post('set_page', { page, context_type: contextType });
+    const path = `/gui/windows/${contextType}`;
+    const shown = this.client.store.cell<string>(path, 'page');
+    await settle(() => shown.value === page, 'setPage', {
+      path,
+      refresh: () => this.client.store.load(path, { children: false, commands: false, flatvalue: true, propfilter: ['page'] }),
+      flush: () => this.client.store.scheduler.flush(),
+    });
   }
 
   openUrl(url: string): Promise<unknown> {
@@ -544,14 +578,18 @@ export class Gui extends Node {
    * Open the editor window of the plugin in `slot` on a track or bus, as clicking it in
    * LUNA's mixer does (or bring it to the front). LUNA answers before the window opens, and
    * an empty slot opens nothing: `effect.openEditor()` waits for the window and says so.
-   * `sessionUid` defaults to the session in LUNA's window. A LUNA without the command
-   * rejects with `Luna.Unsupported`.
+   * `sessionUid` defaults to the session in LUNA's window. `contextType` names the LUNA window
+   * to open it from (`main` by default; an Add On in an alternate window passes its own, such
+   * as `alt_1`); a window that is not open rejects with `uasrv.invalid_object`, and a name LUNA
+   * does not know means `main` (fact 178). A LUNA without the command rejects with
+   * `Luna.Unsupported`.
    *
    * @example
    * await luna.gui.showPlugin(track.id, 'effect_0');
+   * await luna.gui.showPlugin(track.id, 'effect_0', { contextType: 'alt_1' });
    */
-  showPlugin(channelUid: string, slot: string, options: { sessionUid?: string } = {}): Promise<unknown> {
-    return this.post('show_plugin', pluginPayload(channelUid, slot, options.sessionUid)).catch(olderLuna('showPlugin', 'show_plugin'));
+  showPlugin(channelUid: string, slot: string, options: { sessionUid?: string; contextType?: string } = {}): Promise<unknown> {
+    return this.pluginWindow('show_plugin', 'showPlugin', pluginPayload(channelUid, slot, options.sessionUid, options.contextType), options.contextType);
   }
 
   /**
@@ -559,9 +597,28 @@ export class Gui extends Node {
    *
    * @example
    * await luna.gui.hidePlugin(track.id, 'effect_0');
+   * await luna.gui.hidePlugin(track.id, 'effect_0', { contextType: 'alt_1' });
    */
-  hidePlugin(channelUid: string, slot: string, options: { sessionUid?: string } = {}): Promise<unknown> {
-    return this.post('hide_plugin', pluginPayload(channelUid, slot, options.sessionUid)).catch(olderLuna('hidePlugin', 'hide_plugin'));
+  hidePlugin(channelUid: string, slot: string, options: { sessionUid?: string; contextType?: string } = {}): Promise<unknown> {
+    return this.pluginWindow('hide_plugin', 'hidePlugin', pluginPayload(channelUid, slot, options.sessionUid, options.contextType), options.contextType);
+  }
+
+  /**
+   * Post show_plugin / hide_plugin. LUNA answers `uasrv.invalid_object` both when it has no
+   * such command and when the named window is not open (fact 178): tell them apart by
+   * whether `/gui/windows` lists the window.
+   */
+  private async pluginWindow(command: string, method: string, payload: Record<string, unknown>, contextType: string | undefined): Promise<unknown> {
+    try {
+      return await this.post(command, payload);
+    } catch (err) {
+      if (err instanceof UAError && err.code === 'uasrv.invalid_object' && contextType !== undefined && contextType !== 'main' && /^(editor|alt_\d+|editor_\d+)$/.test(contextType)) {
+        const windows = (await this.wire.get('/gui/windows', { children: true, properties: false, commands: false }).catch(() => undefined)) as { children?: { path?: string }[] } | undefined;
+        const open = (windows?.children ?? []).some((c) => c.path === contextType);
+        if (!open) throw new UAError('uasrv.invalid_object', `luna.gui.${method}: LUNA has no open ${contextType} window`, { cmd: 'post', path: `/gui/${command}` });
+      }
+      return olderLuna(method, command)(err);
+    }
   }
 
   /** Run a LUNA rack command by id with extra fields as its data. Escape hatch. */
@@ -765,7 +822,9 @@ export class Gui extends Node {
     const payload: Record<string, unknown> = {};
     if (options.defaultPath !== undefined) payload['default_path'] = options.defaultPath;
     if (options.extensions !== undefined) payload['extensions'] = options.extensions;
-    const files = await this.dialog('show_save_dialog', payload, 'release_save_dialog', options.timeoutMs);
+    // LUNA honours release_file_chooser for every dialog; release_save_dialog is the name LUNA
+    // 3.0 had, kept by later builds only as an alias due to be removed (fact 180).
+    const files = await this.dialog('show_save_dialog', payload, ['release_file_chooser', 'release_save_dialog'], options.timeoutMs);
     return files[0];
   }
 
@@ -781,7 +840,26 @@ export class Gui extends Node {
     };
   }
 
-  private async dialog(command: string, payload: Record<string, unknown>, release: string, timeoutMs = 10 * 60_000): Promise<string[]> {
+  /**
+   * Hold back LUNA's modal progress dialog while this page shows its own progress UI, and
+   * close one already open (fact 223). The hold is app-wide: it withholds the dialog of every
+   * task but one started with `nativeProgressBar`. Release it from a `finally`; a watchdog
+   * releases it after `maxMs` (default two minutes), and so does the page going away when it
+   * still can. LUNA does not drop an Add On's hold when the Add On closes (fact 224).
+   *
+   * @example
+   * const hold = await luna.gui.suppressProgress();
+   * try {
+   *   await work();
+   * } finally {
+   *   await hold.release();
+   * }
+   */
+  suppressProgress(options: SuppressProgressOptions = {}): Promise<ProgressSuppression> {
+    return suppressProgress((command, payload) => this.post(command, payload).catch(olderLuna('suppressProgress', command)), randomUid(), options);
+  }
+
+  private async dialog(command: string, payload: Record<string, unknown>, release: string | readonly string[], timeoutMs = 10 * 60_000): Promise<string[]> {
     const reply = (await this.post(command, payload)) as { uid?: string } | string | null;
     const uid = typeof reply === 'string' ? reply : reply?.uid;
     if (!uid) return [];
@@ -810,7 +888,10 @@ export class Gui extends Node {
       return status.value === 'selected' ? (files.value ?? []).map((f) => f.path) : [];
     } finally {
       watch.release();
-      await this.post(release, { uid }).catch(() => undefined);
+      // The first release name LUNA accepts; the rest are older names for it.
+      for (const name of typeof release === 'string' ? [release] : release) {
+        if (await this.post(name, { uid }).then(() => true, () => false)) break;
+      }
     }
   }
 }
@@ -828,9 +909,10 @@ function olderLuna(method: string, command: string): (err: unknown) => never {
   };
 }
 
-function pluginPayload(channelUid: string, slot: string, sessionUid: string | undefined): Record<string, unknown> {
+function pluginPayload(channelUid: string, slot: string, sessionUid: string | undefined, contextType?: string): Record<string, unknown> {
   const payload: Record<string, unknown> = { channel_uid: channelUid, insert_type: slot };
   if (sessionUid !== undefined) payload['session_uid'] = sessionUid;
+  if (contextType !== undefined) payload['context_type'] = contextType;
   return payload;
 }
 
@@ -865,13 +947,3 @@ function childName(child: unknown): string {
   return typeof raw === 'string' ? raw.slice(raw.lastIndexOf('/') + 1) : '';
 }
 
-function rootChildNames(reply: unknown): string[] {
-  const children = typeof reply === 'object' && reply !== null ? (reply as { children?: unknown }).children : undefined;
-  if (!Array.isArray(children)) return [];
-  const out: string[] = [];
-  for (const child of children) {
-    const raw = typeof child === 'string' ? child : typeof child === 'object' && child !== null ? ((child as { path?: unknown; name?: unknown }).path ?? (child as { name?: unknown }).name) : undefined;
-    if (typeof raw === 'string') out.push(raw.slice(raw.lastIndexOf('/') + 1));
-  }
-  return out;
-}

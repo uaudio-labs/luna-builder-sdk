@@ -224,6 +224,44 @@ await track.gain.automation.move(0, Luna.QUARTER_NOTE);
 
 ***
 
+### onAnyChange()
+
+```ts
+onAnyChange(listener, options): Unsubscribe;
+```
+
+Called when members are added or removed, or when any of the named props of any member
+changes: one listener for "redraw the list". The per-member subscriptions follow the
+list, so a member added later is covered and a removed one is let go. Several changes in
+the same turn call the listener once.
+
+`props` are the member's prop fields by name (`'name'`, `'length'`), not wire names.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `listener` | () => `void` |
+| `options` | \{ `props?`: readonly [`PropKey`](../type-aliases/PropKey.md)\<[`BreakpointNode`](BreakpointNode.md)\>[]; \} |
+| `options.props?` | readonly [`PropKey`](../type-aliases/PropKey.md)\<[`BreakpointNode`](BreakpointNode.md)\>[] |
+
+#### Returns
+
+[`Unsubscribe`](../type-aliases/Unsubscribe.md)
+
+#### Example
+
+```ts
+const sources = await session.loadSources();
+const stop = sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+```
+
+#### Inherited from
+
+[`Collection`](Collection.md).[`onAnyChange`](Collection.md#onanychange)
+
+***
+
 ### onChange()
 
 ```ts
@@ -301,6 +339,39 @@ await track.gain.automation.setValue(0, -3);
 
 ***
 
+### trimRange()
+
+```ts
+trimRange(delta, range): Promise<void>;
+```
+
+Add `delta` to the curve over `[start, stop)` (`trim_control_values`, fact 227): every
+breakpoint in the range moves by `delta`, LUNA adds anchors at the edges so the curve
+outside keeps its shape, and on a mixer output it puts that output's `gain_trim` back to 0.
+With no breakpoints yet, the control's value plus `delta` becomes a plateau. One undo step.
+Resolves once the lane has changed.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `delta` | `number` |
+| `range` | \{ `start`: `number`; `stop`: `number`; \} |
+| `range.start` | `number` |
+| `range.stop` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await track.gain.automation.trimRange(3, { start: 0, stop: Luna.WHOLE_NOTE * 4 }); // +3 dB
+```
+
+***
+
 ### watch()
 
 ```ts
@@ -339,3 +410,36 @@ luna.renders.onChange(() => draw(luna.renders.items));
 #### Inherited from
 
 [`Collection`](Collection.md).[`watch`](Collection.md#watch)
+
+***
+
+### writeRange()
+
+```ts
+writeRange(value, range): Promise<void>;
+```
+
+Write `value` over `[start, stop)` (`write_control_values`, fact 227): breakpoints in the
+range go, and LUNA adds anchors so the curve outside it keeps its shape (one at `start - 1`
+holding the old value, a step to `value` at `start` and `stop - 1`, and one at `stop` back
+to the old value). `start === stop` writes a single point. One undo step. The value goes as
+a float literal (fact 82). Resolves once the lane shows the write.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `value` | `number` |
+| `range` | \{ `start`: `number`; `stop`: `number`; \} |
+| `range.start` | `number` |
+| `range.stop` | `number` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Example
+
+```ts
+await track.gain.automation.writeRange(-12, { start: Luna.WHOLE_NOTE, stop: Luna.WHOLE_NOTE * 2 });
+```

@@ -15,13 +15,17 @@ import type { Client } from '../client/client';
 import { derived, type Prop, type WritableProp } from '../store/prop';
 import { UAError, Unsupported } from '../wire/errors';
 import type { Unsubscribe } from '../wire/port';
-import { AudioSource } from './audio-source';
+import { AudioSource, sourceFilePath } from './audio-source';
+import { SourceUsage } from './source-usage';
+import { SessionPackage } from './workspace';
 import { Bus, type FolderMode } from './bus';
 import type { Channel } from './channel';
 import { Collection } from './collection';
 import { RecordTakes } from './record';
 import { Context } from './context';
+import { Lyrics } from './lyrics';
 import { Markers } from './markers';
+import { Groups } from './groups';
 import { SessionStorage } from './storage';
 import { Musical } from './musical';
 import { Node } from './node';
@@ -36,7 +40,11 @@ import { Track, type TrackType } from './track';
 import { TICKS_PER_BEAT } from './ticks';
 import { Transport } from './transport';
 
-export type SoloMode = string;
+/**
+ * How soloing a track treats the others (fact 157): `'latching'` adds it to what is soloed,
+ * `'exclusive'` unsolos the rest (LUNA does that only inside a touch, fact 78).
+ */
+export type SoloMode = 'latching' | 'exclusive';
 
 const SYSTEM_TRACK_TYPES = new Set<string>(['click', 'count_in']);
 
@@ -82,6 +90,25 @@ export interface ImportPathOptions {
   name?: string;
   /** How long to wait for the workspace to list the new source. Default 30 000 ms. */
   timeoutMs?: number;
+  /**
+   * What the file is. Default `'audio'`, which resolves to an {@link AudioSource}; `'midi'`
+   * and `'video'` resolve to an {@link ImportedFile} (fact 163). LUNA checks the content is
+   * what the type says and refuses it with `uasrv.invalid_value` otherwise.
+   */
+  type?: 'audio' | 'midi' | 'video';
+}
+
+/**
+ * A MIDI or video file copied into a session's package by {@link Session.importPath}. Only the
+ * file is added: no track or clip is made (fact 163). A MIDI file is filed in the package's
+ * `midi` folder, a video file, with its extension, in `video`.
+ */
+export interface ImportedFile {
+  /** The file's uid in the package. */
+  uid: string;
+  type: 'midi' | 'video';
+  /** The name it was stored under. */
+  name: string;
 }
 
 export interface BounceOptions {
@@ -112,7 +139,7 @@ export interface NewTrackOptions {
   /** Default `'audio'`. */
   trackType?: Extract<TrackType, 'audio' | 'instrument' | 'midi_matrix' | 'video'>;
   /** Default `'mono'`. */
-  stemFormat?: 'mono' | 'stereo' | string;
+  stemFormat?: 'mono' | 'stereo' | (string & {});
   /** How many tracks to make. Default 1. */
   count?: number;
   /** Number the name when a track or bus already has it. */
@@ -173,14 +200,14 @@ export interface NewTrackFromPresetOptions {
   /** Place the new tracks in this folder track. */
   folderUid?: string;
   /** The stem format of the audio track an effect plugin's preset makes. Default mono. */
-  stemFormat?: 'mono' | 'stereo' | string;
+  stemFormat?: 'mono' | 'stereo' | (string & {});
 }
 
 export interface NewBusOptions {
   /** Default `'Bus'`. */
   name?: string;
   /** Default `'stereo'`. */
-  stemFormat?: 'mono' | 'stereo' | string;
+  stemFormat?: 'mono' | 'stereo' | (string & {});
 }
 
 export interface NewFolderOptions {
@@ -192,7 +219,7 @@ export interface NewFolderOptions {
    */
   mode?: Exclude<FolderMode, 'none'>;
   /** Default `'stereo'`. */
-  stemFormat?: 'mono' | 'stereo' | string;
+  stemFormat?: 'mono' | 'stereo' | (string & {});
   /** Place the new folder inside this folder. Default: the session root. */
   folderUid?: string;
 }
@@ -241,7 +268,13 @@ export class Session extends Node {
   readonly canUndo: Prop<boolean>;
   readonly canRedo: Prop<boolean>;
   readonly changeCount: Prop<number>;
-  readonly soloMode: Prop<SoloMode>;
+  /**
+   * The session's solo mode, writable (fact 157). LUNA refuses any value but the two
+   * {@link SoloMode}s. Not undoable.
+   *
+   * @example await session.soloMode.set('exclusive');
+   */
+  readonly soloMode: WritableProp<SoloMode>;
   readonly tempoEstablished: Prop<boolean>;
   readonly commandStatus: Prop<string | null>;
   readonly commandPercentComplete: Prop<number>;
@@ -254,6 +287,10 @@ export class Session extends Node {
   /** Tempo map, time and key signatures, and tick/bar/seconds conversion. */
   readonly musical: Musical;
   readonly markers: Markers;
+  /** The session's lyrics, ruler and transcribed (fact 152). */
+  readonly lyrics: Lyrics;
+  /** Mix, edit, plugin and send groups (facts 215-218). Not loaded by `ready()`: `await session.groups.load()`. */
+  readonly groups: Groups;
   /** Data Add Ons keep with this session, by reverse-DNS context (fact 129). */
   readonly storage: SessionStorage;
   /** Edit contexts (`main`, `editor`, `alt_<n>`). */
@@ -296,7 +333,7 @@ export class Session extends Node {
     this.canUndo = this.prop<boolean>('can_undo');
     this.canRedo = this.prop<boolean>('can_redo');
     this.changeCount = this.prop<number>('change_count');
-    this.soloMode = this.prop<SoloMode>('solo_mode');
+    this.soloMode = this.writableProp<SoloMode>('solo_mode');
     this.tempoEstablished = this.prop<boolean>('tempo_established');
     this.commandStatus = this.prop<string | null>('command_status');
     this.commandPercentComplete = this.prop<number>('command_percent_complete');
@@ -306,6 +343,8 @@ export class Session extends Node {
     this.playlists = new Collection<Playlist>(client, `${this.path}/playlists`, (p) => new Playlist(client, p, uid, () => this.transactionMode), { levels: 2, commands: false, flatvalue: true });
     this.musical = new Musical(client, this.path, uid, (name, fn) => this.transaction(name, fn));
     this.markers = new Markers(client, this.path, uid, () => this.musical.timeline);
+    this.lyrics = new Lyrics(client, this.path);
+    this.groups = new Groups(client, this.path, uid);
     this.storage = new SessionStorage(client, this.path);
     this.contexts = new Collection<Context>(client, `${this.path}/contexts`, (p) => new Context(client, p, uid), { levels: 2, commands: false, flatvalue: true });
     this.context = new Context(client, `${this.path}/contexts/main`, uid);
@@ -358,6 +397,80 @@ export class Session extends Node {
       this.sourcesRelease = this.sourcesCollection.watch().release;
     }
     return this.sourcesCollection;
+  }
+
+  /**
+   * The session's source files, loaded and ready: waits for `ready()` (which brings the
+   * package uid), loads the folder and every member's properties, and keeps following it.
+   *
+   * @example
+   * const sources = await session.loadSources();
+   * sources.items.map((s) => s.displayName.value);
+   * sources.onAnyChange(() => render(sources.items), { props: ['name', 'length'] });
+   */
+  async loadSources(): Promise<Collection<AudioSource>> {
+    await this.ready();
+    const sources = this.sources;
+    if (!sources) throw new UAError('unavailable', 'loadSources(): LUNA did not report the session package uid', { path: this.path });
+    await sources.load();
+    await sources.membersReady();
+    // Let the collection announce its first load now, so a listener added next starts quiet.
+    await this.client.settled();
+    return sources;
+  }
+
+  /**
+   * A source file's absolute path on disk, from the session's package path (fact 239):
+   * `<package>/audio/<uid>.wav`, or `<package>/renders/clips/<uid>.wav` for a rendering.
+   * Synchronous, so a `dragstart` handler can use it. `undefined` before `ready()`.
+   *
+   * @example
+   * const path = session.sourcePath(source);
+   * if (path) await luna.gui.revealPath(path);
+   */
+  sourcePath(source: AudioSource | string): string | undefined {
+    const pkg = this.sessionPackagePath.value;
+    if (!pkg) return undefined;
+    const member = typeof source === 'string' ? this.sources?.byId(source) : source;
+    const uid = typeof source === 'string' ? source : source.id;
+    return sourceFilePath(pkg, uid, member?.isRender ?? false);
+  }
+
+  /**
+   * The session's own package in the workspace (name, folder, favourite, comments), loaded,
+   * without loading every package (`workspace.packages`).
+   *
+   * @example
+   * const pkg = await session.package();
+   * pkg.name; pkg.directoryPath.value; await pkg.favorite.set(true);
+   */
+  async package(): Promise<SessionPackage> {
+    await this.ready();
+    const uid = this.sessionPackageUid.value;
+    if (!uid) throw new UAError('unavailable', 'package(): LUNA did not report the session package uid', { path: this.path });
+    if (this.packageNode?.id !== uid) {
+      this.packageNode?.dispose();
+      this.packageNode = new SessionPackage(this.client, `/workspace/sessions/${uid}`);
+    }
+    await this.packageNode.load({ children: false, commands: false, flatvalue: true });
+    return this.packageNode;
+  }
+
+  private packageNode: SessionPackage | undefined;
+
+  /**
+   * Which tracks and clips use each source file, live: it follows clips being added, deleted,
+   * rendered or pointed at another file, and tracks switching playlists. Loads every
+   * playlist's clips first. Call `dispose()` on it when done.
+   *
+   * @example
+   * const usage = await session.sourceUsage();
+   * usage.byId(source.id)?.trackUids.map((t) => session.tracks.byId(t)?.name.value);
+   * usage.isUsed(source.id);
+   * usage.onChange(() => render());
+   */
+  sourceUsage(): Promise<SourceUsage> {
+    return new SourceUsage(this).start();
   }
 
   /** The active playlist of a track, once playlists are loaded. */
@@ -854,14 +967,123 @@ export class Session extends Node {
   /**
    * Move or copy the clips in a tick range (or the context selection when omitted) so they
    * start at `toTick`.
+   *
+   * `playlists` moves them to other tracks: each entry takes the clips of `from` (a playlist
+   * or its uid) to `to`. It replaces `trackUids`, which LUNA then ignores (fact 174).
+   * `moveAutomation` carries the tracks' automation in the range along; left out, LUNA follows
+   * the context's own "automation follows edit" setting.
+   *
+   * @example
+   * // Move bar 1 of the vocal to the double track, at the same time.
+   * await session.moveClips(0, {
+   *   startTick: 0,
+   *   stopTick: Luna.WHOLE_NOTE,
+   *   playlists: [{ from: session.playlistFor(vocal)!, to: session.playlistFor(double)! }],
+   * });
    */
-  moveClips(toTick: number, options: { startTick?: number; stopTick?: number; trackUids?: string[]; copy?: boolean; contextType?: string } = {}): Promise<unknown> {
+  moveClips(
+    toTick: number,
+    options: {
+      startTick?: number;
+      stopTick?: number;
+      trackUids?: string[];
+      copy?: boolean;
+      contextType?: string;
+      playlists?: ReadonlyArray<{ from: Playlist | string; to: Playlist | string }>;
+      moveAutomation?: boolean;
+    } = {},
+  ): Promise<unknown> {
     const payload: Record<string, unknown> = { session_uid: this.uid, context_type: options.contextType ?? 'main', location: toTick };
     if (options.startTick !== undefined) payload['start'] = options.startTick;
     if (options.stopTick !== undefined) payload['stop'] = options.stopTick;
     if (options.trackUids !== undefined) payload['track_uid'] = options.trackUids;
     if (options.copy !== undefined) payload['copy'] = options.copy;
+    if (options.moveAutomation !== undefined) payload['move_automation'] = options.moveAutomation;
+    if (options.playlists !== undefined && options.playlists.length > 0) {
+      const uidOf = (p: Playlist | string) => (typeof p === 'string' ? p : p.id);
+      payload['playlists'] = options.playlists.map((e) => ({ source_playlist: uidOf(e.from), destination_playlist: uidOf(e.to) }));
+    }
     return this.post('move_clips', payload);
+  }
+
+  /**
+   * Delete playlist versions in one undo step (`delete_playlists`), and resolve once they
+   * have left {@link playlists} (fact 170). A version a track is using can be deleted when
+   * the track has another: the track switches to the version before it (after it, for the
+   * first). LUNA also applies it to the tracks edit-grouped with them. Deleting nothing
+   * deletable (a track's only version) rejects with `uasrv.invalid_value`.
+   *
+   * @example
+   * const old = session.playlists.items.filter((p) => p.trackUid.value === track.id && p.id !== track.playlistUid.value);
+   * await session.deletePlaylists(old);
+   */
+  async deletePlaylists(playlists: ReadonlyArray<Playlist | string>): Promise<void> {
+    const uids = playlists.map((p) => (typeof p === 'string' ? p : p.id));
+    if (!uids.length) throw new UAError('out_of_range', 'deletePlaylists(): give at least one playlist');
+    await this.playlists.load();
+    await this.post('delete_playlists', { session_uid: this.uid, context_type: 'main', playlist_uid: uids });
+    await this.settlePlaylistsGone(uids, 'delete playlists');
+  }
+
+  /**
+   * Delete every playlist version the given tracks are not using, keeping the one each plays
+   * (`delete_playlists` with `delete_unused`, which lists the versions to keep, fact 170).
+   * Resolves once they have left {@link playlists}.
+   *
+   * @example
+   * await session.deleteUnusedPlaylists([vocal, double]);
+   */
+  async deleteUnusedPlaylists(tracks: ReadonlyArray<Track | string>): Promise<void> {
+    await this.playlists.load();
+    await this.playlists.membersReady();
+    const ids = tracks.map((t) => (typeof t === 'string' ? t : t.id));
+    const keep = ids.map((id) => this.tracks.byId(id)?.playlistUid.value).filter((u): u is string => typeof u === 'string' && u !== '');
+    if (keep.length !== ids.length) throw new UAError('out_of_range', 'deleteUnusedPlaylists(): give tracks of this session');
+    const doomed = this.playlists.items.filter((p) => ids.includes(p.trackUid.value ?? '') && !keep.includes(p.id)).map((p) => p.id);
+    if (!doomed.length) return;
+    await this.post('delete_playlists', { session_uid: this.uid, context_type: 'main', playlist_uid: keep, delete_unused: true });
+    await this.settlePlaylistsGone(doomed, 'delete unused playlists');
+  }
+
+  private async settlePlaylistsGone(uids: readonly string[], what: string): Promise<void> {
+    await settle(() => uids.every((u) => this.playlists.byId(u) === undefined), what, {
+      path: `${this.path}/playlists`,
+      refresh: () => this.playlists.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
+  /**
+   * Make one audio track per device input, each recording from its input, in one undo step,
+   * as LUNA's "create tracks from inputs" does (`new_tracks_from_inputs`, fact 172), and
+   * resolve to the new tracks once listed and loaded. Each is named after its input (made
+   * unique) and takes the input's stem format unless `stemFormat` says otherwise.
+   * `recordEnable` arms them; `autoGain` starts Auto Gain on those that support it.
+   *
+   * Inputs LUNA does not make tracks for (talkback, monitor, loopback) are skipped. Because
+   * LUNA never answers a request with an unknown input or with none left, the SDK refuses
+   * those first: `unknown_input` for an input not in `luna.audioInputs()`, `no_inputs` when
+   * nothing is left.
+   *
+   * @example
+   * const inputs = await luna.audioInputs();
+   * const tracks = await session.newTracksFromInputs({ inputUids: inputs.slice(0, 2).map((i) => i.uid), recordEnable: true });
+   */
+  async newTracksFromInputs(options: { inputUids: readonly string[]; recordEnable?: boolean; autoGain?: boolean; stemFormat?: 'mono' | 'stereo' }): Promise<Track[]> {
+    const known = await this.client.audioInputs();
+    for (const uid of options.inputUids) {
+      if (!known.some((i) => i.uid === uid)) throw new UAError('unknown_input', `newTracksFromInputs(): no input ${uid}`, { path: `${this.path}/new_tracks_from_inputs` });
+    }
+    if (!options.inputUids.some((uid) => autoCreatesTrack(known.find((i) => i.uid === uid)!.name))) {
+      throw new UAError('no_inputs', 'newTracksFromInputs(): LUNA makes no track for these inputs', { path: `${this.path}/new_tracks_from_inputs` });
+    }
+    const payload: Record<string, unknown> = { session_uid: this.uid, input_uids: [...options.inputUids] };
+    if (options.recordEnable !== undefined) payload['record_enable'] = options.recordEnable;
+    if (options.autoGain !== undefined) payload['auto_gain'] = options.autoGain;
+    if (options.stemFormat !== undefined) payload['stem_format'] = options.stemFormat;
+    const reply = (await this.post('new_tracks_from_inputs', payload)) as { new_tracks?: unknown } | null;
+    const uids = Array.isArray(reply?.new_tracks) ? reply.new_tracks.filter((u): u is string => typeof u === 'string') : [];
+    return uids.length ? this.resolveTracks(uids) : [];
   }
 
   /**
@@ -1000,14 +1222,24 @@ export class Session extends Node {
    * engine on the same machine. A path the engine cannot open rejects
    * with LUNA's `device.database_error`. For a browser `File`, use {@link uploadFile}.
    *
+   * With `type: 'midi'` or `'video'` the file is copied into the package's `midi` or
+   * `video` folder instead, and the call resolves to an {@link ImportedFile} as soon as LUNA
+   * answers (fact 163). Nothing plays it yet: LUNA's own import (`importFile`) also makes the
+   * track and clip.
+   *
    * @example
    * const [path] = await luna.gui.chooseFiles({ filters: ['*.wav'] });
    * if (path) {
    *   const source = await session.importPath(path);
    *   await session.insertClip({ trackUid: track.id, sourceUid: source.id, startTick: 0, stopTick: 4 * Luna.TICKS_PER_BEAT });
    * }
+   * const midi = await session.importPath('/Users/me/groove.mid', { type: 'midi' });   // { uid, type: 'midi', name }
    */
-  async importPath(path: string, options: ImportPathOptions = {}): Promise<AudioSource> {
+  importPath(path: string, options?: ImportPathOptions & { type?: 'audio' }): Promise<AudioSource>;
+  importPath(path: string, options: ImportPathOptions & { type: 'midi' | 'video' }): Promise<ImportedFile>;
+  async importPath(path: string, options: ImportPathOptions = {}): Promise<AudioSource | ImportedFile> {
+    const type = options.type ?? 'audio';
+    if (type !== 'audio' && type !== 'midi' && type !== 'video') throw new UAError('out_of_range', `importPath(): type must be 'audio', 'midi' or 'video'`, { path: this.path });
     await this.ready();
     const sources = this.sources;
     if (!sources) throw new UAError('unavailable', 'importPath(): the session package uid is not known yet', { path: this.path });
@@ -1015,7 +1247,7 @@ export class Session extends Node {
     if (!name) throw new UAError('out_of_range', `importPath(): no file name in ${JSON.stringify(path)}`, { path: this.path });
     const reply = (await this.wire.post('/workspace/import_file', {
       session_package_uid: this.sessionPackageUid.value,
-      type: 'audio',
+      type,
       import_id: Math.floor(Math.random() * 0x7fffffff),
       phase: 'local_copy',
       path,
@@ -1023,6 +1255,7 @@ export class Session extends Node {
     })) as { uid?: unknown } | null;
     const uid = reply?.uid;
     if (typeof uid !== 'string') throw new UAError('invalid_response', 'importPath(): import_file local_copy answered without a uid', { path: '/workspace/import_file' });
+    if (type !== 'audio') return { uid, type, name };
     return this.listedSource(uid, options.timeoutMs ?? 30_000);
   }
 
@@ -1260,12 +1493,16 @@ export class Session extends Node {
     this.playlists.dispose();
     this.musical.dispose();
     this.markers.dispose();
+    this.lyrics.dispose();
+    this.groups.dispose();
     this.storage.dispose();
     this.contexts.dispose();
     this.recordTakes.dispose();
     this.sourcesCollection?.dispose();
     this.sourcesRelease?.();
     this.sourcesRelease = undefined;
+    this.packageNode?.dispose();
+    this.packageNode = undefined;
     this.watchRelease?.();
     this.watchRelease = undefined;
     this.readyPromise = undefined;
@@ -1315,6 +1552,15 @@ function base64(bytes: Uint8Array): string {
 }
 
 /** A fresh 32-hex uid, the shape LUNA uses for render and file objects. */
+/**
+ * Whether LUNA makes a track for a device input of this name in `new_tracks_from_inputs`: not
+ * for talkback, monitor or loopback inputs (fact 172).
+ */
+function autoCreatesTrack(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower !== '' && lower !== 'mon' && !['talkback', 'monitor', 'mon ', 'loopback'].some((f) => lower.includes(f));
+}
+
 function newUid(): string {
   return globalThis.crypto.randomUUID().replaceAll('-', '');
 }

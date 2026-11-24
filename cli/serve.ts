@@ -2,8 +2,9 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { connect, createServer as createTcpServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { extname, join, normalize, resolve, sep } from 'node:path';
-import { flagNumber, flagString, packageRoot, type Args } from './util';
+import { extname, join, resolve } from 'node:path';
+import { ENGINE_HINT, resolveEngine, type Engine } from './engine';
+import { errorMessage, flagNumber, flagString, packageRoot, safeJoin, type Args } from './util';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -34,8 +35,8 @@ const MIME: Record<string, string> = {
  * Mounts:
  *   /                 the Add On folder (default: cwd)
  *   /__builder/       the SDK package (dist, examples, docs)
- *   /__engine/        a wasm engine build (--engine <dir>, or UA_WASM_ENGINE, or auto-detected
- *                     from a sibling hbsystem/wasm_engine/dist/Release in the tree)
+ *   /__engine/        a wasm engine: --engine <dir>, --luna-version <x.y.z>, or one found
+ *                     locally (see engine.ts)
  */
 export async function serve(args: Args): Promise<number> {
   const dir = resolve(args.positional[0] ?? process.cwd());
@@ -43,25 +44,19 @@ export async function serve(args: Args): Promise<number> {
   const portExplicit = args.flags['port'] !== undefined;
   const host = flagString(args, 'host') ?? (args.flags['luna'] ? '0.0.0.0' : '127.0.0.1');
   const root = packageRoot();
-  const engineDir = resolveEngineDir(flagString(args, 'engine'));
+  let engine: Engine | undefined;
+  try {
+    engine = await resolveEngine(args);
+  } catch (err) {
+    console.error(`No wasm engine: ${errorMessage(err)}`);
+    return 1;
+  }
+  const mounts: ServeMounts = { dir, root, engineDir: engine?.dir };
 
   const server = createHttpServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://x');
-    let pathname = decodeURIComponent(url.pathname);
-    let base = dir;
-    if (pathname.startsWith('/__builder/')) {
-      base = root;
-      pathname = pathname.slice('/__builder'.length);
-    } else if (pathname.startsWith('/__engine/')) {
-      if (!engineDir) return send(res, 404, 'no wasm engine mounted; pass --engine <dir> or set UA_WASM_ENGINE');
-      base = engineDir;
-      pathname = pathname.slice('/__engine'.length);
-    }
-    const file = safeJoin(base, pathname);
-    if (!file) return send(res, 403, 'forbidden');
-    let target = file;
-    if (existsSync(target) && statSync(target).isDirectory()) target = join(target, 'index.html');
-    if (!existsSync(target) || statSync(target).isDirectory()) return send(res, 404, `not found: ${pathname}`);
+    const target = servedFile(mounts, decodeURIComponent(url.pathname));
+    if (typeof target !== 'string') return send(res, target.status, target.text);
     res.writeHead(200, {
       'Content-Type': MIME[extname(target).toLowerCase()] ?? 'application/octet-stream',
       'Cache-Control': 'no-store',
@@ -84,7 +79,7 @@ export async function serve(args: Args): Promise<number> {
   if (port !== wantedPort) console.error(`port ${wantedPort} is busy (a stale 'ua-builder serve'?); using ${port} instead`);
 
   const lines = [`Serving ${dir}`, `  http://localhost:${port}/`];
-  if (engineDir) lines.push(`  http://localhost:${port}/__engine/luna-engine.js   (wasm engine from ${engineDir})`);
+  if (engine) lines.push(`  http://localhost:${port}/__engine/luna-engine.js   (wasm engine ${engine.lunaVersion ? `for LUNA ${engine.lunaVersion} ` : ''}from ${engine.dir})`);
   if (args.flags['luna']) {
     const forwardPort = flagNumber(args, 'forward-port', 4719);
     const lunaPort = flagNumber(args, 'luna-port', 4718);
@@ -133,10 +128,31 @@ export async function listenWithFallback(server: ReturnType<typeof createHttpSer
   }
 }
 
-function safeJoin(base: string, pathname: string): string | undefined {
-  const full = normalize(join(base, pathname));
-  const baseNorm = normalize(base + sep);
-  return full === normalize(base) || full.startsWith(baseNorm) ? full : undefined;
+/** What `serve` serves from: the Add On, the SDK package, and the engine. */
+export interface ServeMounts {
+  dir: string;
+  root: string;
+  engineDir: string | undefined;
+}
+
+/** The file `serve` answers a request path with, or the status to answer instead. */
+export function servedFile(m: ServeMounts, requested: string): string | { status: number; text: string } {
+  let pathname = requested;
+  let base = m.dir;
+  if (pathname.startsWith('/__builder/')) {
+    base = m.root;
+    pathname = pathname.slice('/__builder'.length);
+  } else if (pathname.startsWith('/__engine/')) {
+    if (!m.engineDir) return { status: 404, text: `no wasm engine mounted; ${ENGINE_HINT}` };
+    base = m.engineDir;
+    pathname = pathname.slice('/__engine'.length);
+  }
+  const file = safeJoin(base, pathname);
+  if (!file) return { status: 403, text: 'forbidden' };
+  let target = file;
+  if (existsSync(target) && statSync(target).isDirectory()) target = join(target, 'index.html');
+  if (!existsSync(target) || statSync(target).isDirectory()) return { status: 404, text: `not found: ${pathname}` };
+  return target;
 }
 
 function send(res: ServerResponse<IncomingMessage>, code: number, text: string): void {
@@ -153,17 +169,3 @@ function lanAddress(): string {
   return 'localhost';
 }
 
-/** Where a wasm engine build lives: flag, env, one shipped in the SDK, or a sibling tree checkout. */
-export function resolveEngineDir(flag: string | undefined): string | undefined {
-  const candidates = [flag, process.env['UA_WASM_ENGINE']].filter((x): x is string => typeof x === 'string' && x.length > 0);
-  const root = packageRoot();
-  candidates.push(join(root, 'engine'));
-  // builder lives at <tree>/packages/sdk/luna/builder/sdk; the engine at <tree>/packages/hbsystem/wasm_engine/dist
-  for (const rel of ['../../../../hbsystem/wasm_engine/dist/Release', '../../../../hbsystem/wasm_engine/dist/Debug']) candidates.push(resolve(root, rel));
-  for (const c of candidates) {
-    const dir = resolve(c);
-    if (existsSync(join(dir, 'luna-engine.js'))) return dir;
-    if (existsSync(join(dir, 'Release', 'luna-engine.js'))) return join(dir, 'Release');
-  }
-  return undefined;
-}

@@ -14,11 +14,17 @@
 - [`AudioSource`](AudioSource.md)
 - [`Effect`](Effect.md)
 - [`Marker`](Marker.md)
+- [`Lyric`](Lyric.md)
+- [`ErrorNotice`](ErrorNotice.md)
+- [`Group`](Group.md)
+- [`MidiOutputAssignment`](MidiOutputAssignment.md)
+- [`AnalysisNode`](AnalysisNode.md)
 - [`SessionStorage`](SessionStorage.md)
 - [`StorageContext`](StorageContext.md)
 - [`Chord`](Chord.md)
 - [`Context`](Context.md)
 - [`BreakpointNode`](BreakpointNode.md)
+- [`Warp`](Warp.md)
 - [`Gui`](Gui.md)
 - [`AddOn`](AddOn.md)
 - [`AddOnInstance`](AddOnInstance.md)
@@ -39,6 +45,10 @@
 - [`Preferences`](Preferences.md)
 - [`Render`](Render.md)
 - [`Job`](Job.md)
+- [`DeviceInput`](DeviceInput.md)
+- [`DeviceOutput`](DeviceOutput.md)
+- [`AutoGain`](AutoGain.md)
+- [`AutoGainChannel`](AutoGainChannel.md)
 - [`Session`](Session.md)
 - [`Sessions`](Sessions.md)
 
@@ -108,6 +118,36 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Returns
 
 `Promise`\<`R`\>
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
 
 ***
 

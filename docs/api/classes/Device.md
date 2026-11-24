@@ -13,8 +13,10 @@
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="clocksource"></a> `clockSource` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="devicetype"></a> `deviceType` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
+| <a id="inputs"></a> `inputs` | `readonly` | [`DeviceInputs`](DeviceInputs.md) | The device's audio inputs, live (fact 185). `inputs.watch()` follows hotplug, `in_use` and analysis results. **Example** `const w = device.inputs.watch(); await w.ready; device.inputs.items.map((i) => i.name.value);` | - |
 | <a id="name"></a> `name` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="online"></a> `online` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
+| <a id="outputs"></a> `outputs` | `readonly` | [`DeviceOutputs`](DeviceOutputs.md) | The device's audio outputs (fact 189). **Example** `await device.outputs.load(); device.outputs.items.map((o) => [o.name.value, o.stemFormat.value]);` | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="samplerate"></a> `sampleRate` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
 
@@ -89,6 +91,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
 
 ***
 

@@ -15,7 +15,9 @@
 import type { Client } from '../client/client';
 import { derived, type Prop, type WritableProp } from '../store/prop';
 import { UAError } from '../wire/errors';
+import { midiOperationPayload, type MidiOperation } from './midi-operations';
 import { Node } from './node';
+import { postControlValues, type ControlValue, type ControlValueRange } from './control-values';
 
 export type ContextType = 'main' | 'editor' | `alt_${number}` | string;
 
@@ -72,6 +74,16 @@ export class Context extends Node {
   readonly hiddenTracks: Prop<string[] | null>;
   /** Zoom. */
   readonly pixelsPerTick: WritableProp<number>;
+  /**
+   * The tick at the left edge of this window's timeline view, with {@link pixelsPerTick} the
+   * horizontal scroll (fact 159). Stored with the session, not undoable; `undefined` until
+   * something has set it. A page that draws its own timeline can share its scroll through it.
+   *
+   * @example
+   * const x = (tick: number) => (tick - (ctx.timelineViewStartTick.value ?? 0)) * ctx.pixelsPerTick.value!;
+   * await ctx.timelineViewStartTick.set(Luna.WHOLE_NOTE * 8);
+   */
+  readonly timelineViewStartTick: WritableProp<number>;
   readonly gridEnable: WritableProp<boolean>;
   /** Grid size such as `1_4`, `1_8`, `bar`. */
   readonly grid: WritableProp<string>;
@@ -108,6 +120,7 @@ export class Context extends Node {
     this.pinnedTracks = this.prop<string[] | null>('pinned_tracks');
     this.hiddenTracks = this.prop<string[] | null>('hidden_tracks');
     this.pixelsPerTick = this.writableProp<number>('pixels_per_tick');
+    this.timelineViewStartTick = this.writableProp<number>('timeline_view_start_tick');
     this.gridEnable = this.writableProp<boolean>('grid_enable');
     this.grid = this.writableProp<string>('grid');
     this.linkEditAndPlay = this.writableProp<boolean>('link_edit_and_play');
@@ -198,6 +211,11 @@ export class Context extends Node {
   }
 
   /** Run one of the context's edit commands (`copy`, `paste`, `duplicate`, `select_all`, ...). */
+  /** A context's commands live under its `commands` node. */
+  protected override commandPath(command: string): string {
+    return `${this.path}/commands/${command}`;
+  }
+
   run(command: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     return this.wire.post(`${this.path}/commands/${command}`, { session_uid: this.sessionUid, ...payload });
   }
@@ -241,6 +259,52 @@ export class Context extends Node {
   }
   muteClips(): Promise<unknown> {
     return this.run('mute_clips');
+  }
+
+  /**
+   * Write an absolute value per control over `[start, stop)`, or over this context's selection
+   * when the range is left out (`write_control_values`, fact 227). One undo step for all of
+   * them. Resolves on LUNA's reply, which comes after the write; the lanes update by push.
+   * An unknown control uid rejects with `device.database_error`.
+   *
+   * @example
+   * await session.context.writeControlValues(
+   *   [{ control: vocal.gain, value: -12 }, { control: guitar.gain, value: -9 }],
+   *   { start: 0, stop: Luna.WHOLE_NOTE * 2 },
+   * );
+   */
+  async writeControlValues(controls: readonly ControlValue[], range: ControlValueRange = {}): Promise<void> {
+    await postControlValues(this.client, this.sessionUid, 'write_control_values', controls, range, this.id);
+  }
+
+  /**
+   * Add a delta per control over `[start, stop)`, or over this context's selection when the
+   * range is left out (`trim_control_values`, fact 227). One undo step for all of them.
+   * Resolves on LUNA's reply; the lanes update by push.
+   *
+   * @example
+   * await session.context.trimControlValues([{ control: vocal.gain, value: 3 }], { start: 0, stop: Luna.WHOLE_NOTE });
+   */
+  async trimControlValues(controls: readonly ControlValue[], range: ControlValueRange = {}): Promise<void> {
+    await postControlValues(this.client, this.sessionUid, 'trim_control_values', controls, range, this.id);
+  }
+
+  /**
+   * Apply one of LUNA's MIDI operations to what this context selects (fact 158): the selected
+   * notes with focus `notes`, the MIDI on the selected tracks in the range with `timeline`.
+   * One undo entry. Resolves when LUNA answers; the edits arrive as MIDI table changes and
+   * the selected notes follow. With nothing to act on LUNA changes nothing and answers
+   * success. Rejects with `out_of_range` before sending for a value outside LUNA's range.
+   *
+   * @example
+   * await ctx.selectNotes(playlist.id, rows);
+   * await ctx.midiOperation({ type: 'transpose', semitones: -12 });
+   * await ctx.midiOperation({ type: 'duration', beats: 1 });
+   * await ctx.midiOperation({ type: 'invert', around: 'root', scale: { root: 0, mask: 0b101010110101 } });
+   */
+  async midiOperation(op: MidiOperation): Promise<void> {
+    const midi_operation = midiOperationPayload(op);
+    await this.run('midi_operation', { midi_operation });
   }
 }
 

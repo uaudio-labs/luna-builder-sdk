@@ -1,5 +1,5 @@
 # Type Alias: StemFormat
 
 ```ts
-type StemFormat = "mono" | "stereo" | string;
+type StemFormat = "mono" | "stereo" | string & object;
 ```

@@ -2,6 +2,260 @@
 
 Versions of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin it carries.
 
+## 3.1.2 Update 1
+
+Changed (breaking)
+- `track.duplicate()` resolves to the new `Luna.Track`, listed in `session.tracks`, instead of
+  LUNA's raw reply (fact 166). Replace reading the reply with
+  `const copy = await track.duplicate()` and `copy.id`.
+- `Luna.SoloMode` is `'latching' | 'exclusive'`, the two values LUNA publishes (fact 157),
+  instead of `string`. A `string` passed to `session.soloMode.set()` no longer typechecks;
+  pass one of the two values. `Luna.MockEngine` sessions start `latching` (was `latch`) and
+  refuse other values, so a test that set or expected `latch` must use `latching`.
+- `luna.session()` gives up on a session still loading after 15 s and rejects with
+  `Luna.RequestTimeout`; it used to wait for as long as loading took. A large session on a slow
+  computer can take longer: pass `{ timeoutMs }` (or `{ wait: true }`, which waits without
+  limit) where that matters. With nothing open it still rejects with `Luna.NoSessionOpen`.
+- `luna.gui.setPage()` takes a `Luna.SettablePage` (`'mixer' | 'timeline' | 'home' | 'addon' |
+  'dashboard'`) instead of any string, since LUNA refuses `lunaplay`, which it only reports
+  (fact 236). It resolves with nothing once the window shows the page, instead of with LUNA's
+  reply as soon as LUNA answered, and rejects with code `no_effect` if the window never shows
+  it. Code that read the reply, or passed another page name, must change.
+
+Added
+- `luna.session({ wait: true })` waits for the user to open a session, and `timeoutMs`
+  bounds how long it waits.
+- `session.loadSources()` answers the session's source files loaded and ready in one call.
+  `Collection.onAnyChange(listener, { props })` calls one listener when members come or go
+  or the named props of any member change, following members added later.
+- `AudioSource.displayName` (and `hasName`) is `undefined` for a file LUNA named with its own
+  uid (docs/EVIDENCE.md, fact 238). `AudioSource.origin`, `format` and `isRender`, with
+  `Luna.SourceOrigin`, tell recordings, imports and bounces from clip renderings.
+- `session.sourcePath(source)` and `source.filePath()` give a source's path on disk
+  (`<package>/audio/<uid>.wav`, renderings under `renders/clips/`), and `source.reveal()`
+  shows it in Finder or Explorer (fact 239). `session.package()` is the session's own
+  `SessionPackage`, without loading every package.
+- `session.sourceUsage()` lists, live, which tracks and clips use each source file, as source
+  or rendering, on every playlist.
+- `luna.workspace.unusedMedia(packageUid)` runs LUNA's Delete Unused Media pre-flight and
+  answers the counts, the uids it would remove and why it keeps each other file;
+  `deleteUnusedMedia(packageUid, { toTrash, clearUndo, deleteAutoBackups })` removes them
+  (fact 240). The uid lists need a LUNA build that reports them; older ones answer counts.
+- `Luna.startSourceDrag(event, { session, source } | { path })` fills a `dragstart` with file
+  paths LUNA's timeline accepts, so a session file dragged from a page becomes a clip where
+  it is dropped, without a copy (fact 241). `Luna.fileUrl()` makes the `file://` URL.
+- `luna.workspace.recentList(limit)` is a live recent-sessions list that queries again when
+  sessions open, close or switch, with `openSessionUid` on the rows that are open (fact 242).
+- `luna.sessions.ready()` also reads each open session's own properties, so
+  `sessionPackageUid` is known without `session.ready()`. `luna.sessions.byPackageUid(uid)`
+  finds an open session by package uid with or without dashes (`Luna.normalizePackageUid`),
+  and `luna.sessions.openOrFocus(uid)` opens a package or switches to it if it is open.
+- `Luna.MockEngine` models `delete_unused_media` (`engine.keepMedia()` gives a file a reason
+  to stay), `addSource({ unnamed, origin, format })`, and moves `last_opened` on
+  `open_session`. `engine.overrideCommand()` can add a command the mock does not have.
+
+- `ua-builder feedback <improvement|bug|feature|feedback> --title ... --body ...` (or
+  `--body-file <file|->`) opens a prefilled issue on github.com/uaudio-labs/luna-builder-sdk
+  in the browser, with the SDK, Node and OS versions filled in, for the person to check and
+  submit with their own GitHub account. `--print` prints the link instead. A description too
+  long for the link is cut at a line break and the rest printed to paste. The destination is
+  one `FeedbackBackend` (`cli/feedback-backend.ts`), so it can move off GitHub.
+- Issue forms for the four kinds in `.github/ISSUE_TEMPLATE/`.
+- The skills, the scaffold READMEs and `llms.txt` now have agents ask, after a
+  `LUNA BUILDER SDK IMPROVEMENT` line, whether to send it to Universal Audio (saying that a
+  GitHub account is needed), and send it with `ua-builder feedback improvement`.
+- `luna.workspace.templates()` lists the session templates (`.lunatemplate` packages) whose
+  files are on disk, and `luna.sessions.createFromTemplate({ templatePackageUid, name })`
+  creates a session copied from one, loads it and resolves when LUNA reports it loaded. The
+  copy is a package of its own; the template is never changed (docs/EVIDENCE.md, fact 151).
+  `Luna.MockEngine.addPackage()` takes `template`, `tracks`, `factory` and `online` to model
+  them.
+- `luna.sessions.create()` takes `sessionPackageUid`, `sessionType` and `standaloneId`, which
+  LUNA's `new_session` already accepts: a fixed package uid lets an Add On keep one session
+  of its own and find it again; `sessionType: 'standalone'` with a `standaloneId` puts it in a
+  standalone sessions folder (docs/EVIDENCE.md, fact 237). docs/MANIFEST.md, "An Add On with
+  a session of its own", is the recipe, and notes that an Add On which switches sessions
+  itself must not be `show_with_session`.
+- `session.lyrics` lists a session's lyric lines (`Luna.Lyric`: `location`, `length`, `text`,
+  `sourceUid`, `words`), following LUNA as lines change. A line typed on LUNA's lyric ruler is
+  at a tick; one transcribed from a recording (`lyric.transcribed`) is at nanoseconds into the
+  source it came from (docs/EVIDENCE.md, fact 152). `Luna.MockEngine.addLyric()` adds lines.
+- `Luna.gainToDb()` and `Luna.dbToGain()` convert between linear gain and dB. They are not
+  fader positions, which `Luna.Taper` maps.
+- More note lengths in engine ticks: `Luna.THIRTY_SECOND_NOTE`, `Luna.SIXTY_FOURTH_NOTE`,
+  `Luna.ONE_TWENTY_EIGHTH_NOTE`, and `Luna.dotted()` and `Luna.triplet()` for any note.
+- Insert slot helpers: `InsertSlot` names the `'instrument'` slot; `Luna.isRecordFxSlot()`,
+  `Luna.insertSlotForAlias()` and `Luna.isInsertAliasPluginId()` map LUNA's `alias.console`
+  chain entry to the `console` slot; `Luna.isLunaExtensionPluginId()` and
+  `Luna.LUNA_EXTENSION_PLUGIN_IDS` recognise LUNA's extensions; `Luna.pluginFormat()` guesses a
+  plug-in's format from its id, as LUNA does (docs/EVIDENCE.md, fact 181).
+- Value lists and parsers for what LUNA publishes: `Luna.TRACK_TYPES`, `Luna.BUS_TYPES`,
+  `Luna.FOLDER_MODES`, `Luna.STEM_FORMATS`, `Luna.SESSION_TYPES`, `Luna.CONTROL_TYPES`, with
+  `Luna.parseTrackType()`, `parseBusType()` (cue buses included), `parseFolderMode()`,
+  `parseStemFormat()`, `parseSessionType()` (name or index) and `parseControlType()`;
+  `Luna.HIDDEN_SESSION_TYPES` and `Luna.isHiddenSessionType()` leave LUNA's history and
+  track-preset packages out of a session list. `ControlType` now lists every LUNA control type.
+- `Luna.ErrorCodes`: the codes a `Luna.Error` carries, LUNA's (`uasrv.*`, `device.*`) and the
+  SDK's own, to compare `error.code` against.
+- `Luna.folderTree(session)` builds the folder hierarchy: rows in LUNA's order with depths,
+  `visibleRows({ collapsed })` for the rows under collapsed folders, `descendants()`,
+  `expandSelection()` as LUNA widens a selection, `summingFolder()` for the folder a channel's
+  main output sums into, and the malformed links it found in `anomalies` (facts 136, 182).
+- `automation.writeRange(value, { start, stop })` writes a value over a tick range and
+  `automation.trimRange(delta, { start, stop })` offsets the curve there, with LUNA adding
+  anchors at the edges so the rest keeps its shape; `session.context.writeControlValues()` and
+  `trimControlValues()` do the same for several controls in one undo step, over a range or the
+  context's selection (docs/EVIDENCE.md, fact 227).
+- Clip gain automation: `clip.controls` and `clip.gainControl`, a `Luna.Control` whose
+  `automation` lane is the clip-gain envelope (dB, clip-relative ticks).
+  `Luna.clipGainAt(breakpoints, tick)` evaluates it as LUNA does and `Luna.dbToGain()` converts
+  to amplitude with LUNA's -144 dB floor (fact 228).
+- Warp markers: `clip.warps` lists a clip's markers (`start` in clip-relative ticks,
+  `sourceStart` in nanoseconds, `type`), and `set()`, `delete()` and `removeTimeStretch()` edit
+  them (facts 229-231). `Luna.MockEngine` models the clip controls, warps and the five commands.
+- `device.inputs` and `device.outputs` on each of `luna.devices`: live collections of
+  `Luna.DeviceInput` (name, type, stem format, device channels, channel index, I/O type,
+  `inUse`, `ioDesc`) and `Luna.DeviceOutput` (name, `ioType`, stem format). `watch()` on
+  them is recursive, so a watched collection follows inputs being plugged and unplugged and
+  `inUse` as tracks are routed (docs/EVIDENCE.md, facts 185, 189). `luna.audioInputs()` is
+  unchanged; `input.snapshot()` gives the same record.
+- `input.watchAnalysis('signal_level' | 'tempo' | 'instrument' | 'stereo_detect')` turns one
+  of LUNA's live input analyses on while held, and its result follows on `signalLevelPeak`,
+  `tempo`, `instrument` or `stereoDetect`. Holds are counted per connection; the switch is
+  turned on only if it was off, and back off on the last release only if the SDK turned it
+  on (facts 186-188).
+- `luna.activeAudioEngine`: whether audio is on (`enabled`), the engine type and the drivers
+  in use, with `isDeviceActive(driverId)` (fact 190).
+- `luna.autoGain`: LUNA's Auto Gain service, with `status`, `countDown`, the `channels` it is
+  listening to and their peaks, `start(track, { autoStart, duration })` (whole seconds),
+  `stop(track)`, `stopAll()` and `available()`. `track.supportsAutoGain` says whether a track's
+  input can take part (facts 191-194).
+- `Luna.MockEngine` models them: `addDevice` takes `outputs`, `ioType` and `autoGain`;
+  `addDeviceInput` plugs an input in; `setInputAnalysis` publishes results;
+  `setActiveAudioEngine` changes the engine; `/auto_gain` is there unless
+  `new MockEngine({ autoGain: false })`.
+- `session.groups` lists the session's mix, edit, plugin and send groups, each with `name`,
+  `attributes`, `order` and `members` (track and bus uids). `session.groups.add()`,
+  `reorder()` and `affectedTracks()`, and `group.addMembers()`, `removeMembers()` and
+  `delete()` edit them in one undo step each (docs/EVIDENCE.md, facts 215-218). Call
+  `await session.groups.load()` first.
+- `track.midiOutputs` lists where a track sends its MIDI (a track, a bus, an effect slot or a
+  MIDI device, with the channel as LUNA stores it: 0 for all, 1-16 for one), and
+  `track.midiOutputs.set([...])` replaces them (facts 219-220).
+- `luna.gui.suppressProgress()` holds back LUNA's progress dialog while a page draws its own,
+  and returns a hold to `release()`; a watchdog (`maxMs`, default two minutes) and the page
+  going away release it too (facts 223-225).
+- `Luna.MockEngine` models groups, MIDI output assignments and the progress
+  suppression handles (`progressSuppressions`, `resetWebClient()`).
+- Lyrics can be edited: `session.lyrics.add(location, text, { length, sourceUid })` adds a line
+  (a ruler line at a tick by default) and resolves to it, and `lyric.setText()`,
+  `lyric.moveTo()` and `lyric.delete()` change one. A line already where one is added or moved
+  is replaced, as in LUNA (docs/EVIDENCE.md, fact 153).
+- `session.musical.deleteTimeSignature(bar)` and `deleteKeySignature(tick)`. Later time
+  signatures keep their bar numbers (fact 154).
+- Session settings as props: `transport.enableTempoPercent`, `preRoll` and `postRoll` (LUNA's
+  `"bars,beats,ticks"` text, read and written with `Luna.parseRollDuration` and
+  `Luna.formatRollDuration`), `clickDuringPlay`, `clickDuringRecord`, `clickDuringCountIn` and
+  `mergeMidi` (facts 155-156).
+- `session.context.timelineViewStartTick`, the timeline view's scroll beside `pixelsPerTick`
+  (fact 159).
+- `session.context.midiOperation(op)` runs LUNA's MIDI operations on what the context selects:
+  velocity, velocity percent, duration (bars, beats, ticks), duration percent or an exact scale,
+  legato, staccato, reverse, transpose and invert, optionally in a scale (fact 158).
+- `luna.gui.sessionStoragePath`, the folder LUNA saves new sessions in (fact 160).
+- `luna.workspace.addTag(packageUid, tag)`, and `luna.workspace.templates({ tag, factory })`
+  finds templates by tag, the steady way to find one LUNA ships (facts 161-162).
+- `session.importPath(path, { type: 'midi' | 'video' })` copies a MIDI or video file into the
+  session's package and resolves to `{ uid, type, name }` (fact 163).
+- `job.done()` resolves when a job completes and rejects with its error code, `canceled` or
+  `removed`. LUNA removes a job in the same turn it ends; the SDK keeps the ending, so a late
+  caller still gets it (docs/EVIDENCE.md, fact 200).
+- `session.musical.chords.detect({ clip })` runs LUNA's chord detection and
+  `session.lyrics.transcribe({ clip, provider, addToRuler })` its lyric transcription. Each
+  returns a `Luna.JobRun`: await it for the outcome (`empty: true` when nothing was found), and
+  read `progress` (0..1) and `snapshot` on the way, or `cancel()`. The job is matched to its
+  launch by session, type and track (facts 201-204). `session.lyrics.providers()` reads the
+  transcription providers.
+- `source.analysis` holds what LUNA analysed about a source: `key`, `tempo`, `instrument`,
+  `transients` (paged) and `chord`, each with a typed `read()`, and every analysis (the
+  overviews too) with `count` and `md5` props that follow LUNA under `source.analysis.watch()`,
+  so a growing waveform needs no polling (facts 205-207). `overviewInfo()` is unchanged.
+- `Luna.MockEngine` models jobs (`startJob()`, `planNextJob()`, `finishJob()`), the
+  `extract_chords` and `extract_lyrics` commands, `/lyric_transcription` and per-source
+  analyses (`addAnalysis()`).
+- `track.rename(name)` renames a track as LUNA's own rename does, so a preset loaded later
+  keeps the name (`name.set` does not); `track.nameModified` reports it. `Luna.Port.set` takes
+  optional request parameters, which carry it (fact 165).
+- `effect.setPower(on)` powers an insert on or off, as LUNA's insert power switch does
+  (fact 171).
+- `effect.moveTo(slot)` and `effect.copyTo(slot)` move or copy a plugin with its state,
+  automation and preset to another slot, on any track or bus of the session. They refuse a
+  move between different kinds of slot (such as `console` and `effect_N`), which LUNA does
+  not check and which corrupts the chain (fact 173).
+- `bus.delete()` deletes a bus, and `bus.deleteWithContents()` a folder with everything in it
+  (fact 168). `bus.loadPreset(preset)` applies a track preset to a bus; `bus.presetUid` and
+  `bus.presetName` follow it (fact 169).
+- `session.deletePlaylists(playlists)` and `session.deleteUnusedPlaylists(tracks)` delete
+  playlist versions (fact 170).
+- `session.newTracksFromInputs({ inputUids, recordEnable, autoGain, stemFormat })` makes a
+  track per device input and resolves to them (fact 172).
+- `session.moveClips()` takes `playlists: [{ from, to }]` to move clips to other tracks, and
+  `moveAutomation` (fact 174).
+- `luna.presets.setFavorite(preset, on)` marks a preset a favorite;
+  `query({ withDescriptions: true })` adds each row's `description`;
+  `luna.presets.trackPresetPlugins(preset)` lists the plugins a track preset uses
+  (facts 175-176).
+- `plugin.sdkType` is the plugin's format as LUNA decides it (`uadx`, `vst3`, `au`, ...)
+  (fact 177).
+- `luna.gui.showPlugin()` and `hidePlugin()` take `contextType`, for an Add On in an alternate
+  LUNA window (fact 178).
+- `Luna.MockEngine` models all of the above, and takes `sdkType` in `addPlugin()`,
+  `description` in `addPreset()` and `addTrackPreset()`, and `plugins` in `addTrackPreset()`.
+- `luna.preferences.context(name)` keeps JSON values on the computer, across sessions and
+  launches: `get(key)` and `set(key, value)` under one of LUNA's preference contexts. Contexts
+  are shared and unprotected (any Add On can read and write any of them), so name yours after
+  your Add On's id and keep secrets in `luna.secrets`. It initialises each preference before
+  reading it, since LUNA reads a context from disk only then (fact 232).
+- `track.postRecordCommands` sets what LUNA runs on each audio take once it lands
+  (`Luna.POST_RECORD_COMMANDS`: `extract_lyrics`, `extract_chords`), and
+  `track.instrumentDetermined` reads the instrument LUNA detected (fact 233).
+- `node.commandEnabled(name)` follows whether LUNA would take a command now, as its own menus
+  grey out (`session.context.commandEnabled('paste')`, fact 234).
+- `luna.errors` lists LUNA's error notices (`Luna.ErrorNotice`: level, code, title, payload,
+  groups), read-only (fact 235).
+- `Luna.ChannelRef`, the type of an argument that takes a track, a bus or its uid (groups and
+  `Luna.folderTree()`).
+
+Changed
+- `Luna.MockEngine.finishTake()` names a take's file `src_<track>_take<n>`, so takes on two
+  tracks no longer share a file uid. A mock session's `session_package_path` is now its
+  package's folder (`<directory_path>/<file_name>`).
+- `transport.tempoPercent` and `session.soloMode` are writable.
+- `Luna.MockEngine`'s `set_time_signature` places a signature at its bar's tick and moves the
+  later ones, as LUNA does (fact 154).
+- `track.duplicate()` takes `after`, the channel to put the copy after (fact 166).
+- `setAutomationMode()` is on buses too: it moved from `Track` to their common base,
+  `Channel` (fact 167).
+- `Luna.MockEngine`'s `new_session` keeps the `session_package_uid` it is sent and lists the
+  package under `/workspace/sessions/<uid>`; `open_session` names the session from that
+  workspace row rather than its uid, and opening a package no longer resets its row.
+  `addPackage()` takes `directoryPath` and `sessionType`.
+- The line the skills, the scaffold READMEs and `llms.txt` ask agents to end with when the
+  SDK could support a workflow better is now `LUNA BUILDER SDK IMPROVEMENT: <version>`
+  (was `LUNA BUILDER SDK FEEDBACK:`); the LUNA Channel kit's skill points at the new line.
+
+Fixed
+- `luna.gui.chooseSavePath()` releases the dialog with `release_file_chooser`, the name LUNA
+  honours, falling back to `release_save_dialog` on LUNA 3.0. Later LUNA builds keep
+  `release_save_dialog` only as an alias due to be removed (fact 180).
+- `workspace.query()`'s `sessionPackageUid` is documented as filtering only the `versions`
+  and `tutorials` tables: LUNA ignores it for sessions.
+- The docs said Windows loads Add On pages and serves media from `file://`. Since LUNA 3.1.2
+  Windows uses `ua-content://` with web security on, as macOS does, so module scripts and
+  `local_content_offset` work there too (docs/MANIFEST.md, docs/FILES.md, fact 114).
+- docs/MANIFEST.md says LUNA refuses to install a `.lunaaddon` whose `html` page is missing,
+  absolute or outside the Add On folder.
+
 ## 3.1.2 Beta 4
 
 Changed

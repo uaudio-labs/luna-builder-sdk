@@ -458,6 +458,56 @@ export class Musical {
     return found;
   }
 
+  /**
+   * Delete the time signature that starts at `bar` and resolve once it has left
+   * {@link timeSignatures}. The signatures after it keep their bar numbers and move to the
+   * ticks the earlier signature now gives them, as LUNA's ruler does (fact 154). One undo
+   * entry. Rejects with `not_found` when no loaded signature starts at `bar` (LUNA answers
+   * success and changes nothing), and with `out_of_range` for the session's first signature,
+   * which every bar is counted from.
+   *
+   * @example
+   * await session.musical.ready();
+   * await session.musical.setTimeSignature(3, 4, 9);
+   * await session.musical.deleteTimeSignature(9);   // back to the signature before bar 9
+   */
+  async deleteTimeSignature(bar: number): Promise<void> {
+    if (!Number.isInteger(bar)) throw new UAError('out_of_range', 'deleteTimeSignature(): bar must be an integer');
+    const rows = [...this.timeSignatures.items].filter((s) => s.tick.value !== undefined).sort((a, b) => a.tick.value! - b.tick.value!);
+    const row = rows.find((s) => s.bar.value === bar);
+    if (!row) throw new UAError('not_found', `deleteTimeSignature(): no time signature starts at bar ${bar}; await musical.ready() first`);
+    if (row === rows[0]) throw new UAError('out_of_range', 'deleteTimeSignature(): the first time signature cannot be deleted; set it instead');
+    await this.post('delete_time_signature', { bar });
+    await settle(() => !this.timeSignatures.items.some((s) => s.bar.value === bar), 'delete time signature', {
+      path: this.timeSignatures.path,
+      refresh: () => this.timeSignatures.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
+  /**
+   * Delete the key signature at `tick` and resolve once it has left {@link keySignatures}.
+   * One undo entry. Rejects with `out_of_range` for tick 0, the session's key, which LUNA
+   * refuses to delete (change it with {@link setKeySignature}), and with `not_found` when no
+   * loaded key signature is at `tick` (fact 154).
+   *
+   * @example
+   * await session.musical.ready();
+   * const key = session.musical.keySignatureAt(session.transport.tick);
+   * if (key && key.tick.value !== 0) await session.musical.deleteKeySignature(key.tick.value!);
+   */
+  async deleteKeySignature(tick: number): Promise<void> {
+    requireTick(tick, 'key signature tick');
+    if (tick === 0) throw new UAError('out_of_range', 'deleteKeySignature(): the key at tick 0 cannot be deleted; set it instead');
+    if (!this.keySignatures.items.some((k) => k.tick.value === tick)) throw new UAError('not_found', `deleteKeySignature(): no key signature at tick ${tick}; await musical.ready() first`);
+    await this.post('delete_key_signature', { tick });
+    await settle(() => !this.keySignatures.items.some((k) => k.tick.value === tick), 'delete key signature', {
+      path: this.keySignatures.path,
+      refresh: () => this.keySignatures.reload(),
+      flush: () => this.client.store.scheduler.flush(),
+    });
+  }
+
   /** Move bar one to `tick`. */
   setBarOne(tick: number): Promise<unknown> {
     return this.post('set_bar_one', { tick });

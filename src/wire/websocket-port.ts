@@ -206,8 +206,8 @@ export class WebSocketPort implements Port {
     return this.request('get', path, getOptionsToParams(options), undefined, options?.ignoreResponse === true);
   }
 
-  async set(path: string, data: unknown): Promise<void> {
-    await this.request('set', path, {}, data, false);
+  async set(path: string, data: unknown, params?: Record<string, string>): Promise<void> {
+    await this.request('set', path, { ...params }, data, false);
   }
 
   async post(path: string, data?: unknown): Promise<unknown> {

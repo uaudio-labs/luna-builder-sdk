@@ -249,7 +249,8 @@ set(
    nodePath, 
    property, 
    value, 
-wire): Promise<void>;
+   wire, 
+params?): Promise<void>;
 ```
 
 Write a property: the cell takes `value` at once, and `wire` (default `value`) is what is
@@ -263,6 +264,7 @@ sent, for a value whose wire form differs, such as a number that must go as a fl
 | `property` | `string` | `undefined` |
 | `value` | `unknown` | `undefined` |
 | `wire` | `unknown` | `value` |
+| `params?` | `Record`\<`string`, `string`\> | `undefined` |
 
 #### Returns
 

@@ -91,7 +91,7 @@ export interface Note {
 /** The wire shape of `midi/table/row_data`: a whole table, or one delta against it (fact 40). */
 export interface MidiRowData {
   /** `update` is a whole table; `added`, `changed` and `deleted` are deltas. */
-  operation: 'update' | 'added' | 'changed' | 'deleted' | string;
+  operation: 'update' | 'added' | 'changed' | 'deleted' | (string & {});
   row_ids: number[];
   enabled?: boolean[];
   midi_data?: number[];

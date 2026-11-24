@@ -1,5 +1,9 @@
 # Interface: SessionPackageRow
 
+## Extended by
+
+- [`RecentSessionRow`](RecentSessionRow.md)
+
 ## Properties
 
 | Property | Type | Description |

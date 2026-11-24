@@ -28,6 +28,30 @@
 
 ## Accessors
 
+### controls
+
+#### Get Signature
+
+```ts
+get controls(): Controls;
+```
+
+The clip's own controls (`<clip>/controls/<type>`). LUNA gives every clip a `gain` one
+(fact 228); see [gainControl](#gaincontrol).
+
+##### Example
+
+```ts
+await clip.controls.load();
+clip.controls.items.map((c) => c.controlType.value); // ['gain']
+```
+
+##### Returns
+
+[`Controls`](Controls.md)
+
+***
+
 ### disposed
 
 #### Get Signature
@@ -46,6 +70,33 @@ props stop updating and its commands reject with [Disposed](Disposed.md).
 #### Inherited from
 
 [`Node`](Node.md).[`disposed`](Node.md#disposed)
+
+***
+
+### gainControl
+
+#### Get Signature
+
+```ts
+get gainControl(): Control;
+```
+
+The clip gain control (fact 228): its `automation` lane is the clip-gain envelope, in dB,
+with ticks relative to the clip's start, edited with the usual breakpoint verbs. Its value
+follows [gain](#gain). [clipGainAt](../functions/clipGainAt.md) evaluates the lane as LUNA does.
+
+##### Example
+
+```ts
+await clip.gainControl.load();
+const lane = clip.gainControl.automation;
+await lane.insert([{ tick: 0, value: 0 }, { tick: Luna.WHOLE_NOTE, value: -144 }]); // fade to silence
+Luna.clipGainAt(lane.breakpoints, Luna.HALF_NOTE); // -72
+```
+
+##### Returns
+
+[`Control`](Control.md)
 
 ***
 
@@ -122,6 +173,29 @@ The playlist this clip sits on, taken from its path.
 ##### Returns
 
 `string`
+
+***
+
+### warps
+
+#### Get Signature
+
+```ts
+get warps(): Warps;
+```
+
+The clip's warp markers (facts 229-231). Call `load()` before reading.
+
+##### Example
+
+```ts
+await clip.warps.load();
+clip.warps.markers; // [{ rowid, start, sourceStart, type }]
+```
+
+##### Returns
+
+[`Warps`](Warps.md)
 
 ## Methods
 
@@ -245,6 +319,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
 
 ***
 

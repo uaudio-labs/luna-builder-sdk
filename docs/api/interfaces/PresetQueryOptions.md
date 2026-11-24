@@ -12,4 +12,5 @@
 | <a id="pluginid"></a> `pluginId?` | `string` | The plugin whose presets to list. One of `pluginId` or `deviceTypeId` is required. |
 | <a id="search"></a> `search?` | `string` | Case-insensitive substring to match against preset names. |
 | <a id="tags"></a> `tags?` | `string` \| readonly `string`[] | Only presets carrying these tags: all of them, or any with `matchAnyTag` (fact 120). |
+| <a id="withdescriptions"></a> `withDescriptions?` | `boolean` | Include each preset's `description`: one more read per plugin or device type listed (fact 175). |
 | <a id="withtags"></a> `withTags?` | `boolean` | Include each preset's tags in the rows. |

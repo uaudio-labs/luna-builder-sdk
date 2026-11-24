@@ -9,24 +9,31 @@
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
 | <a id="arrangementstart"></a> `arrangementStart` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | Where [returnToZero](#returntozero) goes (ticks). LUNA reads it as 0 until it is set (fact 89). | - |
+| <a id="clickduringcountin"></a> `clickDuringCountIn` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Whether the click sounds during the count-in (fact 155). **Example** `await t.clickDuringCountIn.set(true);` | - |
+| <a id="clickduringplay"></a> `clickDuringPlay` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Whether the click sounds during playback (fact 155). **Example** `await t.clickDuringPlay.set(false);` | - |
+| <a id="clickduringrecord"></a> `clickDuringRecord` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Whether the click sounds while recording (fact 155). **Example** `await t.clickDuringRecord.set(true);` | - |
 | <a id="client"></a> `client` | `readonly` | [`Client`](Client.md) | - | [`Node`](Node.md).[`client`](Node.md#client) |
 | <a id="countinenabled"></a> `countInEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="countingin"></a> `countingIn` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
+| <a id="enabletempopercent"></a> `enableTempoPercent` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Whether [tempoPercent](#tempopercent) applies (fact 155). **Example** `await t.enableTempoPercent.set(false);` | - |
 | <a id="location"></a> `location` | `readonly` | [`Prop`](../interfaces/Prop.md)\<[`TransportLocation`](../interfaces/TransportLocation.md)\> | Live playhead, pushed many times per second while playing. | - |
 | <a id="looping"></a> `looping` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="loopstart"></a> `loopStart` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | - | - |
 | <a id="loopstop"></a> `loopStop` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | - | - |
 | <a id="maxtick"></a> `maxTick` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
+| <a id="mergemidi"></a> `mergeMidi` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | Whether MIDI recorded over an existing MIDI clip merges into it (on) or makes a new take (off) (fact 155). **Example** `await t.mergeMidi.set(true);` | - |
 | <a id="path"></a> `path` | `readonly` | `string` | Engine path of this object, for example `/sessions/<uid>/tracks/<id>`. | [`Node`](Node.md).[`path`](Node.md#path) |
 | <a id="playing"></a> `playing` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="playstart"></a> `playStart` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | Where playback starts (ticks); also the resting playhead when stopped. | - |
+| <a id="postroll"></a> `postRoll` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`\> | How long the post-roll is, in the same form as [preRoll](#preroll) (fact 156). **Example** `await t.postRoll.set('1,0,0');` | - |
 | <a id="postrollenabled"></a> `postRollEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
+| <a id="preroll"></a> `preRoll` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`string`\> | How long the pre-roll is, as LUNA stores it: a `"bars,beats,ticks"` duration string (`"1,0,0"` is one bar, `"0,2,0"` two beats; ticks are engine ticks). Read and write it with `Luna.parseRollDuration` and `Luna.formatRollDuration`. Used while [preRollEnabled](#prerollenabled) is on (fact 156). **Example** `await t.preRoll.set(Luna.formatRollDuration({ bars: 2 }));` | - |
 | <a id="prerollenabled"></a> `preRollEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="punchedin"></a> `punchedIn` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`boolean`\> | - | - |
 | <a id="recordenabled"></a> `recordEnabled` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`boolean`\> | - | - |
 | <a id="recplaymode"></a> `recPlayMode` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`string`\> | - | - |
 | <a id="tempo"></a> `tempo` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | Tempo in effect at the playhead (BPM), carved out of the `location` pushes (fact 95: a tempo edit shows here at once). Notifies only when the number moves, so a BPM display is not re-rendered on every playhead push. It follows the playhead only: to recompute anything planned from the tempo map (clip lengths, seconds) when the tempo is edited, use `session.musical.timeline.onChange` and `session.musical.tempoAt(tick)`. **Example** `t.tempo.onChange(() => bpm.textContent = `${t.tempo.value ?? '--'} BPM`);` | - |
-| <a id="tempopercent"></a> `tempoPercent` | `readonly` | [`Prop`](../interfaces/Prop.md)\<`number`\> | - | - |
+| <a id="tempopercent"></a> `tempoPercent` | `readonly` | [`WritableProp`](../interfaces/WritableProp.md)\<`number`\> | Playback speed as a percentage of the tempo map (100 is as written), applied only while [enableTempoPercent](#enabletempopercent) is on. Not undoable. LUNA publishes both only when its tempo-percent feature is enabled; elsewhere they stay `undefined` (fact 155). **Example** `await t.tempoPercent.set(80); await t.enableTempoPercent.set(true); // practice at 80%` | - |
 | <a id="timesignature"></a> `timeSignature` | `readonly` | [`Prop`](../interfaces/Prop.md)\<\{ `denominator`: `number`; `numerator`: `number`; \}\> | Time signature in effect at the playhead, carved out of the `location` pushes. Notifies only when it changes. Format with `Luna.formatTimeSignature`. **Example** `t.timeSignature.onChange(() => meter.textContent = Luna.formatTimeSignature(t.timeSignature.value));` | - |
 
 ## Accessors
@@ -144,6 +151,40 @@ Invoke any command on this node by name. Prefer a typed method when one exists.
 #### Inherited from
 
 [`Node`](Node.md).[`command`](Node.md#command)
+
+***
+
+### commandEnabled()
+
+```ts
+commandEnabled(command): Prop<boolean>;
+```
+
+Whether LUNA would take `command` on this node now (`<command>/enabled`, fact 234), as
+LUNA greys out its own menu items: `false` for `paste` with nothing copied, for example.
+Follows LUNA from the first call until this node is disposed. `undefined` until read, and
+for a command that publishes no enabled state (most are always enabled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `command` | `string` |
+
+#### Returns
+
+[`Prop`](../interfaces/Prop.md)\<`boolean`\>
+
+#### Example
+
+```ts
+const canPaste = session.context.commandEnabled('paste');
+canPaste.onChange(() => (pasteButton.disabled = canPaste.value === false));
+```
+
+#### Inherited from
+
+[`Node`](Node.md).[`commandEnabled`](Node.md#commandenabled)
 
 ***
 

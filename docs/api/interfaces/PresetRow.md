@@ -4,6 +4,7 @@
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
+| <a id="description"></a> `description?` | `string` | The preset's description, `''` when it has none. Present only when the query asked for it (`withDescriptions`, fact 175). |
 | <a id="factory"></a> `factory` | `boolean` | - |
 | <a id="favorite"></a> `favorite` | `boolean` | - |
 | <a id="isinstrumentpreset"></a> `isInstrumentPreset?` | `boolean` | True for an instrument plugin's preset listed among track presets, false for a track preset. Present only when the query asked for them (`includeInstrumentPresets`, fact 132). |

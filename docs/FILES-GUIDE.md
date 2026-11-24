@@ -262,8 +262,8 @@ Limits:
   the extension. A served MIDI file is for reading: fetch its bytes with `XMLHttpRequest`
   and parse them; a media element does not play MIDI.
 - To read the bytes (to decode audio, for example), use `XMLHttpRequest` with
-  `responseType = 'arraybuffer'`, **not `fetch()`**. On Windows the URL is `file:///`, which
-  `fetch()` refuses.
+  `responseType = 'arraybuffer'`, which works on every LUNA version. `fetch()` fails in LUNA
+  before 3.1.2 on Windows, where the URL is `file:///`.
 - The URL works only in your Add On's own pages.
 
 ## Saving files

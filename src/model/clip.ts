@@ -17,6 +17,9 @@ import type { Client } from '../client/client';
 import type { Collection } from './collection';
 import type { FadeShape } from './compiled-clip';
 import { Context } from './context';
+import { Controls } from './controls';
+import type { Control } from './control';
+import { Warps } from './warps';
 import { derived, type Prop, type WritableProp } from '../store/prop';
 import { MidiClip } from './midi';
 import { Disposed, UAError } from '../wire/errors';
@@ -98,6 +101,8 @@ export class Clip extends Node {
   private midiClip: MidiClip | undefined;
   private deleting = false;
   private contextView: Context | undefined;
+  private controlsFolder: Controls | undefined;
+  private warpList: Warps | undefined;
 
   readonly uid: Prop<string>;
   readonly name: WritableProp<string>;
@@ -206,6 +211,46 @@ export class Clip extends Node {
       renderState: this.renderState.value,
       midiSourceStart: this.midiSourceStart.value,
     });
+  }
+
+  /**
+   * The clip's own controls (`<clip>/controls/<type>`). LUNA gives every clip a `gain` one
+   * (fact 228); see {@link gainControl}.
+   *
+   * @example
+   * await clip.controls.load();
+   * clip.controls.items.map((c) => c.controlType.value); // ['gain']
+   */
+  get controls(): Controls {
+    this.controlsFolder ??= new Controls(this.client, `${this.path}/controls`);
+    return this.controlsFolder;
+  }
+
+  /**
+   * The clip gain control (fact 228): its `automation` lane is the clip-gain envelope, in dB,
+   * with ticks relative to the clip's start, edited with the usual breakpoint verbs. Its value
+   * follows {@link gain}. {@link clipGainAt} evaluates the lane as LUNA does.
+   *
+   * @example
+   * await clip.gainControl.load();
+   * const lane = clip.gainControl.automation;
+   * await lane.insert([{ tick: 0, value: 0 }, { tick: Luna.WHOLE_NOTE, value: -144 }]); // fade to silence
+   * Luna.clipGainAt(lane.breakpoints, Luna.HALF_NOTE); // -72
+   */
+  get gainControl(): Control {
+    return this.controls.get('gain');
+  }
+
+  /**
+   * The clip's warp markers (facts 229-231). Call `load()` before reading.
+   *
+   * @example
+   * await clip.warps.load();
+   * clip.warps.markers; // [{ rowid, start, sourceStart, type }]
+   */
+  get warps(): Warps {
+    this.warpList ??= new Warps(this.client, this.path, this.sessionUid);
+    return this.warpList;
   }
 
   /** The playlist this clip sits on, taken from its path. */
@@ -652,5 +697,7 @@ export class Clip extends Node {
   protected override release(): void {
     this.midiClip?.dispose();
     this.midiClip = undefined;
+    this.controlsFolder?.dispose();
+    this.warpList?.dispose();
   }
 }

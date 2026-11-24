@@ -3,6 +3,64 @@
 What changed in each release of `@uaudio/luna-builder-sdk` and the `ua-luna-builder` plugin
 it carries, in brief. `CHANGELOG.md` has the detail.
 
+## 3.1.2 Update 1 — 2026-11-24
+
+- **Breaking:** `track.duplicate()` resolves to the new `Luna.Track` instead of LUNA's reply;
+  use `(await track.duplicate()).id` (see `CHANGELOG.md`).
+- **Breaking:** `Luna.SoloMode` is `'latching' | 'exclusive'` instead of `string`, and
+  `Luna.MockEngine` sessions start `latching` (was `latch`) (see `CHANGELOG.md`).
+- **Breaking:** `luna.session()` rejects with `Luna.RequestTimeout` when a session takes more
+  than 15 s to load; pass `{ timeoutMs }` for longer (see `CHANGELOG.md`).
+- **Breaking:** `luna.gui.setPage()` takes only `'mixer' | 'timeline' | 'home' | 'addon' |
+  'dashboard'` and resolves with nothing once the page shows, not with LUNA's reply (see
+  `CHANGELOG.md`).
+- `luna.session({ wait: true })` waits for the user to open a session.
+- Session files: `session.loadSources()`, `source.filePath()` and `reveal()`,
+  `session.sourceUsage()` (which tracks and clips use each file), and `AudioSource.origin`,
+  `format` and `isRender` to tell recordings, imports and bounces from renderings.
+- `luna.workspace.unusedMedia()` and `deleteUnusedMedia()` run LUNA's Delete Unused Media.
+- `Luna.startSourceDrag()` lets a page drag a session file onto LUNA's timeline as a clip.
+- `luna.workspace.recentList()` is a live recent-sessions list that marks the open ones, and
+  `luna.sessions.byPackageUid()` and `openOrFocus()` find or switch to an open session.
+- Session templates: `luna.workspace.templates()` (by tag too) and
+  `luna.sessions.createFromTemplate()`; `luna.workspace.addTag()` tags a package.
+- `luna.sessions.create()` takes a fixed `sessionPackageUid` and a standalone folder, so an
+  Add On can keep a session of its own (docs/MANIFEST.md, "An Add On with a session of its own").
+- Lyrics: `session.lyrics` reads and edits a session's lyric lines, and
+  `session.lyrics.transcribe()` and `session.musical.chords.detect()` run LUNA's lyric
+  transcription and chord detection as awaitable jobs (`job.done()`, `Luna.JobRun`).
+- `source.analysis` reads LUNA's key, tempo, instrument, transient and chord analysis of a
+  source, and follows overviews as they grow.
+- Automation: `writeRange()` and `trimRange()` over a tick range, clip gain automation
+  (`clip.gainControl`, `Luna.clipGainAt()`), and warp markers (`clip.warps`).
+- Groups: `session.groups` lists and edits mix, edit, plugin and send groups.
+- Devices: `device.inputs` and `device.outputs`, live input analysis
+  (`input.watchAnalysis()`), `luna.activeAudioEngine` and LUNA's Auto Gain (`luna.autoGain`).
+- Tracks and buses: `track.rename()`, `track.duplicate()`'s `after`, `track.midiOutputs`,
+  `track.postRecordCommands`, `session.newTracksFromInputs()`, `bus.delete()`,
+  `bus.deleteWithContents()`, `bus.loadPreset()`, and `setAutomationMode()` on buses.
+- Plugins and presets: `effect.setPower()`, `effect.moveTo()` and `copyTo()`, `plugin.sdkType`,
+  `luna.presets.setFavorite()`, preset descriptions and `trackPresetPlugins()`.
+- Session settings as props: pre- and post-roll, click during play, record and count-in, MIDI
+  merge, varispeed (`transport.tempoPercent`, now writable) and the solo mode (writable).
+- `session.context.midiOperation()` runs LUNA's MIDI operations (velocity, duration, legato,
+  transpose, ...) on the selection, and `node.commandEnabled()` follows whether LUNA would
+  take a command now.
+- `session.importPath()` imports a MIDI or video file, `session.deletePlaylists()` and
+  `deleteUnusedPlaylists()` delete playlist versions, and `session.moveClips()` moves clips to
+  other tracks.
+- `luna.preferences.context()` keeps JSON values on the computer across sessions, and
+  `luna.errors` lists LUNA's error notices.
+- `luna.gui.suppressProgress()` holds back LUNA's progress dialog while a page shows its own.
+- Helpers: `Luna.folderTree()`, `Luna.gainToDb()`/`dbToGain()`, more note lengths with
+  `Luna.dotted()` and `Luna.triplet()`, insert-slot helpers, `Luna.ErrorCodes`, and value lists
+  and parsers for LUNA's track, bus, folder, stem, session and control types.
+- `ua-builder feedback` opens a prefilled issue on the SDK's GitHub repository, and agents now
+  end with a `LUNA BUILDER SDK IMPROVEMENT:` line (was `FEEDBACK`) and offer to send it.
+- `Luna.MockEngine` models all of the above.
+- The docs now say Windows loads Add On pages and media from `ua-content://` since LUNA 3.1.2,
+  and that LUNA refuses a `.lunaaddon` whose `html` page is missing or outside it.
+
 ## 3.1.2 Beta 4 — 2026-11-20
 
 - The docs now explain that LUNA 3.1.2 keeps an Add On's secrets, allowed servers and web
